@@ -5,10 +5,10 @@ import { join } from "node:path";
 import type { ModelCatalogSnapshot, QuotaSnapshot } from "@aialra/contracts";
 import { RouteDecisionSchema, TaskContractSchema } from "@aialra/contracts";
 import { CodexAppServerClient, CodexProvider } from "@aialra/providers";
-import { redact } from "@aialra/security";
 import { z } from "zod";
 
 import { codexEnvironment } from "./environment.js";
+import { runnerPublicMessage } from "./public-error.js";
 
 const InvocationSchema = z
   .object({
@@ -89,13 +89,19 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
     });
     writeLine(response, { type: "result", result });
     response.end();
-  } catch (error) {
-    const message = redact(error instanceof Error ? error.message : String(error));
+  } catch {
     if (!response.headersSent) {
       response.writeHead(400, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "runner_rejected", message } }));
+      response.end(
+        JSON.stringify({
+          error: { code: "runner_rejected", message: runnerPublicMessage("request") },
+        }),
+      );
     } else {
-      writeLine(response, { type: "error", error: { code: "runner_failed", message } });
+      writeLine(response, {
+        type: "error",
+        error: { code: "runner_failed", message: runnerPublicMessage("execution") },
+      });
       response.end();
     }
   } finally {
@@ -110,13 +116,13 @@ async function quota(response: ServerResponse): Promise<void> {
     if (!currentQuota) throw new Error("quota_unavailable");
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     response.end(JSON.stringify(currentQuota));
-  } catch (error) {
+  } catch {
     response.writeHead(503, { "content-type": "application/json", "retry-after": "5" });
     response.end(
       JSON.stringify({
         error: {
           code: "quota_unavailable",
-          message: redact(error instanceof Error ? error.message : String(error)),
+          message: runnerPublicMessage("quota"),
         },
       }),
     );
@@ -129,13 +135,13 @@ async function models(response: ServerResponse): Promise<void> {
     if (!currentModels) throw new Error("model_catalog_unavailable");
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     response.end(JSON.stringify(currentModels));
-  } catch (error) {
+  } catch {
     response.writeHead(503, { "content-type": "application/json", "retry-after": "5" });
     response.end(
       JSON.stringify({
         error: {
           code: "model_catalog_unavailable",
-          message: redact(error instanceof Error ? error.message : String(error)),
+          message: runnerPublicMessage("models"),
         },
       }),
     );
