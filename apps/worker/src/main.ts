@@ -28,10 +28,11 @@ async function main(): Promise<void> {
   const runnerUrl = process.env.RUNNER_URL ?? "http://runner:13214";
   const provider = new RunnerClientProvider(runnerUrl);
 
+  const runtimeClient = new RunnerQuotaClient(runnerUrl);
   const service = new WorkerService({
     repository,
     provider,
-    quotaClient: new RunnerQuotaClient(runnerUrl),
+    quotaClient: runtimeClient,
   });
   const boss = new PgBoss({ connectionString: databaseUrl, schema: "pgboss" });
   await boss.start();
@@ -51,6 +52,25 @@ async function main(): Promise<void> {
     void repository.deleteExpiredMetadata(new Date());
   }, 3_600_000);
   retentionTimer.unref();
+
+  let runtimeRefreshActive = false;
+  const refreshRuntimeState = async () => {
+    if (runtimeRefreshActive) return;
+    runtimeRefreshActive = true;
+    try {
+      const [quota, models] = await Promise.allSettled([
+        runtimeClient.read(),
+        runtimeClient.listModels(),
+      ]);
+      if (quota.status === "fulfilled") await repository.saveQuotaSnapshot(quota.value);
+      if (models.status === "fulfilled") await repository.saveModelCatalog(models.value);
+    } finally {
+      runtimeRefreshActive = false;
+    }
+  };
+  await refreshRuntimeState();
+  const runtimeRefreshTimer = setInterval(() => void refreshRuntimeState(), 5_000);
+  runtimeRefreshTimer.unref();
 
   const metricsPort = Number(process.env.METRICS_PORT ?? 13212);
   const metricsServer = createServer((request, response) => {
@@ -80,6 +100,7 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(retentionTimer);
+    clearInterval(runtimeRefreshTimer);
     await new Promise<void>((resolve) => metricsServer.close(() => resolve()));
     await boss.stop({ graceful: true, timeout: 30_000 });
     await repository.close();

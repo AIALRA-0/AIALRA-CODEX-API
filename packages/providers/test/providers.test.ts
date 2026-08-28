@@ -8,6 +8,7 @@ import {
   calculateApiEquivalentUsd,
   calculateCodexCredits,
   codexFilesystemPermissionOverride,
+  modelCatalogFromAppServer,
   quotaSnapshotFromAppServer,
 } from "../src/index.js";
 
@@ -41,6 +42,51 @@ describe("provider utilities", () => {
     expect(snapshot.usedPercent).toBe(42);
     expect(snapshot.windowDurationMinutes).toBe(300);
     expect(snapshot.planType).toBe("pro");
+    expect(snapshot.windows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "codex:primary", remainingPercent: 58 }),
+      ]),
+    );
+  });
+
+  it("keeps every named App Server quota window separate", () => {
+    const snapshot = quotaSnapshotFromAppServer({
+      rateLimits: { primary: { usedPercent: 10 } },
+      rateLimitsByLimitId: {
+        weekly: { limitName: "周限制", primary: { usedPercent: 25 } },
+        spark: { limitName: "Spark", secondary: { usedPercent: 40 } },
+      },
+    });
+    expect(snapshot.windows.map((window) => window.id)).toEqual([
+      "codex:primary",
+      "weekly:primary",
+      "spark:secondary",
+    ]);
+  });
+
+  it("normalizes the runtime model catalog", () => {
+    const catalog = modelCatalogFromAppServer({
+      data: [
+        {
+          id: "gpt-5.5",
+          displayName: "GPT-5.5",
+          supportedReasoningEfforts: ["low", "high", "future"],
+          inputModalities: ["text", "image"],
+        },
+      ],
+    });
+    expect(catalog.models[0]).toMatchObject({
+      id: "gpt-5.5",
+      available: true,
+      supportedReasoningEfforts: ["low", "high"],
+      inputModalities: ["text", "image"],
+    });
+  });
+
+  it("supports published rate cards and leaves Spark unknown", () => {
+    expect(calculateCodexCredits("gpt-5.5", 1_000_000, 0, 0)).toBe(125);
+    expect(calculateApiEquivalentUsd("gpt-5.4-mini", 1_000_000, 0, 0)).toBe(0.75);
+    expect(calculateCodexCredits("gpt-5.3-codex-spark", 1_000, 0, 1_000)).toBeNull();
   });
 
   it("denies the Codex identity directory in every task profile", () => {

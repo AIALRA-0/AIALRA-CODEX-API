@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "@simplewebauthn/browser": "latest",
+    "katex": "^0.18.4",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
+    "@types/katex": "^0.16.8",
     "@types/react": "latest",
     "@types/react-dom": "latest"
   }

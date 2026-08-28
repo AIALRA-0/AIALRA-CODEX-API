@@ -19,6 +19,8 @@ export class UnavailableQuotaProvider implements QuotaProvider {
       planType: null,
       fetchedAt: new Date().toISOString(),
       source: "unavailable",
+      windows: [],
+      stale: true,
     };
   }
 }
@@ -28,7 +30,12 @@ export class RepositoryQuotaProvider implements QuotaProvider {
 
   async read(): Promise<QuotaSnapshot> {
     const snapshot = await this.repository.latestQuotaSnapshot();
-    return snapshot ?? new UnavailableQuotaProvider().read();
+    if (!snapshot) return new UnavailableQuotaProvider().read();
+    return {
+      ...snapshot,
+      windows: snapshot.windows ?? [],
+      stale: Date.now() - Date.parse(snapshot.fetchedAt) > 45_000,
+    };
   }
 }
 

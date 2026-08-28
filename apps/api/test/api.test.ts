@@ -59,6 +59,39 @@ describe("AIALRA Model Router API", () => {
     expect(response.body.model).toBe("gpt-5.6-luna");
   });
 
+  it("lists the expanded catalog and changes model settings idempotently", async () => {
+    const catalog = await request(app.getHttpServer()).get("/api/v1/models").expect(200);
+    expect(catalog.body.data.map((model: { id: string }) => model.id)).toEqual(
+      expect.arrayContaining([
+        "gpt-5.6-sol",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.3-codex-spark",
+      ]),
+    );
+
+    const first = await request(app.getHttpServer())
+      .patch("/api/v1/models/gpt-5.6-sol")
+      .set("Idempotency-Key", "model-setting-test")
+      .send({ enabled: false })
+      .expect(200);
+    const replay = await request(app.getHttpServer())
+      .patch("/api/v1/models/gpt-5.6-sol")
+      .set("Idempotency-Key", "model-setting-test")
+      .send({ enabled: false })
+      .expect(200);
+    expect(first.body.replayed).toBe(false);
+    expect(replay.body.replayed).toBe(true);
+
+    const conflict = await request(app.getHttpServer())
+      .patch("/api/v1/models/gpt-5.6-terra")
+      .set("Idempotency-Key", "model-setting-test")
+      .send({ enabled: false })
+      .expect(409);
+    expect(conflict.body.error.code).toBe("idempotency_conflict");
+  });
+
   it("rejects unsupported Responses parameters", async () => {
     const response = await request(app.getHttpServer())
       .post("/v1/responses")

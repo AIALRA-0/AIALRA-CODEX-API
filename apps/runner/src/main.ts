@@ -2,8 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 
+import type { ModelCatalogSnapshot, QuotaSnapshot } from "@aialra/contracts";
 import { RouteDecisionSchema, TaskContractSchema } from "@aialra/contracts";
-import { CodexProvider, CodexQuotaClient } from "@aialra/providers";
+import { CodexAppServerClient, CodexProvider } from "@aialra/providers";
 import { redact } from "@aialra/security";
 import { z } from "zod";
 
@@ -20,6 +21,24 @@ const InvocationSchema = z
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const maxConcurrency = Math.max(1, Number(process.env.RUNNER_MAX_CONCURRENCY ?? 1));
 let activeInvocations = 0;
+let currentQuota: QuotaSnapshot | null = null;
+let currentModels: ModelCatalogSnapshot | null = null;
+const appServer = new CodexAppServerClient({
+  codexPath: process.env.CODEX_BIN || undefined,
+  environment: codexEnvironment(),
+  onQuota: (snapshot) => {
+    currentQuota = snapshot;
+  },
+});
+
+async function refreshRuntimeState(): Promise<void> {
+  const [quotaResult, modelResult] = await Promise.allSettled([
+    appServer.readQuota(),
+    appServer.listModels(),
+  ]);
+  if (quotaResult.status === "fulfilled") currentQuota = quotaResult.value;
+  if (modelResult.status === "fulfilled") currentModels = modelResult.value;
+}
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -87,17 +106,35 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
 
 async function quota(response: ServerResponse): Promise<void> {
   try {
-    const snapshot = await new CodexQuotaClient({
-      codexPath: process.env.CODEX_BIN || undefined,
-    }).read();
+    if (!currentQuota) await refreshRuntimeState();
+    if (!currentQuota) throw new Error("quota_unavailable");
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    response.end(JSON.stringify(snapshot));
+    response.end(JSON.stringify(currentQuota));
   } catch (error) {
     response.writeHead(503, { "content-type": "application/json", "retry-after": "5" });
     response.end(
       JSON.stringify({
         error: {
           code: "quota_unavailable",
+          message: redact(error instanceof Error ? error.message : String(error)),
+        },
+      }),
+    );
+  }
+}
+
+async function models(response: ServerResponse): Promise<void> {
+  try {
+    if (!currentModels) await refreshRuntimeState();
+    if (!currentModels) throw new Error("model_catalog_unavailable");
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify(currentModels));
+  } catch (error) {
+    response.writeHead(503, { "content-type": "application/json", "retry-after": "5" });
+    response.end(
+      JSON.stringify({
+        error: {
+          code: "model_catalog_unavailable",
           message: redact(error instanceof Error ? error.message : String(error)),
         },
       }),
@@ -116,6 +153,10 @@ const server = createServer((request, response) => {
     void quota(response);
     return;
   }
+  if (request.method === "GET" && request.url === "/models") {
+    void models(response);
+    return;
+  }
   if (request.method === "POST" && request.url === "/invoke") {
     void invoke(request, response);
     return;
@@ -126,6 +167,14 @@ const server = createServer((request, response) => {
 
 server.listen(port, "0.0.0.0");
 
-const shutdown = () => server.close(() => process.exit(0));
+void refreshRuntimeState();
+const runtimeRefreshTimer = setInterval(() => void refreshRuntimeState(), 30_000);
+runtimeRefreshTimer.unref();
+
+const shutdown = () => {
+  clearInterval(runtimeRefreshTimer);
+  appServer.close();
+  server.close(() => process.exit(0));
+};
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);

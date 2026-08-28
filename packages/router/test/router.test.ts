@@ -42,6 +42,8 @@ describe("selectRoute", () => {
       planType: "pro",
       fetchedAt: new Date().toISOString(),
       source: "app-server",
+      windows: [],
+      stale: false,
     });
 
     expect(decision.provider).toBe("codex");
@@ -63,6 +65,8 @@ describe("selectRoute", () => {
         planType: "pro",
         fetchedAt: new Date().toISOString(),
         source: "app-server",
+        windows: [],
+        stale: false,
       }),
     ).toThrow("codex_capacity_constrained");
   });

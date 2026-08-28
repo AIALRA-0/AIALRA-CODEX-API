@@ -42,9 +42,13 @@ export function selectRoute(
   policy: RoutingPolicy = DEFAULT_ROUTING_POLICY,
 ): RouteDecision {
   if (task.model !== "auto") {
+    const model =
+      task.model === "luna" || task.model === "terra" || task.model === "sol"
+        ? CODEX_MODEL_IDS[task.model]
+        : task.model;
     return {
       provider: "codex",
-      model: CODEX_MODEL_IDS[task.model],
+      model,
       effort: task.effort,
       policyVersion: policy.version,
       reasonCode: "explicit_codex_model",

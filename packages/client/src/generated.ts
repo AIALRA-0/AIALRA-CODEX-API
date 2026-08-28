@@ -180,6 +180,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/models/{modelId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: operations["updateModel"];
+    trace?: never;
+  };
   "/api/v1/quota": {
     parameters: {
       query?: never;
@@ -506,11 +522,8 @@ export interface components {
         maxAttempts: number;
       };
       sessionKey?: string;
-      /**
-       * @default auto
-       * @enum {string}
-       */
-      model: "auto" | "luna" | "terra" | "sol";
+      /** @default auto */
+      model: string;
       /**
        * @default medium
        * @enum {string}
@@ -606,6 +619,40 @@ export interface components {
       fetchedAt: string;
       /** @enum {string} */
       source: "app-server" | "unavailable";
+      stale: boolean;
+      windows: components["schemas"]["QuotaWindow"][];
+    };
+    QuotaWindow: {
+      id: string;
+      name: string;
+      /** @enum {string} */
+      kind: "primary" | "secondary";
+      usedPercent: number | null;
+      remainingPercent: number | null;
+      windowDurationMinutes: number | null;
+      /** Format: date-time */
+      resetsAt: string | null;
+    };
+    RuntimeModel: {
+      id: string;
+      displayName: string;
+      available: boolean;
+      enabled: boolean;
+      hidden: boolean;
+      isDefault: boolean;
+      supportedReasoningEfforts: string[];
+      defaultReasoningEffort: string | null;
+      inputModalities: string[];
+      creditRate: {
+        [key: string]: unknown;
+      } | null;
+      apiRate: {
+        [key: string]: unknown;
+      } | null;
+      /** @enum {string} */
+      rateStatus: "available" | "unavailable";
+      /** Format: date-time */
+      discoveredAt: string;
     };
     ResponsesRequest: {
       /** @default auto */
@@ -992,7 +1039,39 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Declared model capabilities */
+      /** @description Runtime Codex model catalog merged with Router settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            data: components["schemas"]["RuntimeModel"][];
+          };
+        };
+      };
+    };
+  };
+  updateModel: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        modelId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          enabled: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Model setting updated or replayed */
       200: {
         headers: {
           [name: string]: unknown;

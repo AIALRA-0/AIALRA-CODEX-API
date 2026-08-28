@@ -22,6 +22,8 @@ describe("job object authorization", () => {
         planType: "pro",
         fetchedAt: new Date().toISOString(),
         source: "app-server",
+        windows: [],
+        stale: false,
       }),
     } as never);
     const job = await service.create(

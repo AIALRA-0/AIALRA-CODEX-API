@@ -245,7 +245,45 @@ paths:
       operationId: listModels
       responses:
         "200":
-          description: Declared model capabilities
+          description: Runtime Codex model catalog merged with Router settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RuntimeModel"
+  /api/v1/models/{modelId}:
+    patch:
+      operationId: updateModel
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              additionalProperties: false
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Model setting updated or replayed
   /api/v1/quota:
     get:
       operationId: getQuota
@@ -805,7 +843,7 @@ components:
           type: string
         model:
           type: string
-          enum: [auto, luna, terra, sol]
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
           default: auto
         effort:
           type: string
@@ -958,7 +996,17 @@ components:
     QuotaSnapshot:
       type: object
       required:
-        [provider, usedPercent, windowDurationMinutes, resetsAt, planType, fetchedAt, source]
+        [
+          provider,
+          usedPercent,
+          windowDurationMinutes,
+          resetsAt,
+          planType,
+          fetchedAt,
+          source,
+          windows,
+          stale,
+        ]
       properties:
         provider:
           const: codex
@@ -977,6 +1025,68 @@ components:
         source:
           type: string
           enum: [app-server, unavailable]
+        stale:
+          type: boolean
+        windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaWindow"
+    QuotaWindow:
+      type: object
+      required: [id, name, kind, usedPercent, remainingPercent, windowDurationMinutes, resetsAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [primary, secondary]
+        usedPercent:
+          type: [number, "null"]
+        remainingPercent:
+          type: [number, "null"]
+        windowDurationMinutes:
+          type: [number, "null"]
+        resetsAt:
+          type: [string, "null"]
+          format: date-time
+    RuntimeModel:
+      type: object
+      required:
+        [
+          id,
+          displayName,
+          available,
+          enabled,
+          hidden,
+          isDefault,
+          supportedReasoningEfforts,
+          defaultReasoningEffort,
+          inputModalities,
+          creditRate,
+          apiRate,
+          rateStatus,
+          discoveredAt,
+        ]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        available: { type: boolean }
+        enabled: { type: boolean }
+        hidden: { type: boolean }
+        isDefault: { type: boolean }
+        supportedReasoningEfforts:
+          type: array
+          items: { type: string }
+        defaultReasoningEffort: { type: [string, "null"] }
+        inputModalities:
+          type: array
+          items: { type: string }
+        creditRate: { type: [object, "null"], additionalProperties: true }
+        apiRate: { type: [object, "null"], additionalProperties: true }
+        rateStatus: { type: string, enum: [available, unavailable] }
+        discoveredAt: { type: string, format: date-time }
     ResponsesRequest:
       type: object
       required: [input]
