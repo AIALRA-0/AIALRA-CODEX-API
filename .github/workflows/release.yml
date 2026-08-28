@@ -19,6 +19,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Normalize the registry namespace
+        shell: bash
+        run: echo "IMAGE_NAMESPACE=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - name: Enable Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Sign in to GHCR
@@ -37,10 +40,10 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: ghcr.io/${{ github.repository_owner }}/aialra-model-router-${{ matrix.target }}:${{ github.ref_name }}
+          tags: ghcr.io/${{ env.IMAGE_NAMESPACE }}/aialra-model-router-${{ matrix.target }}:${{ github.ref_name }}
       - name: Attest the published image
         uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/aialra-model-router-${{ matrix.target }}
+          subject-name: ghcr.io/${{ env.IMAGE_NAMESPACE }}/aialra-model-router-${{ matrix.target }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
