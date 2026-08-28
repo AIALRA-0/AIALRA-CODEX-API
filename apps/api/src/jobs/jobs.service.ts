@@ -32,6 +32,25 @@ export class JobsService {
     @Inject(QuotaService) private readonly quotaService: QuotaService,
   ) {}
 
+  private async assertRoutableModel(modelId: string): Promise<void> {
+    const settings = await this.repository.listModelSettings();
+    const setting = settings.find((candidate) => candidate.modelId === modelId);
+    if (setting?.enabled === false || (!setting && !modelId.startsWith("gpt-5.6-"))) {
+      throw new ConflictException({
+        error: { code: "model_disabled", message: "该模型尚未在 Router 中启用。" },
+      });
+    }
+    const catalog = await this.repository.latestModelCatalog();
+    if (
+      catalog &&
+      !catalog.models.some((candidate) => candidate.id === modelId && candidate.available)
+    ) {
+      throw new ConflictException({
+        error: { code: "model_unavailable", message: "当前 Codex 账号无法使用该模型。" },
+      });
+    }
+  }
+
   async create(
     input: CreateJobRequest,
     callerId: string,
@@ -62,6 +81,8 @@ export class JobsService {
         },
       });
     }
+    const route = selectRoute(task, await this.quotaService.read());
+    await this.assertRoutableModel(route.model);
     const hash = requestHash(input);
     if (idempotencyKey) {
       const existing = await this.repository.findByIdempotency(callerId, idempotencyKey);
@@ -306,7 +327,9 @@ export class JobsService {
     const task = TaskContractSchema.parse(taskInput);
     const quota = await this.quotaService.read();
     try {
-      return selectRoute(task, quota);
+      const route = selectRoute(task, quota);
+      await this.assertRoutableModel(route.model);
+      return route;
     } catch (error) {
       const code = error instanceof Error ? error.message : "routing_rejected";
       throw new ConflictException({

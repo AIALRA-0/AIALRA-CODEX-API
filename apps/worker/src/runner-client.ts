@@ -1,7 +1,13 @@
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 
-import { QuotaSnapshotSchema, type QuotaSnapshot, UsageLedgerSchema } from "@aialra/contracts";
+import {
+  ModelCatalogSnapshotSchema,
+  QuotaSnapshotSchema,
+  type ModelCatalogSnapshot,
+  type QuotaSnapshot,
+  UsageLedgerSchema,
+} from "@aialra/contracts";
 import type {
   ModelProvider,
   ProviderEvent,
@@ -62,5 +68,13 @@ export class RunnerQuotaClient {
     });
     if (!response.ok) throw new Error(`runner_quota_unavailable:${response.status}`);
     return QuotaSnapshotSchema.parse(await response.json());
+  }
+
+  async listModels(): Promise<ModelCatalogSnapshot> {
+    const response = await fetch(new URL("/models", this.baseUrl), {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`runner_models_unavailable:${response.status}`);
+    return ModelCatalogSnapshotSchema.parse(await response.json());
   }
 }

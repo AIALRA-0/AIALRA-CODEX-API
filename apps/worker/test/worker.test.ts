@@ -101,6 +101,8 @@ describe("WorkerService", () => {
             planType: "pro",
             fetchedAt: new Date().toISOString(),
             source: "app-server",
+            windows: [],
+            stale: false,
           })
           .mockResolvedValueOnce({
             provider: "codex",
@@ -110,6 +112,8 @@ describe("WorkerService", () => {
             planType: "pro",
             fetchedAt: new Date().toISOString(),
             source: "app-server",
+            windows: [],
+            stale: false,
           }),
       },
       createWorkspace: async () => "test-workspace",
@@ -136,6 +140,8 @@ describe("WorkerService", () => {
       planType: "pro",
       fetchedAt: "2026-08-27T19:59:00.000Z",
       source: "app-server" as const,
+      windows: [],
+      stale: false,
     };
     const after = {
       ...before,

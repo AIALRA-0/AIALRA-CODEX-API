@@ -6,7 +6,14 @@ import { createInterface } from "node:readline";
 
 import { Codex, type ThreadEvent, type ThreadItem } from "@openai/codex-sdk";
 
-import type { QuotaSnapshot, RouteDecision, TaskContract, UsageLedger } from "@aialra/contracts";
+import type {
+  ModelCatalogSnapshot,
+  QuotaSnapshot,
+  ReasoningEffort,
+  RouteDecision,
+  TaskContract,
+  UsageLedger,
+} from "@aialra/contracts";
 import { redact } from "@aialra/security";
 
 export interface ProviderEvent {
@@ -49,6 +56,9 @@ export const CODEX_CREDIT_RATE_CARD = {
     "gpt-5.6-luna": { input: 5, cachedInput: 0.5, output: 30 },
     "gpt-5.6-terra": { input: 50, cachedInput: 5, output: 300 },
     "gpt-5.6-sol": { input: 100, cachedInput: 10, output: 500 },
+    "gpt-5.5": { input: 125, cachedInput: 12.5, output: 750 },
+    "gpt-5.4": { input: 62.5, cachedInput: 6.25, output: 375 },
+    "gpt-5.4-mini": { input: 18.75, cachedInput: 1.875, output: 113 },
   },
 } as const;
 
@@ -59,6 +69,9 @@ export const CODEX_API_USD_RATE_CARD = {
     "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, output: 1.2 },
     "gpt-5.6-terra": { input: 2, cachedInput: 0.2, output: 12 },
     "gpt-5.6-sol": { input: 4, cachedInput: 0.4, output: 20 },
+    "gpt-5.5": { input: 5, cachedInput: 0.5, output: 30 },
+    "gpt-5.4": { input: 2.5, cachedInput: 0.25, output: 15 },
+    "gpt-5.4-mini": { input: 0.75, cachedInput: 0.075, output: 4.5 },
   },
 } as const;
 
@@ -345,6 +358,8 @@ export async function removeCodexSession(authDirectory: string, threadId: string
 
 interface JsonRpcResponse {
   id?: number;
+  method?: string;
+  params?: unknown;
   result?: unknown;
   error?: { code?: number; message?: string };
 }
@@ -355,107 +370,238 @@ interface RateLimitWindow {
   resetsAt?: number;
 }
 
-export function quotaSnapshotFromAppServer(result: unknown): QuotaSnapshot {
+function quotaWindows(result: unknown) {
   const value = (result ?? {}) as {
-    rateLimits?: {
-      primary?: RateLimitWindow | null;
-      secondary?: RateLimitWindow | null;
-    } | null;
+    rateLimits?: { primary?: RateLimitWindow | null; secondary?: RateLimitWindow | null } | null;
+    rateLimitsByLimitId?: Record<
+      string,
+      {
+        limitName?: string | null;
+        primary?: RateLimitWindow | null;
+        secondary?: RateLimitWindow | null;
+      }
+    > | null;
     primary?: RateLimitWindow | null;
     secondary?: RateLimitWindow | null;
-    planType?: string | null;
   };
-  const limits = value.rateLimits ?? value;
-  const window = limits.primary ?? limits.secondary ?? null;
+  const groups = new Map<string, { name: string; limits: typeof value.rateLimits }>();
+  groups.set("codex", { name: "Codex", limits: value.rateLimits ?? value });
+  for (const [id, entry] of Object.entries(value.rateLimitsByLimitId ?? {})) {
+    groups.set(id, { name: entry.limitName || id, limits: entry });
+  }
+  return [...groups.entries()].flatMap(([id, group]) =>
+    (["primary", "secondary"] as const).flatMap((kind) => {
+      const window = group.limits?.[kind];
+      if (!window) return [];
+      const usedPercent = window.usedPercent ?? null;
+      return [
+        {
+          id: `${id}:${kind}`,
+          name: group.name,
+          kind,
+          usedPercent,
+          remainingPercent: usedPercent === null ? null : Math.max(0, 100 - usedPercent),
+          windowDurationMinutes: window.windowDurationMins ?? null,
+          resetsAt: window.resetsAt ? new Date(window.resetsAt * 1_000).toISOString() : null,
+        },
+      ];
+    }),
+  );
+}
+
+export function quotaSnapshotFromAppServer(result: unknown): QuotaSnapshot {
+  const value = (result ?? {}) as { planType?: string | null };
+  const windows = quotaWindows(result);
+  const primary = windows.find((window) => window.id === "codex:primary") ?? windows[0] ?? null;
   return {
     provider: "codex",
-    usedPercent: window?.usedPercent ?? null,
-    windowDurationMinutes: window?.windowDurationMins ?? null,
-    resetsAt: window?.resetsAt ? new Date(window.resetsAt * 1_000).toISOString() : null,
+    usedPercent: primary?.usedPercent ?? null,
+    windowDurationMinutes: primary?.windowDurationMinutes ?? null,
+    resetsAt: primary?.resetsAt ?? null,
     planType: value.planType ?? null,
     fetchedAt: new Date().toISOString(),
     source: "app-server",
+    windows,
+    stale: false,
   };
 }
 
-export interface CodexQuotaClientOptions {
+const KNOWN_REASONING_EFFORTS = new Set<ReasoningEffort>([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
+
+export function modelCatalogFromAppServer(result: unknown): ModelCatalogSnapshot {
+  const value = (result ?? {}) as { data?: unknown[]; models?: unknown[] };
+  const rows = value.data ?? value.models ?? (Array.isArray(result) ? result : []);
+  const discoveredAt = new Date().toISOString();
+  return {
+    fetchedAt: discoveredAt,
+    source: "app-server",
+    models: rows.flatMap((row) => {
+      const item = row as Record<string, unknown>;
+      const id = String(item.id ?? item.model ?? item.slug ?? "").trim();
+      if (!id) return [];
+      const rawEfforts = (item.supportedReasoningEfforts ??
+        item.supported_reasoning_efforts ??
+        []) as unknown[];
+      const supportedReasoningEfforts = rawEfforts
+        .map(String)
+        .filter((effort): effort is ReasoningEffort =>
+          KNOWN_REASONING_EFFORTS.has(effort as ReasoningEffort),
+        );
+      const rawDefault = String(item.defaultReasoningEffort ?? item.default_reasoning_effort ?? "");
+      const defaultReasoningEffort = KNOWN_REASONING_EFFORTS.has(rawDefault as ReasoningEffort)
+        ? (rawDefault as ReasoningEffort)
+        : null;
+      return [
+        {
+          id,
+          displayName: String(item.displayName ?? item.display_name ?? item.name ?? id),
+          available: true,
+          hidden: Boolean(item.hidden),
+          isDefault: Boolean(item.isDefault ?? item.is_default),
+          supportedReasoningEfforts,
+          defaultReasoningEffort,
+          inputModalities: (
+            (item.inputModalities ?? item.input_modalities ?? ["text"]) as unknown[]
+          ).map(String),
+          creditRate: null,
+          apiRate: null,
+          rateStatus: "unavailable" as const,
+          discoveredAt,
+        },
+      ];
+    }),
+  };
+}
+
+export interface CodexAppServerClientOptions {
   codexPath?: string;
   timeoutMs?: number;
   environment?: NodeJS.ProcessEnv;
+  onQuota?: (snapshot: QuotaSnapshot) => void;
+}
+
+export class CodexAppServerClient {
+  private child: ReturnType<typeof spawn> | null = null;
+  private lines: ReturnType<typeof createInterface> | null = null;
+  private requestId = 1;
+  private starting: Promise<void> | null = null;
+  private readonly pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }
+  >();
+
+  constructor(private readonly options: CodexAppServerClientOptions = {}) {}
+
+  private async start(): Promise<void> {
+    if (this.child) return;
+    if (this.starting) return this.starting;
+    this.starting = (async () => {
+      const child = spawn(this.options.codexPath ?? "codex", ["app-server"], {
+        env: this.options.environment ?? process.env,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      this.child = child;
+      this.lines = createInterface({ input: child.stdout });
+      this.lines.on("line", (line) => this.handleLine(line));
+      child.once("exit", () => this.reset(new Error("codex_app_server_exited")));
+      child.once("error", (error) => this.reset(error));
+      await this.send("initialize", {
+        clientInfo: { name: "aialra-model-router", title: "AIALRA Model Router", version: "0.1.0" },
+        capabilities: { experimentalApi: true },
+      });
+      await this.send("initialized", undefined, true);
+    })().finally(() => {
+      this.starting = null;
+    });
+    return this.starting;
+  }
+
+  private handleLine(line: string): void {
+    try {
+      const message = JSON.parse(line) as JsonRpcResponse;
+      if (message.method === "account/rateLimits/updated") {
+        this.options.onQuota?.(quotaSnapshotFromAppServer(message.params));
+        return;
+      }
+      if (message.id === undefined) return;
+      const handler = this.pending.get(message.id);
+      if (!handler) return;
+      clearTimeout(handler.timeout);
+      this.pending.delete(message.id);
+      if (message.error)
+        handler.reject(new Error(redact(message.error.message ?? "app_server_error")));
+      else handler.resolve(message.result);
+    } catch {
+      // App Server can emit non-protocol notices. They never become application data.
+    }
+  }
+
+  private reset(error: Error): void {
+    this.lines?.close();
+    this.lines = null;
+    this.child = null;
+    for (const handler of this.pending.values()) {
+      clearTimeout(handler.timeout);
+      handler.reject(error);
+    }
+    this.pending.clear();
+  }
+
+  private async send(method: string, params?: unknown, notification = false): Promise<unknown> {
+    if (method !== "initialize" && !this.child) await this.start();
+    const child = this.child;
+    const stdin = child?.stdin;
+    if (!stdin?.writable) throw new Error("codex_app_server_unavailable");
+    if (notification) {
+      stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+      return null;
+    }
+    const id = this.requestId++;
+    const promise = new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error("codex_app_server_timeout"));
+      }, this.options.timeoutMs ?? 10_000);
+      this.pending.set(id, { resolve, reject, timeout });
+    });
+    stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    return promise;
+  }
+
+  async readQuota(): Promise<QuotaSnapshot> {
+    await this.start();
+    return quotaSnapshotFromAppServer(await this.send("account/rateLimits/read"));
+  }
+
+  async listModels(): Promise<ModelCatalogSnapshot> {
+    await this.start();
+    return modelCatalogFromAppServer(await this.send("model/list", { limit: 100 }));
+  }
+
+  close(): void {
+    const child = this.child;
+    this.reset(new Error("codex_app_server_closed"));
+    child?.kill();
+  }
 }
 
 export class CodexQuotaClient {
-  constructor(private readonly options: CodexQuotaClientOptions = {}) {}
-
+  private readonly client: CodexAppServerClient;
+  constructor(options: CodexAppServerClientOptions = {}) {
+    this.client = new CodexAppServerClient(options);
+  }
   async read(): Promise<QuotaSnapshot> {
-    const child = spawn(this.options.codexPath ?? "codex", ["app-server"], {
-      env: this.options.environment ?? process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    const lines = createInterface({ input: child.stdout });
-    const timeoutMs = this.options.timeoutMs ?? 10_000;
-    let requestId = 1;
-    const pending = new Map<
-      number,
-      { resolve: (value: unknown) => void; reject: (error: Error) => void }
-    >();
-
-    const send = (method: string, params?: unknown, notification = false): Promise<unknown> => {
-      if (notification) {
-        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
-        return Promise.resolve(null);
-      }
-      const id = requestId++;
-      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
-    };
-
-    lines.on("line", (line) => {
-      try {
-        const message = JSON.parse(line) as JsonRpcResponse;
-        if (message.id === undefined) {
-          return;
-        }
-        const handler = pending.get(message.id);
-        if (!handler) {
-          return;
-        }
-        pending.delete(message.id);
-        if (message.error) {
-          handler.reject(new Error(redact(message.error.message ?? "app_server_error")));
-        } else {
-          handler.resolve(message.result);
-        }
-      } catch {
-        // Ignore non-protocol output because stderr/stdout can include upgrade notices.
-      }
-    });
-
-    const timeout = setTimeout(() => {
-      for (const handler of pending.values()) {
-        handler.reject(new Error("codex_quota_timeout"));
-      }
-      pending.clear();
-      child.kill();
-    }, timeoutMs);
-
     try {
-      await send("initialize", {
-        clientInfo: {
-          name: "aialra-model-router",
-          title: "AIALRA Model Router",
-          version: "0.1.0",
-        },
-        capabilities: { experimentalApi: true },
-      });
-      await send("initialized", undefined, true);
-      const result = await send("account/rateLimits/read");
-      return quotaSnapshotFromAppServer(result);
+      return await this.client.readQuota();
     } finally {
-      clearTimeout(timeout);
-      lines.close();
-      child.kill();
+      this.client.close();
     }
   }
 }
@@ -469,6 +615,8 @@ export function unavailableQuotaSnapshot(): QuotaSnapshot {
     planType: null,
     fetchedAt: new Date().toISOString(),
     source: "unavailable",
+    windows: [],
+    stale: true,
   };
 }
 

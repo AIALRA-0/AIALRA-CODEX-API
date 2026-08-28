@@ -5,6 +5,7 @@ import {
   type Job,
   type JobEvent,
   type JobStatus,
+  type ModelCatalogSnapshot,
   type QuotaSnapshot,
 } from "@aialra/contracts";
 import { decryptRecord, encryptRecord, isEncryptedRecord } from "@aialra/security";
@@ -109,6 +110,18 @@ export interface DeletionReceipt {
   metadataDeleteAfter: string;
 }
 
+export interface ModelSetting {
+  modelId: string;
+  enabled: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface ModelSettingResult {
+  setting: ModelSetting;
+  replayed: boolean;
+}
+
 export interface JobRepository {
   create(job: Job): Promise<Job>;
   findById(id: string): Promise<Job | null>;
@@ -124,6 +137,17 @@ export interface JobRepository {
   events(jobId: string, afterSequence?: number): Promise<JobEvent[]>;
   saveQuotaSnapshot(snapshot: QuotaSnapshot): Promise<void>;
   latestQuotaSnapshot(): Promise<QuotaSnapshot | null>;
+  saveModelCatalog(snapshot: ModelCatalogSnapshot): Promise<void>;
+  latestModelCatalog(): Promise<ModelCatalogSnapshot | null>;
+  listModelSettings(): Promise<ModelSetting[]>;
+  setModelEnabled(modelId: string, enabled: boolean, actorId: string): Promise<ModelSetting>;
+  setModelEnabledIdempotent(
+    modelId: string,
+    enabled: boolean,
+    actorId: string,
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<ModelSettingResult>;
   createApiKey(record: StoredApiKey): Promise<StoredApiKey>;
   createApiKeyIdempotent(
     actorId: string,
@@ -167,6 +191,17 @@ export class InMemoryJobRepository implements JobRepository {
   private readonly jobs = new Map<string, Job>();
   private readonly eventMap = new Map<string, JobEvent[]>();
   private quotaSnapshot: QuotaSnapshot | null = null;
+  private modelCatalog: ModelCatalogSnapshot | null = null;
+  private readonly modelSettings = new Map<string, ModelSetting>(
+    ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"].map((modelId) => [
+      modelId,
+      { modelId, enabled: true, updatedAt: new Date(0).toISOString(), updatedBy: "migration" },
+    ]),
+  );
+  private readonly modelSettingRequests = new Map<
+    string,
+    { requestHash: string; setting: ModelSetting }
+  >();
   private readonly apiKeys = new Map<string, StoredApiKey>();
   private readonly apiKeyRequests = new Map<
     string,
@@ -255,6 +290,42 @@ export class InMemoryJobRepository implements JobRepository {
 
   async latestQuotaSnapshot(): Promise<QuotaSnapshot | null> {
     return this.quotaSnapshot ? structuredClone(this.quotaSnapshot) : null;
+  }
+
+  async saveModelCatalog(snapshot: ModelCatalogSnapshot): Promise<void> {
+    this.modelCatalog = structuredClone(snapshot);
+  }
+
+  async latestModelCatalog(): Promise<ModelCatalogSnapshot | null> {
+    return this.modelCatalog ? structuredClone(this.modelCatalog) : null;
+  }
+
+  async listModelSettings(): Promise<ModelSetting[]> {
+    return [...this.modelSettings.values()].map((setting) => structuredClone(setting));
+  }
+
+  async setModelEnabled(modelId: string, enabled: boolean, actorId: string): Promise<ModelSetting> {
+    const stored = { modelId, enabled, updatedBy: actorId, updatedAt: new Date().toISOString() };
+    this.modelSettings.set(modelId, stored);
+    return structuredClone(stored);
+  }
+
+  async setModelEnabledIdempotent(
+    modelId: string,
+    enabled: boolean,
+    actorId: string,
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<ModelSettingResult> {
+    const key = `${actorId}:${idempotencyKey}`;
+    const existing = this.modelSettingRequests.get(key);
+    if (existing) {
+      if (existing.requestHash !== requestHash) throw new Error("idempotency_conflict");
+      return { setting: structuredClone(existing.setting), replayed: true };
+    }
+    const setting = await this.setModelEnabled(modelId, enabled, actorId);
+    this.modelSettingRequests.set(key, { requestHash, setting: structuredClone(setting) });
+    return { setting, replayed: false };
   }
 
   async createApiKey(record: StoredApiKey): Promise<StoredApiKey> {
@@ -560,6 +631,40 @@ CREATE TABLE IF NOT EXISTS quota_snapshots (
   snapshot JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS quota_current (
+  provider TEXT PRIMARY KEY,
+  snapshot JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_catalog_current (
+  provider TEXT PRIMARY KEY,
+  snapshot JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_settings (
+  model_id TEXT PRIMARY KEY,
+  enabled BOOLEAN NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  updated_by TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_setting_requests (
+  actor_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  response JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (actor_id, idempotency_key)
+);
+
+INSERT INTO model_settings (model_id, enabled, updated_at, updated_by) VALUES
+  ('gpt-5.6-luna', TRUE, NOW(), 'migration'),
+  ('gpt-5.6-terra', TRUE, NOW(), 'migration'),
+  ('gpt-5.6-sol', TRUE, NOW(), 'migration')
+ON CONFLICT (model_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id UUID PRIMARY KEY,
@@ -885,17 +990,135 @@ export class PostgresJobRepository implements JobRepository {
   }
 
   async saveQuotaSnapshot(snapshot: QuotaSnapshot): Promise<void> {
-    await this.pool.query(
-      "INSERT INTO quota_snapshots (id, provider, snapshot, created_at) VALUES ($1,$2,$3,$4)",
-      [randomUUID(), snapshot.provider, snapshot, snapshot.fetchedAt],
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query(
+        "SELECT snapshot FROM quota_current WHERE provider=$1 FOR UPDATE",
+        [snapshot.provider],
+      );
+      const previous = current.rowCount ? (current.rows[0].snapshot as QuotaSnapshot) : null;
+      const changed =
+        !previous ||
+        JSON.stringify({ ...previous, fetchedAt: null, stale: null }) !==
+          JSON.stringify({ ...snapshot, fetchedAt: null, stale: null });
+      await client.query(
+        `INSERT INTO quota_current (provider, snapshot, updated_at) VALUES ($1,$2,$3)
+         ON CONFLICT (provider) DO UPDATE SET snapshot=EXCLUDED.snapshot, updated_at=EXCLUDED.updated_at`,
+        [snapshot.provider, snapshot, snapshot.fetchedAt],
+      );
+      if (changed) {
+        await client.query(
+          "INSERT INTO quota_snapshots (id, provider, snapshot, created_at) VALUES ($1,$2,$3,$4)",
+          [randomUUID(), snapshot.provider, snapshot, snapshot.fetchedAt],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async latestQuotaSnapshot(): Promise<QuotaSnapshot | null> {
-    const result = await this.pool.query(
+    const current = await this.pool.query(
+      "SELECT snapshot FROM quota_current WHERE provider='codex'",
+    );
+    if (current.rowCount) return current.rows[0].snapshot as QuotaSnapshot;
+    const history = await this.pool.query(
       "SELECT snapshot FROM quota_snapshots WHERE provider='codex' ORDER BY created_at DESC LIMIT 1",
     );
-    return result.rowCount ? (result.rows[0].snapshot as QuotaSnapshot) : null;
+    return history.rowCount ? (history.rows[0].snapshot as QuotaSnapshot) : null;
+  }
+
+  async saveModelCatalog(snapshot: ModelCatalogSnapshot): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO model_catalog_current (provider, snapshot, updated_at) VALUES ('codex',$1,$2)
+       ON CONFLICT (provider) DO UPDATE SET snapshot=EXCLUDED.snapshot, updated_at=EXCLUDED.updated_at`,
+      [snapshot, snapshot.fetchedAt],
+    );
+  }
+
+  async latestModelCatalog(): Promise<ModelCatalogSnapshot | null> {
+    const result = await this.pool.query(
+      "SELECT snapshot FROM model_catalog_current WHERE provider='codex'",
+    );
+    return result.rowCount ? (result.rows[0].snapshot as ModelCatalogSnapshot) : null;
+  }
+
+  async listModelSettings(): Promise<ModelSetting[]> {
+    const result = await this.pool.query("SELECT * FROM model_settings ORDER BY model_id");
+    return result.rows.map((row) => ({
+      modelId: row.model_id,
+      enabled: row.enabled,
+      updatedAt: new Date(row.updated_at).toISOString(),
+      updatedBy: row.updated_by,
+    }));
+  }
+
+  async setModelEnabled(modelId: string, enabled: boolean, actorId: string): Promise<ModelSetting> {
+    const result = await this.pool.query(
+      `INSERT INTO model_settings (model_id, enabled, updated_at, updated_by) VALUES ($1,$2,NOW(),$3)
+       ON CONFLICT (model_id) DO UPDATE SET enabled=EXCLUDED.enabled,
+         updated_at=EXCLUDED.updated_at, updated_by=EXCLUDED.updated_by RETURNING *`,
+      [modelId, enabled, actorId],
+    );
+    const row = result.rows[0];
+    return {
+      modelId: row.model_id,
+      enabled: row.enabled,
+      updatedAt: new Date(row.updated_at).toISOString(),
+      updatedBy: row.updated_by,
+    };
+  }
+
+  async setModelEnabledIdempotent(
+    modelId: string,
+    enabled: boolean,
+    actorId: string,
+    idempotencyKey: string,
+    requestHashValue: string,
+  ): Promise<ModelSettingResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const prior = await client.query(
+        "SELECT request_hash, response FROM model_setting_requests WHERE actor_id=$1 AND idempotency_key=$2 FOR UPDATE",
+        [actorId, idempotencyKey],
+      );
+      if (prior.rowCount) {
+        if (prior.rows[0].request_hash !== requestHashValue)
+          throw new Error("idempotency_conflict");
+        await client.query("COMMIT");
+        return { setting: prior.rows[0].response as ModelSetting, replayed: true };
+      }
+      const updated = await client.query(
+        `INSERT INTO model_settings (model_id, enabled, updated_at, updated_by) VALUES ($1,$2,NOW(),$3)
+         ON CONFLICT (model_id) DO UPDATE SET enabled=EXCLUDED.enabled,
+           updated_at=EXCLUDED.updated_at, updated_by=EXCLUDED.updated_by RETURNING *`,
+        [modelId, enabled, actorId],
+      );
+      const row = updated.rows[0];
+      const setting: ModelSetting = {
+        modelId: row.model_id,
+        enabled: row.enabled,
+        updatedAt: new Date(row.updated_at).toISOString(),
+        updatedBy: row.updated_by,
+      };
+      await client.query(
+        "INSERT INTO model_setting_requests (actor_id,idempotency_key,request_hash,response,created_at) VALUES ($1,$2,$3,$4,NOW())",
+        [actorId, idempotencyKey, requestHashValue, setting],
+      );
+      await client.query("COMMIT");
+      return { setting, replayed: false };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async createApiKey(record: StoredApiKey): Promise<StoredApiKey> {

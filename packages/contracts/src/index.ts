@@ -3,6 +3,17 @@ import { z } from "zod";
 export const ModelAliasSchema = z.enum(["auto", "luna", "terra", "sol"]);
 export type ModelAlias = z.infer<typeof ModelAliasSchema>;
 
+export const ModelSelectionSchema = z.union([
+  ModelAliasSchema,
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/),
+]);
+export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
+
 export const ReasoningEffortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
@@ -56,7 +67,7 @@ export const TaskContractSchema = z.object({
   deadlineMs: z.number().int().min(1_000).max(3_600_000).default(120_000),
   budget: TaskBudgetSchema.default({ maxOutputTokens: 8_192, maxAttempts: 2 }),
   sessionKey: z.string().min(1).max(256).optional(),
-  model: ModelAliasSchema.default("auto"),
+  model: ModelSelectionSchema.default("auto"),
   effort: ReasoningEffortSchema.default("medium"),
   replayable: z.boolean().default(true),
   ambiguity: z.number().int().min(0).max(4).default(1),
@@ -144,6 +155,17 @@ export const JobSchema = z.object({
 });
 export type Job = z.infer<typeof JobSchema>;
 
+export const QuotaWindowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  kind: z.enum(["primary", "secondary"]),
+  usedPercent: z.number().min(0).max(100).nullable(),
+  remainingPercent: z.number().min(0).max(100).nullable(),
+  windowDurationMinutes: z.number().nonnegative().nullable(),
+  resetsAt: z.string().datetime().nullable(),
+});
+export type QuotaWindow = z.infer<typeof QuotaWindowSchema>;
+
 export const QuotaSnapshotSchema = z.object({
   provider: z.literal("codex"),
   usedPercent: z.number().min(0).max(100).nullable(),
@@ -152,12 +174,49 @@ export const QuotaSnapshotSchema = z.object({
   planType: z.string().nullable(),
   fetchedAt: z.string().datetime(),
   source: z.enum(["app-server", "unavailable"]),
+  windows: z.array(QuotaWindowSchema).default([]),
+  stale: z.boolean().default(false),
 });
 export type QuotaSnapshot = z.infer<typeof QuotaSnapshotSchema>;
 
+export const ModelRateSchema = z.object({
+  input: z.number().nonnegative(),
+  cachedInput: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  currency: z.enum(["credits", "USD"]),
+  unit: z.literal("million_tokens"),
+  effectiveDate: z.string(),
+  source: z.string().url(),
+});
+export type ModelRate = z.infer<typeof ModelRateSchema>;
+
+export const RuntimeModelSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  available: z.boolean(),
+  enabled: z.boolean(),
+  hidden: z.boolean().default(false),
+  isDefault: z.boolean().default(false),
+  supportedReasoningEfforts: z.array(ReasoningEffortSchema),
+  defaultReasoningEffort: ReasoningEffortSchema.nullable(),
+  inputModalities: z.array(z.string()),
+  creditRate: ModelRateSchema.nullable(),
+  apiRate: ModelRateSchema.nullable(),
+  rateStatus: z.enum(["available", "unavailable"]),
+  discoveredAt: z.string().datetime(),
+});
+export type RuntimeModel = z.infer<typeof RuntimeModelSchema>;
+
+export const ModelCatalogSnapshotSchema = z.object({
+  models: z.array(RuntimeModelSchema.omit({ enabled: true })),
+  fetchedAt: z.string().datetime(),
+  source: z.enum(["app-server", "unavailable"]),
+});
+export type ModelCatalogSnapshot = z.infer<typeof ModelCatalogSnapshotSchema>;
+
 export const ResponsesRequestSchema = z
   .object({
-    model: ModelAliasSchema.or(z.string().min(1)).default("auto"),
+    model: ModelSelectionSchema.default("auto"),
     input: z.union([z.string(), z.array(z.unknown())]),
     instructions: z.string().optional(),
     reasoning: z.object({ effort: ReasoningEffortSchema.optional() }).optional(),

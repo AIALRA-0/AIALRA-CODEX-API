@@ -80,23 +80,29 @@ export function attachQuotaWindowDelta(
   before: QuotaSnapshot,
   after: QuotaSnapshot,
 ): UsageLedger {
+  const beforePrimary = before.windows?.find((window) => window.id === "codex:primary");
+  const afterPrimary = after.windows?.find((window) => window.id === "codex:primary");
+  const beforeUsed = beforePrimary?.usedPercent ?? before.usedPercent;
+  const afterUsed = afterPrimary?.usedPercent ?? after.usedPercent;
+  const beforeReset = beforePrimary?.resetsAt ?? before.resetsAt;
+  const afterReset = afterPrimary?.resetsAt ?? after.resetsAt;
+  const beforeDuration = beforePrimary?.windowDurationMinutes ?? before.windowDurationMinutes;
+  const afterDuration = afterPrimary?.windowDurationMinutes ?? after.windowDurationMinutes;
   const sameWindow =
     before.source === "app-server" &&
     after.source === "app-server" &&
-    before.resetsAt != null &&
-    before.resetsAt === after.resetsAt &&
-    before.windowDurationMinutes != null &&
-    before.windowDurationMinutes === after.windowDurationMinutes;
-  const hasPercentages = before.usedPercent != null && after.usedPercent != null;
+    beforeReset != null &&
+    beforeReset === afterReset &&
+    beforeDuration != null &&
+    beforeDuration === afterDuration;
+  const hasPercentages = beforeUsed != null && afterUsed != null;
   const delta =
-    sameWindow && hasPercentages && after.usedPercent! >= before.usedPercent!
-      ? after.usedPercent! - before.usedPercent!
-      : null;
+    sameWindow && hasPercentages && afterUsed! >= beforeUsed! ? afterUsed! - beforeUsed! : null;
 
   return {
     ...usage,
-    quotaUsedPercentBefore: before.usedPercent,
-    quotaUsedPercentAfter: after.usedPercent,
+    quotaUsedPercentBefore: beforeUsed,
+    quotaUsedPercentAfter: afterUsed,
     quotaWindowDeltaPercent: delta,
   };
 }
@@ -186,6 +192,15 @@ export class WorkerService {
     let route: RouteDecision;
     try {
       route = selectRoute(job.task, quota);
+      const settings = await this.repository.listModelSettings();
+      const setting = settings.find((candidate) => candidate.modelId === route.model);
+      if (setting?.enabled === false || (!setting && !route.model.startsWith("gpt-5.6-"))) {
+        throw new Error("model_disabled");
+      }
+      const catalog = await this.repository.latestModelCatalog();
+      if (catalog && !catalog.models.some((model) => model.id === route.model && model.available)) {
+        throw new Error("model_unavailable");
+      }
     } catch (error) {
       const errorCode = error instanceof Error ? error.message : "routing_rejected";
       await this.transition(

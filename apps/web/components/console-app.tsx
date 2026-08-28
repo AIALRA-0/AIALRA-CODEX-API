@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Formula } from "./formula";
+
 type JobStatus =
   | "accepted"
   | "queued"
@@ -47,13 +49,30 @@ interface Quota {
   resetsAt: string | null;
   planType: string | null;
   source: "app-server" | "unavailable";
+  fetchedAt: string;
+  stale: boolean;
+  windows: Array<{
+    id: string;
+    name: string;
+    kind: "primary" | "secondary";
+    usedPercent: number | null;
+    remainingPercent: number | null;
+    windowDurationMinutes: number | null;
+    resetsAt: string | null;
+  }>;
 }
 
 interface ModelRecord {
-  alias: string;
   id: string;
-  provider: "codex";
-  purpose: string;
+  displayName: string;
+  available: boolean;
+  enabled: boolean;
+  supportedReasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+  inputModalities: string[];
+  rateStatus: "available" | "unavailable";
+  creditRate: { input: number; cachedInput: number; output: number } | null;
+  apiRate: { input: number; cachedInput: number; output: number } | null;
 }
 
 interface ApiKeyRecord {
@@ -114,11 +133,7 @@ const TASK_KIND_LABEL: Record<string, string> = {
   batch: "批处理",
 };
 
-const MODEL_PURPOSE_LABEL: Record<string, string> = {
-  luna: "边界清楚、结构化、可自动验证的高吞吐任务",
-  terra: "日常编码、调试、集成和审查任务",
-  sol: "高歧义规划、高风险任务和分歧裁决",
-};
+const LEVEL_LABEL = ["很低", "低", "中", "高", "很高"] as const;
 
 async function routerFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/router${path}`, {
@@ -140,6 +155,56 @@ async function routerFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(error?.error?.message ?? `请求失败 HTTP ${response.status}`);
   }
   return value as T;
+}
+
+function useVisiblePolling(refresh: (signal?: AbortSignal) => Promise<void>, intervalMs: number) {
+  useEffect(() => {
+    let controller = new AbortController();
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      controller.abort();
+    };
+    const start = () => {
+      if (timer || document.hidden) return;
+      controller = new AbortController();
+      void refresh(controller.signal);
+      timer = setInterval(() => void refresh(controller.signal), intervalMs);
+    };
+    const visibility = () => {
+      stop();
+      if (!document.hidden) start();
+    };
+    start();
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [intervalMs, refresh]);
+}
+
+function HelpTip({ id, text }: { id: string; text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="help-tip-wrap">
+      <button
+        type="button"
+        className="help-tip-button"
+        aria-label="查看说明"
+        aria-describedby={id}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        onBlur={() => setOpen(false)}
+      >
+        ?
+      </button>
+      <span id={id} role="tooltip" className="help-tip" data-open={open ? "true" : "false"}>
+        {text}
+      </span>
+    </span>
+  );
 }
 
 function formatDate(value: string | null): string {
@@ -244,12 +309,12 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
       <table>
         <thead>
           <tr>
-            <th>任务</th>
+            <th>调用</th>
             <th>状态</th>
             <th>Codex 模型</th>
             <th>类型</th>
             <th>API 等效成本</th>
-            <th>本次额度窗口变化</th>
+            <th>单次额度变化</th>
             <th>创建时间</th>
           </tr>
         </thead>
@@ -257,7 +322,7 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
           {jobs.length === 0 ? (
             <tr>
               <td colSpan={7} className="muted">
-                当前没有任务
+                当前没有调用记录
               </td>
             </tr>
           ) : (
@@ -292,11 +357,11 @@ function Overview() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const [jobResult, quotaResult] = await Promise.all([
-        routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12"),
-        routerFetch<Quota>("/api/v1/quota"),
+        routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12", { signal }),
+        routerFetch<Quota>("/api/v1/quota", { signal }),
       ]);
       setJobs(jobResult.data);
       setQuota(quotaResult);
@@ -305,9 +370,7 @@ function Overview() {
       setError(cause instanceof Error ? cause.message : "控制面读取失败");
     }
   }, []);
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useVisiblePolling(refresh, 5_000);
   const active = jobs.filter((job) => !TERMINAL.has(job.status)).length;
   const succeeded = jobs.filter((job) => job.status === "succeeded").length;
   const completed = jobs.filter((job) => TERMINAL.has(job.status)).length;
@@ -325,7 +388,7 @@ function Overview() {
         copy={
           syntheticDemo
             ? "用于公开截图的合成控制台，不连接真实运行数据"
-            : "这里读取真实队列、额度窗口和最近任务，不使用合成数据"
+            : "这里读取真实队列、额度周期和最近调用，不使用合成数据"
         }
         action={
           <button className="button" onClick={() => void refresh()}>
@@ -343,24 +406,25 @@ function Overview() {
           </div>
           <span className="muted">
             来源 {quota?.source === "app-server" ? "Codex App Server" : "暂不可用"}
+            {quota?.stale ? " · 数据已过期" : ""}
           </span>
         </article>
         <article className="metric">
-          <small>当前活动任务</small>
+          <small>当前活动调用</small>
           <strong>{active}</strong>
           <span className={active ? "warning" : "success"}>
             {active ? "队列正在处理" : "队列空闲"}
           </span>
         </article>
         <article className="metric">
-          <small>最近任务成功率</small>
+          <small>最近调用成功率</small>
           <strong>{completed ? `${completionRate}%` : "—"}</strong>
-          <span className="muted">基于最近 {jobs.length} 项任务</span>
+          <span className="muted">基于最近 {jobs.length} 次调用</span>
         </article>
       </section>
       <section className="console-section">
         <div className="row">
-          <h3>最近任务</h3>
+          <h3>最近调用</h3>
           <a className="button" href="/console/jobs">
             查看全部
           </a>
@@ -380,6 +444,12 @@ function Playground() {
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [models, setModels] = useState<ModelRecord[]>([]);
+  const refreshModels = useCallback(async (signal?: AbortSignal) => {
+    const result = await routerFetch<{ data: ModelRecord[] }>("/api/v1/models", { signal });
+    setModels(result.data);
+  }, []);
+  useVisiblePolling(refreshModels, 30_000);
 
   async function submit() {
     setBusy(true);
@@ -449,9 +519,13 @@ function Playground() {
               <label htmlFor="model">模型</label>
               <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>
                 <option value="auto">自动选择</option>
-                <option value="luna">Luna</option>
-                <option value="terra">Terra</option>
-                <option value="sol">Sol</option>
+                {models
+                  .filter((item) => item.available && item.enabled)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.displayName}
+                    </option>
+                  ))}
               </select>
             </div>
             <div className="field">
@@ -529,7 +603,7 @@ function Playground() {
                   <dd>{formatUsd(apiEquivalentUsd(job))}</dd>
                 </div>
                 <div>
-                  <dt>本次额度窗口变化</dt>
+                  <dt>单次额度变化</dt>
                   <dd>{formatQuotaDelta(job.usage.quotaWindowDeltaPercent)}</dd>
                 </div>
               </dl>
@@ -615,8 +689,8 @@ function Jobs() {
     <>
       <PageHeading
         eyebrow="持久队列"
-        title="任务管理"
-        copy="查看真实状态、Token、API 等效成本和单次额度窗口变化"
+        title="调用记录"
+        copy="查看每次 API 或网页调用的状态、结果、用量和错误"
         action={
           <button className="button" onClick={() => void refresh()}>
             刷新
@@ -629,12 +703,12 @@ function Jobs() {
         <section className="card console-section">
           <div className="row">
             <div>
-              <h3>任务详情</h3>
+              <h3>调用详情</h3>
               <code>{selected.id}</code>
             </div>
             {!TERMINAL.has(selected.status) ? (
               <button className="button danger-button" onClick={() => setCancelTarget(selected)}>
-                取消任务
+                取消调用
               </button>
             ) : null}
           </div>
@@ -663,14 +737,14 @@ function Jobs() {
               <dd>{formatUsd(apiEquivalentUsd(selected))}，按同模型官方 API Token 单价估算</dd>
             </div>
             <div>
-              <dt>本次额度窗口变化</dt>
+              <dt>单次额度变化</dt>
               <dd>
                 {formatQuotaDelta(selected.usage.quotaWindowDeltaPercent)}
-                ，根据任务前后同一窗口快照计算
+                ，根据调用前后同一额度周期快照计算
               </dd>
             </div>
             <div>
-              <dt>窗口使用率快照</dt>
+              <dt>额度周期使用率快照</dt>
               <dd>
                 {selected.usage.quotaUsedPercentBefore == null
                   ? "—"
@@ -720,8 +794,8 @@ function Jobs() {
           onSubmit={(event) => event.preventDefault()}
         >
           <span className="eyebrow">不可中断的结果可能仍会返回</span>
-          <h3>确认取消任务</h3>
-          <p className="muted">任务 {cancelTarget?.id.slice(0, 8)} 将进入取消流程</p>
+          <h3>确认取消调用</h3>
+          <p className="muted">调用 {cancelTarget?.id.slice(0, 8)} 将进入取消流程</p>
           <div className="dialog-actions">
             <button
               className="button"
@@ -761,15 +835,15 @@ function Routing() {
       setDecision(result);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "路由预览失败");
+      setError(cause instanceof Error ? cause.message : "路由试算失败");
     }
   }
   return (
     <>
       <PageHeading
         eyebrow="确定性策略"
-        title="路由预览"
-        copy="预览只计算 Codex 的 Luna、Terra 或 Sol 选择，不会创建任务"
+        title="路由试算"
+        copy="这里只计算自动路由会选择哪个模型，不会真正发起调用"
       />
       <div className="workbench-grid">
         <section className="card form-stack">
@@ -799,7 +873,13 @@ function Routing() {
               </select>
             </div>
             <div className="field">
-              <label htmlFor="ambiguity">歧义等级 {ambiguity}</label>
+              <label htmlFor="ambiguity" className="label-with-help">
+                歧义等级 {ambiguity} · {LEVEL_LABEL[ambiguity]}
+                <HelpTip
+                  id="ambiguity-help"
+                  text="衡量目标、条件和验收方式是否清楚，0 表示几乎无需判断，4 表示存在关键缺失或冲突"
+                />
+              </label>
               <input
                 id="ambiguity"
                 type="range"
@@ -810,7 +890,13 @@ function Routing() {
               />
             </div>
             <div className="field">
-              <label htmlFor="risk">风险等级 {risk}</label>
+              <label htmlFor="risk" className="label-with-help">
+                风险等级 {risk} · {LEVEL_LABEL[risk]}
+                <HelpTip
+                  id="risk-help"
+                  text="衡量结果出错后的影响，0 表示容易撤销，4 表示涉及生产、安全、资金或不可逆操作"
+                />
+              </label>
               <input
                 id="risk"
                 type="range"
@@ -822,14 +908,14 @@ function Routing() {
             </div>
           </div>
           <button className="button primary" onClick={() => void preview()}>
-            预览路由
+            开始试算
           </button>
           <ErrorNotice message={error} />
         </section>
         <section className="card">
           <h3>路由决定</h3>
           <pre className="code-panel result-output">
-            {decision ? JSON.stringify(decision, null, 2) : "等待预览"}
+            {decision ? JSON.stringify(decision, null, 2) : "等待试算"}
           </pre>
         </section>
       </div>
@@ -841,60 +927,145 @@ function Models() {
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => {
-    void Promise.all([
-      routerFetch<{ data: ModelRecord[] }>("/api/v1/models"),
-      routerFetch<Quota>("/api/v1/quota"),
-    ])
-      .then(([catalog, snapshot]) => {
-        setModels(catalog.data);
-        setQuota(snapshot);
-      })
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "模型目录读取失败"));
+  const [toggleTarget, setToggleTarget] = useState<ModelRecord | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const [catalog, snapshot] = await Promise.all([
+        routerFetch<{ data: ModelRecord[] }>("/api/v1/models", { signal }),
+        routerFetch<Quota>("/api/v1/quota", { signal }),
+      ]);
+      setModels(catalog.data);
+      setQuota(snapshot);
+      setError("");
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setError(cause instanceof Error ? cause.message : "模型目录读取失败");
+    }
   }, []);
+  useVisiblePolling(refresh, 5_000);
+  async function updateModel() {
+    if (!toggleTarget) return;
+    setBusy(true);
+    try {
+      await routerFetch(`/api/v1/models/${encodeURIComponent(toggleTarget.id)}`, {
+        method: "PATCH",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ enabled: !toggleTarget.enabled }),
+      });
+      setToggleTarget(null);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "模型设置失败");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <>
       <PageHeading
         eyebrow="Codex 运行时"
-        title="模型与额度"
-        copy="模型目录只包含 Codex Luna、Terra 和 Sol"
+        title="用量与模型"
+        copy="实时查看当前账号的全部额度周期，并管理允许手动调用的 Codex 模型"
       />
       <ErrorNotice message={error} />
-      <section className="metrics">
-        <article className="metric">
-          <small>额度使用</small>
-          <strong>{quota?.usedPercent == null ? "—" : `${quota.usedPercent}%`}</strong>
-          <span className="muted">窗口 {quota?.windowDurationMinutes ?? "—"} 分钟</span>
-        </article>
-        <article className="metric">
-          <small>重置时间</small>
-          <strong className="metric-date">{formatDate(quota?.resetsAt ?? null)}</strong>
-          <span className="muted">套餐 {quota?.planType ?? "未知"}</span>
-        </article>
-        <article className="metric">
-          <small>额度数据源</small>
-          <strong className="metric-date">
-            {quota?.source === "app-server" ? "Codex App Server" : "暂不可用"}
-          </strong>
-          <span className="muted">通过 Worker 本地 App Server 读取</span>
-        </article>
+      <section className="console-section">
+        <div className="row">
+          <h3>额度周期</h3>
+          <span className={quota?.stale ? "warning" : "muted"}>
+            {quota?.stale ? "数据已过期" : `更新于 ${formatDate(quota?.fetchedAt ?? null)}`}
+          </span>
+        </div>
+        <div className="metrics">
+          {(quota?.windows.length ? quota.windows : []).map((window) => (
+            <article className="metric" key={window.id}>
+              <small>
+                {window.name} · {window.kind === "primary" ? "主周期" : "次周期"}
+              </small>
+              <strong>{window.usedPercent == null ? "—" : `${window.usedPercent}%`}</strong>
+              <div className="progress">
+                <span style={{ width: `${window.usedPercent ?? 0}%` }} />
+              </div>
+              <span className="muted">
+                剩余 {window.remainingPercent == null ? "—" : `${window.remainingPercent}%`} ·{" "}
+                {window.windowDurationMinutes ?? "—"} 分钟
+              </span>
+              <span className="muted">重置 {formatDate(window.resetsAt)}</span>
+            </article>
+          ))}
+          {!quota?.windows.length ? (
+            <article className="metric">
+              <small>额度数据</small>
+              <strong>—</strong>
+              <span className="muted">当前暂不可用</span>
+            </article>
+          ) : null}
+        </div>
       </section>
       <section className="grid-3 console-section">
         {models.map((model) => (
           <article className="card" key={model.id}>
-            <span className="card-index">{model.alias.toUpperCase()}</span>
+            <span className="card-index">{model.displayName}</span>
             <h3>{model.id}</h3>
-            <p className="muted">{MODEL_PURPOSE_LABEL[model.alias] ?? model.purpose}</p>
-            <span className="pill">Codex</span>
+            <p className="muted">
+              当前账号{model.available ? "可用" : "不可用"} · Router{" "}
+              {model.enabled ? "已启用" : "未启用"}
+            </p>
+            <p className="muted">
+              推理等级{" "}
+              {model.supportedReasoningEfforts.length
+                ? model.supportedReasoningEfforts.join("、")
+                : "暂未返回"}
+            </p>
+            {model.creditRate && model.apiRate ? (
+              <p className="muted">
+                Credits {model.creditRate.input}/{model.creditRate.cachedInput}/
+                {model.creditRate.output} · API US${model.apiRate.input}/{model.apiRate.cachedInput}
+                /{model.apiRate.output}
+              </p>
+            ) : (
+              <p className="muted">暂不能换算 Credits 或 API 等效价格</p>
+            )}
+            <button
+              className="button"
+              disabled={!model.available && !model.enabled}
+              onClick={() => setToggleTarget(model)}
+            >
+              {model.enabled ? "停用" : "启用"}
+            </button>
           </article>
         ))}
       </section>
       <section className="card console-section">
         <h3>计量口径</h3>
+        <p className="muted">
+          I 为输入 Token，K 为缓存输入 Token，O 为输出 Token，费率均按每百万 Token 记录
+        </p>
+        <Formula
+          source={String.raw`C_m=\frac{(I-K)r_i+Kr_k+Or_o}{10^6}`}
+          label="Codex Credits 计算公式"
+        />
+        <Formula
+          source={String.raw`P_{\mathrm{API}}=\frac{(I-K)p_i+Kp_k+Op_o}{10^6}`}
+          label="API 等效价格计算公式"
+        />
+        <Formula
+          source={String.raw`\Delta Q_w=Q_{\mathrm{after},w}-Q_{\mathrm{before},w}`}
+          label="单次额度变化公式"
+        />
+        <Formula
+          source={String.raw`P_{1000}=\frac{1000P_{\mathrm{API}}}{I+O}`}
+          label="每千 Token API 等效价格公式"
+        />
+        <Formula source={String.raw`A_j=M\frac{C_j}{\sum_k C_k}`} label="月度订阅摊销公式" />
         <dl className="detail-list">
           <div>
-            <dt>窗口百分比</dt>
-            <dd>Codex App Server 返回的当前额度窗口已使用比例，不代表单项任务成本</dd>
+            <dt>额度使用比例</dt>
+            <dd>官方额度周期的已用比例，不代表单项调用成本</dd>
+          </div>
+          <div>
+            <dt>单次额度变化</dt>
+            <dd>调用前后同一额度周期读数相差的百分点，读数不变时显示低于当前精度</dd>
           </div>
           <div>
             <dt>Codex Credits</dt>
@@ -910,6 +1081,33 @@ function Models() {
           </div>
         </dl>
       </section>
+      <NativeDialog open={toggleTarget != null} onClose={() => setToggleTarget(null)}>
+        <form
+          method="dialog"
+          className="dialog-content"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <span className="eyebrow">模型设置</span>
+          <h3>确认{toggleTarget?.enabled ? "停用" : "启用"}模型</h3>
+          <p className="muted">
+            {toggleTarget?.displayName}（{toggleTarget?.id}）将
+            {toggleTarget?.enabled ? "不能再接收新调用" : "可以在在线调用和 API 中手动指定"}
+          </p>
+          <div className="dialog-actions">
+            <button
+              className="button"
+              autoFocus
+              disabled={busy}
+              onClick={() => setToggleTarget(null)}
+            >
+              返回
+            </button>
+            <button className="button primary" disabled={busy} onClick={() => void updateModel()}>
+              {busy ? "正在保存" : "确认更改"}
+            </button>
+          </div>
+        </form>
+      </NativeDialog>
     </>
   );
 }
@@ -1205,13 +1403,13 @@ function Records({ kind }: { kind: "audit" | "retention" }) {
     () =>
       kind === "audit"
         ? {
-            title: "审计记录",
-            copy: "记录登录身份触发的密钥、任务、审批和管理变更",
+            title: "操作日志",
+            copy: "记录谁在什么时候提交调用、管理密钥或修改设置",
             path: "/api/v1/audit?limit=100",
           }
         : {
-            title: "删除回执",
-            copy: "确认任务正文和元数据保留任务已经执行",
+            title: "数据清理记录",
+            copy: "查看系统何时删除过期的请求内容、结果和元数据",
             path: "/api/v1/retention/receipts?limit=100",
           },
     [kind],
@@ -1253,7 +1451,7 @@ function Records({ kind }: { kind: "audit" | "retention" }) {
                     <td>
                       <code>{audit.resourceId ?? receipt.resourceId}</code>
                     </td>
-                    <td>{audit.actorId ?? "系统保留任务"}</td>
+                    <td>{audit.actorId ?? "系统清理流程"}</td>
                   </tr>
                 );
               })

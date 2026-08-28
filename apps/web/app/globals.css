@@ -19,6 +19,7 @@
 html {
   background: var(--background);
   scroll-behavior: smooth;
+  overflow-x: clip;
 }
 body {
   margin: 0;
@@ -33,6 +34,8 @@ body {
     "Segoe UI",
     sans-serif;
   line-height: 1.55;
+  max-width: 100%;
+  overflow-x: clip;
 }
 a {
   color: inherit;
@@ -378,6 +381,18 @@ h3 {
 .console-sidebar a {
   border-bottom: 1px solid transparent;
 }
+.console-nav-group {
+  display: grid;
+  gap: 0.15rem;
+  margin-bottom: 1.5rem;
+}
+.console-nav-heading {
+  margin-bottom: 0.35rem;
+  color: var(--quiet);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
 .console-sidebar a:hover {
   border-bottom-color: var(--border-strong);
 }
@@ -455,6 +470,64 @@ h3 {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 680;
+}
+.label-with-help {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.help-tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.help-tip-button {
+  display: inline-grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.72rem;
+  cursor: help;
+}
+.help-tip {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  display: none;
+  width: min(22rem, calc(100vw - 3rem));
+  border: 1px solid var(--border-strong);
+  background: #080808;
+  color: var(--text);
+  padding: 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 450;
+  line-height: 1.55;
+}
+.help-tip-wrap:hover .help-tip,
+.help-tip-wrap:focus-within .help-tip,
+.help-tip[data-open="true"] {
+  display: block;
+}
+.formula {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-block: 1rem;
+  overflow-x: auto;
+  padding: 0.75rem 0;
+  color: var(--text);
+}
+.formula .katex-display {
+  margin: 0;
+  text-align: left;
+}
+.formula-fallback {
+  border-block: 1px solid var(--border);
+  white-space: pre-wrap;
 }
 .field input,
 .field textarea,
@@ -699,6 +772,16 @@ th {
     padding: 0 1rem;
     overflow-x: auto;
     scrollbar-width: none;
+  }
+  .console-nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 1rem;
+    margin: 0;
+  }
+  .console-nav-heading {
+    align-self: center;
+    margin: 0;
   }
   .console-sidebar::-webkit-scrollbar {
     display: none;
