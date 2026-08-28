@@ -1,0 +1,34 @@
+version: 1.0.0-candidate
+effective_date: 2026-08-25
+
+quota_windows:
+  normal: { minimum_percent: 0, maximum_percent: 70 }
+  prefer_luna: { minimum_percent: 70, maximum_percent: 85 }
+  constrained_codex: { minimum_percent: 85, maximum_percent: 95 }
+  reserve_codex: { minimum_percent: 95, maximum_percent: 100 }
+
+model_defaults:
+  bounded: { model: luna, effort: low }
+  coding: { model: terra, effort: medium }
+  review: { model: terra, effort: medium }
+  planning: { model: sol, effort: high }
+  high_risk: { model: sol, effort: high }
+  batch: { model: luna, effort: low }
+
+switching:
+  maximum_same_model_retries: 1
+  before_first_output_only: true
+  before_first_side_effect_only: true
+  allowed_error_classes: [capacity, network, temporary_service]
+
+delegation:
+  maximum_depth: 1
+  child_can_delegate: false
+  maximum_logical_children: 4
+
+release_gates:
+  pass_at_1_minimum: 0.97
+  accepted_after_explicit_retry_minimum: 0.99
+  reassignment_rate_maximum: 0.15
+  human_correction_rate_maximum: 0.02
+  credits_per_accepted_task_terra_ratio_maximum: 0.60

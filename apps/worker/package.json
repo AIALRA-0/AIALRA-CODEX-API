@@ -1,0 +1,24 @@
+{
+  "name": "@aialra/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsup src/main.ts --format esm --sourcemap --clean",
+    "dev": "tsx watch src/main.ts",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aialra/contracts": "workspace:*",
+    "@aialra/persistence": "workspace:*",
+    "@aialra/providers": "workspace:*",
+    "@aialra/router": "workspace:*",
+    "@aialra/security": "workspace:*",
+    "ajv": "latest",
+    "pg-boss": "latest"
+  }
+}

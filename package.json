@@ -1,0 +1,40 @@
+{
+  "name": "aialra-model-router",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Private Codex-to-API gateway with quota-aware Luna, Terra, and Sol routing.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "typecheck": "turbo run typecheck",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "generate:openapi": "openapi-typescript openapi/openapi.yaml -o packages/client/src/generated.ts && prettier --write packages/client/src/generated.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@swc/core": "latest",
+    "@types/node": "latest",
+    "@vitest/coverage-v8": "latest",
+    "openapi-typescript": "latest",
+    "eslint": "latest",
+    "prettier": "latest",
+    "tsup": "latest",
+    "tsx": "latest",
+    "turbo": "latest",
+    "typescript": "5.9.3",
+    "typescript-eslint": "latest",
+    "vitest": "latest"
+  }
+}

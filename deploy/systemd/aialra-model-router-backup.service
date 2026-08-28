@@ -1,0 +1,18 @@
+[Unit]
+Description=Encrypted AIALRA Model Router PostgreSQL backup
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=COMPOSE_FILE=/opt/aialra-model-router/current/deploy/compose.yaml
+Environment=COMPOSE_ENV_FILE=/var/lib/aialra-model-router/production.env
+Environment=AGE_RECIPIENT_FILE=/var/lib/aialra-model-router/secrets/backup_age_recipient
+Environment=BACKUP_DIR=/var/lib/aialra-model-router/backups
+ExecStart=/bin/bash /opt/aialra-model-router/current/deploy/scripts/backup.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aialra-model-router/backups

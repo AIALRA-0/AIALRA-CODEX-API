@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://router.example.invalid/schemas/eval-task.json",
+  "type": "object",
+  "required": ["id", "family", "request", "acceptance"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$" },
+    "family": { "type": "string" },
+    "request": { "$ref": "../openapi/openapi.yaml#/components/schemas/CreateJobRequest" },
+    "acceptance": {
+      "type": "object",
+      "required": ["fixed"],
+      "properties": {
+        "fixed": { "type": "boolean", "const": true },
+        "human_review_required": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

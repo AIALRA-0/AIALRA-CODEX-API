@@ -1,0 +1,27 @@
+{
+  "name": "@aialra/providers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aialra/contracts": "workspace:*",
+    "@aialra/security": "workspace:*",
+    "@openai/codex-sdk": "0.149.1",
+    "zod": "latest"
+  }
+}

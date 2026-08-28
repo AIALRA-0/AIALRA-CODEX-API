@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.4
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate OpenAPI client types
+        run: pnpm generate:openapi
+      - name: Reject stale generated files
+        run: git diff --exit-code
+      - name: Run formatting, lint, type, test, and build gates
+        run: pnpm check
+      - name: Validate deployment configuration
+        env:
+          CODEX_AUTH_DIR: /tmp/aialra-model-router/codex
+          WEBAUTHN_RP_ID: router-private.example.ts.net
+          WEBAUTHN_ORIGIN: https://router-private.example.ts.net
+        run: docker compose -f deploy/compose.yaml config --quiet
+      - name: Validate bundled Skill
+        env:
+          PYTHONUTF8: "1"
+        run: python .github/scripts/validate_skill.py skill/aialra-model-router
+
+  container-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        target: [api, web, worker, runner]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build runtime target
+        run: docker build --file deploy/Containerfile --target "${{ matrix.target }}" --tag "aialra-model-router-${{ matrix.target }}:ci" .

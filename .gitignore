@@ -1,0 +1,32 @@
+# Dependency and build output
+node_modules/
+dist/
+.next/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+auth.json
+.codex/
+deploy/local.env
+deploy/secrets/
+
+# Runtime data
+data/
+backups/
+tmp/
+*.log
+output/
+.playwright-cli/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

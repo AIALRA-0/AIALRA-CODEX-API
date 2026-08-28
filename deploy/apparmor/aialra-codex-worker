@@ -1,0 +1,10 @@
+# This named profile opts the dedicated Worker into unprivileged user
+# namespaces on Ubuntu 24.04. The nested Codex bubblewrap sandbox is the task
+# filesystem boundary; Docker still drops every outer-container capability.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile aialra-codex-worker flags=(unconfined) {
+  userns,
+}

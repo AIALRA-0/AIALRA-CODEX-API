@@ -1,0 +1,266 @@
+name: aialra-model-router
+
+services:
+  postgres:
+    image: postgres:17.5-bookworm@sha256:fbcea1bd13b6a882cd6caa6b58db3ae5c102efe50ec625b3e2a5cbc50db5bfe4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: router
+      POSTGRES_USER: router
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - router_postgres:/var/lib/postgresql/data
+    networks:
+      - backend
+    ports:
+      - "127.0.0.1:13213:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U router -d router"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ${API_IMAGE:-ghcr.io/aialra-0/aialra-model-router-api:0.1.0}
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      target: api
+    restart: unless-stopped
+    user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 13210
+      OPENAPI_PATH: /app/openapi/openapi.yaml
+      DATABASE_URL_FILE: /run/secrets/database_url
+      PAYLOAD_MASTER_KEY_FILE: /run/secrets/payload_master_key
+      API_KEY_PEPPER_FILE: /run/secrets/api_key_pepper
+      SESSION_PEPPER_FILE: /run/secrets/session_pepper
+      BOOTSTRAP_ADMIN_TOKEN_FILE: /run/secrets/bootstrap_admin_token
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      AUTHENTIK_TRUST_PROXY: ${AUTHENTIK_TRUST_PROXY:-false}
+      AUTHENTIK_REQUIRED_GROUP: ${AUTHENTIK_REQUIRED_GROUP:-aialra:access:model-router}
+      JOB_SUBMISSION_ENABLED: ${JOB_SUBMISSION_ENABLED:-true}
+      INTERNAL_PROXY_SECRET_FILE: /run/secrets/internal_proxy_secret
+    secrets:
+      - database_url
+      - payload_master_key
+      - api_key_pepper
+      - session_pepper
+      - bootstrap_admin_token
+      - internal_proxy_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    ports:
+      - "127.0.0.1:13210:13210"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:13210/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  web:
+    image: ${WEB_IMAGE:-ghcr.io/aialra-0/aialra-model-router-web:0.1.0}
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      target: web
+    restart: unless-stopped
+    user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
+    environment:
+      MODEL_ROUTER_API_URL: http://api:13210
+      AUTH_MODE: ${AUTH_MODE:-passkey}
+      INTERNAL_PROXY_SECRET_FILE: /run/secrets/internal_proxy_secret
+      EDGE_PROXY_SECRET_FILE: /run/secrets/edge_proxy_secret
+    secrets:
+      - internal_proxy_secret
+      - edge_proxy_secret
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - frontend
+    ports:
+      - "127.0.0.1:13211:13211"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:13211/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 768m
+    cpus: 0.75
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  worker:
+    profiles: ["codex"]
+    image: ${WORKER_IMAGE:-ghcr.io/aialra-0/aialra-model-router-worker:0.1.0}
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      target: worker
+    restart: unless-stopped
+    user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      PAYLOAD_MASTER_KEY_FILE: /run/secrets/payload_master_key
+      RUNNER_URL: http://runner:13214
+      CODEX_MAX_CONCURRENCY: ${CODEX_MAX_CONCURRENCY:-1}
+      METRICS_PORT: 13212
+    secrets:
+      - database_url
+      - payload_master_key
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,uid=${ROUTER_UID:-1000},gid=${ROUTER_GID:-1000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runner:
+        condition: service_healthy
+    networks:
+      - backend
+      - runner_control
+      - metrics
+    ports:
+      - "127.0.0.1:13212:13212"
+    read_only: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:13212/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  runner:
+    profiles: ["codex"]
+    image: ${RUNNER_IMAGE:-ghcr.io/aialra-0/aialra-model-router-runner:0.1.0}
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      target: runner
+    restart: unless-stopped
+    user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
+    environment:
+      CODEX_BIN: codex
+      CODEX_HOME: /codex-auth
+      CODEX_PERSIST_SESSIONS: "false"
+      RUNNER_MAX_CONCURRENCY: ${CODEX_MAX_CONCURRENCY:-1}
+      RUNNER_PORT: 13214
+    volumes:
+      - ${CODEX_AUTH_DIR:?Set CODEX_AUTH_DIR to the dedicated Codex home}:/codex-auth
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m,uid=${ROUTER_UID:-1000},gid=${ROUTER_GID:-1000}
+      - /workspace/jobs:rw,noexec,nosuid,size=2g,uid=${ROUTER_UID:-1000},gid=${ROUTER_GID:-1000}
+    networks:
+      - runner_control
+      - codex_egress
+    read_only: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:13214/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+      - apparmor=aialra-codex-worker
+    cap_drop:
+      - ALL
+
+networks:
+  frontend:
+    name: aialra_router_frontend
+  backend:
+    name: aialra_router_backend
+    internal: true
+  runner_control:
+    name: aialra_router_runner_control
+    internal: true
+  codex_egress:
+    name: aialra_router_codex_egress
+  metrics:
+    name: aialra_router_metrics
+
+volumes:
+  router_postgres:
+    name: aialra_router_postgres
+
+secrets:
+  postgres_password:
+    file: ${SECRETS_DIR:-./secrets}/postgres_password
+  database_url:
+    file: ${SECRETS_DIR:-./secrets}/database_url
+  payload_master_key:
+    file: ${SECRETS_DIR:-./secrets}/payload_master_key
+  api_key_pepper:
+    file: ${SECRETS_DIR:-./secrets}/api_key_pepper
+  session_pepper:
+    file: ${SECRETS_DIR:-./secrets}/session_pepper
+  bootstrap_admin_token:
+    file: ${SECRETS_DIR:-./secrets}/bootstrap_admin_token
+  internal_proxy_secret:
+    file: ${SECRETS_DIR:-./secrets}/internal_proxy_secret
+  edge_proxy_secret:
+    file: ${SECRETS_DIR:-./secrets}/edge_proxy_secret

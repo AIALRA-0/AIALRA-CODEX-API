@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily AIALRA Model Router backup schedule
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

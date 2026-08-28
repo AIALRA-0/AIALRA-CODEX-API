@@ -1,0 +1,21 @@
+{
+  "name": "@aialra/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "aialra-router": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsup src/main.ts --format esm --clean",
+    "dev": "tsx src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aialra/contracts": "workspace:*",
+    "@aialra/model-router-client": "workspace:*"
+  }
+}

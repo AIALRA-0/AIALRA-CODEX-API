@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIALRA Model Router"
+  short_description: "Route private model jobs by quality, quota, and data policy"
+  default_prompt: "Use $aialra-model-router to turn this task into a governed model-router job."

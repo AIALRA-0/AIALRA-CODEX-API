@@ -1,0 +1,1056 @@
+openapi: 3.1.0
+info:
+  title: AIALRA Model Router API
+  version: 0.1.0
+  description: Private Responses-compatible and native Jobs API for quota-aware model routing
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://router.tailnet.example
+    description: Private Tailnet endpoint
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      operationId: readiness
+      security: []
+      responses:
+        "200":
+          description: Service dependencies are ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /v1/responses:
+    post:
+      operationId: createResponse
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponsesRequest"
+      responses:
+        "200":
+          description: Completed response or Server-Sent Events stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response"
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/jobs:
+    post:
+      operationId: createJob
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+      responses:
+        "201":
+          description: Job accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    get:
+      operationId: listJobs
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Recent jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+  /api/v1/jobs/{id}:
+    get:
+      operationId: getJob
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Current job snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/jobs/{id}/events:
+    get:
+      operationId: getJobEvents
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - name: after
+          in: query
+          schema:
+            type: integer
+            default: -1
+        - name: stream
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Event collection or Server-Sent Events stream
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JobEvent"
+            text/event-stream:
+              schema:
+                type: string
+  /api/v1/jobs/{id}/cancel:
+    post:
+      operationId: cancelJob
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: Cancellation requested or terminal job returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /api/v1/jobs/{id}/approvals:
+    post:
+      operationId: decideJobApproval
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              additionalProperties: false
+              properties:
+                decision:
+                  type: string
+                  enum: [approved, denied]
+                reason:
+                  type: string
+                  maxLength: 2000
+      responses:
+        "201":
+          description: Approval decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobEvent"
+  /api/v1/batches:
+    post:
+      operationId: createBatch
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requests]
+              properties:
+                requests:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    $ref: "#/components/schemas/CreateJobRequest"
+      responses:
+        "201":
+          description: Jobs accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+  /api/v1/routes/preview:
+    post:
+      operationId: previewRoute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task]
+              properties:
+                task:
+                  $ref: "#/components/schemas/TaskContract"
+      responses:
+        "201":
+          description: Deterministic route decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteDecision"
+  /api/v1/models:
+    get:
+      operationId: listModels
+      responses:
+        "200":
+          description: Declared model capabilities
+  /api/v1/quota:
+    get:
+      operationId: getQuota
+      responses:
+        "200":
+          description: Latest worker-published quota snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaSnapshot"
+  /api/v1/usage:
+    get:
+      operationId: getUsage
+      responses:
+        "200":
+          description: Codex Credits, API-equivalent estimates, and accepted-result totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [
+                    accepted_tasks,
+                    codex_credits,
+                    api_equivalent_usd,
+                    credits_per_accepted_task,
+                    api_equivalent_usd_per_accepted_task,
+                    allocated_subscription_usd,
+                  ]
+                properties:
+                  accepted_tasks:
+                    type: integer
+                    minimum: 0
+                  codex_credits:
+                    type: number
+                    minimum: 0
+                  api_equivalent_usd:
+                    type: number
+                    minimum: 0
+                    description: Estimated token-only cost at official API rates
+                  credits_per_accepted_task:
+                    type: [number, "null"]
+                  api_equivalent_usd_per_accepted_task:
+                    type: [number, "null"]
+                  allocated_subscription_usd:
+                    type: number
+                    minimum: 0
+  /api/v1/audit:
+    get:
+      operationId: listAuditEvents
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Administrative audit events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEvent"
+  /api/v1/retention/receipts:
+    get:
+      operationId: listDeletionReceipts
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Payload deletion receipts and metadata deletion deadlines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DeletionReceipt"
+  /api/v1/bootstrap/keys:
+    post:
+      operationId: bootstrapApiKey
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/BootstrapToken"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: First administrator API key, shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApiKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/keys:
+    get:
+      operationId: listApiKeys
+      responses:
+        "200":
+          description: API key metadata without key digests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiKeyMetadata"
+    post:
+      operationId: createApiKey
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+      responses:
+        "201":
+          description: API key metadata and one-time plaintext key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApiKey"
+  /api/v1/keys/{id}/revoke:
+    post:
+      operationId: revokeApiKey
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeApiKeyRequest"
+      responses:
+        "201":
+          description: API key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, revoked, alreadyRevoked]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  revoked:
+                    type: boolean
+                  alreadyRevoked:
+                    type: boolean
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth/passkey/register/options:
+    post:
+      operationId: beginPasskeyRegistration
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/BootstrapToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                displayName:
+                  type: string
+      responses:
+        "201":
+          description: WebAuthn registration challenge and browser options
+  /auth/passkey/register/verify:
+    post:
+      operationId: verifyPasskeyRegistration
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/BootstrapToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, response]
+              properties:
+                challengeId:
+                  type: string
+                  format: uuid
+                response:
+                  type: object
+      responses:
+        "201":
+          description: Registration result and ten one-time recovery codes
+  /auth/passkey/login/options:
+    post:
+      operationId: beginPasskeyLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "201":
+          description: WebAuthn authentication challenge and browser options
+  /auth/passkey/login/verify:
+    post:
+      operationId: verifyPasskeyLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, response]
+              properties:
+                challengeId:
+                  type: string
+                  format: uuid
+                response:
+                  type: object
+      responses:
+        "201":
+          description: Authentication result with an HttpOnly session cookie
+  /auth/recovery/login:
+    post:
+      operationId: loginWithRecoveryCode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+      responses:
+        "201":
+          description: Authentication result after consuming one recovery code
+  /auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "201":
+          description: Current application session revoked and cookie cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loggedOut]
+                properties:
+                  loggedOut:
+                    type: boolean
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: AIALRA_API_KEY
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BootstrapToken:
+      name: X-Bootstrap-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 32
+  responses:
+    BadRequest:
+      description: Unsupported parameter or invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Idempotency key reused with a different request digest
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: Authentication failed or bootstrap is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+        service:
+          type: string
+    CreateApiKeyRequest:
+      type: object
+      required: [name, scopes]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [admin, jobs:read, jobs:write, quota:read, keys:write, approvals:write]
+        rateLimitPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 60
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+          description: Omit for the 30-day default; null requests a non-expiring administrator key
+    RevokeApiKeyRequest:
+      type: object
+      required: [confirmationPrefix]
+      additionalProperties: false
+      properties:
+        confirmationPrefix:
+          type: string
+          minLength: 1
+    ApiKeyMetadata:
+      type: object
+      required: [id, name, prefix, scopes, rateLimitPerMinute, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        rateLimitPerMinute:
+          type: integer
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: [string, "null"]
+          format: date-time
+    CreatedApiKey:
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyMetadata"
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: Plaintext API key returned only once
+            replayed:
+              type: boolean
+              description: True when the same idempotent request is replayed
+    AuditEvent:
+      type: object
+      required: [id, actorId, action, resourceType, resourceId, metadata, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: [string, "null"]
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    DeletionReceipt:
+      type: object
+      required: [id, jobId, payloadDeletedAt, metadataDeleteAfter]
+      properties:
+        id:
+          type: string
+          format: uuid
+        jobId:
+          type: string
+          format: uuid
+        payloadDeletedAt:
+          type: string
+          format: date-time
+        metadataDeleteAfter:
+          type: string
+          format: date-time
+    PermissionProfile:
+      type: object
+      additionalProperties: false
+      properties:
+        filesystem:
+          type: string
+          enum: [none, read, write]
+          default: read
+        network:
+          type: string
+          enum: [none, allowlist]
+          default: none
+        allowedHosts:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+        requireApprovalForWrites:
+          type: boolean
+          default: true
+        requireApprovalForExternalActions:
+          type: boolean
+          default: true
+    TaskContract:
+      type: object
+      required: [objective]
+      additionalProperties: false
+      properties:
+        objective:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        taskKind:
+          type: string
+          enum: [bounded, coding, review, planning, batch, general]
+          default: general
+        requiredContext:
+          type: array
+          items:
+            type: string
+        constraints:
+          type: array
+          items:
+            type: string
+        expectedOutput:
+          type: string
+        validation:
+          type: object
+          properties:
+            responseSchema:
+              type: object
+              additionalProperties: true
+            acceptanceTests:
+              type: array
+              items:
+                type: string
+        dataClassification:
+          type: string
+          enum: [public, internal, confidential, restricted]
+          default: internal
+        permissions:
+          $ref: "#/components/schemas/PermissionProfile"
+        deadlineMs:
+          type: integer
+          minimum: 1000
+          maximum: 3600000
+          default: 120000
+        budget:
+          type: object
+          properties:
+            maxCodexCredits:
+              type: number
+              exclusiveMinimum: 0
+            maxOutputTokens:
+              type: integer
+              default: 8192
+            maxAttempts:
+              type: integer
+              minimum: 1
+              maximum: 2
+              default: 2
+        sessionKey:
+          type: string
+        model:
+          type: string
+          enum: [auto, luna, terra, sol]
+          default: auto
+        effort:
+          type: string
+          enum: [minimal, low, medium, high, xhigh]
+          default: medium
+        replayable:
+          type: boolean
+          default: true
+        ambiguity:
+          type: integer
+          minimum: 0
+          maximum: 4
+        risk:
+          type: integer
+          minimum: 0
+          maximum: 4
+    CreateJobRequest:
+      type: object
+      required: [task]
+      additionalProperties: false
+      properties:
+        task:
+          $ref: "#/components/schemas/TaskContract"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    Job:
+      type: object
+      required: [id, status, task, usage, createdAt, updatedAt, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            [
+              accepted,
+              queued,
+              running,
+              validating,
+              succeeded,
+              needs_review,
+              failed,
+              cancelled,
+              expired,
+            ]
+        task:
+          $ref: "#/components/schemas/TaskContract"
+        route:
+          oneOf:
+            - $ref: "#/components/schemas/RouteDecision"
+            - type: "null"
+        output: {}
+        usage:
+          $ref: "#/components/schemas/UsageLedger"
+        validation: {}
+        errorCode:
+          type: [string, "null"]
+        errorMessage:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    JobEvent:
+      type: object
+      required: [id, jobId, sequence, type, data, createdAt]
+      properties:
+        id:
+          type: string
+        jobId:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+        type:
+          type: string
+          enum: [status, output.delta, tool, approval, validation, usage, error]
+        data:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    RouteDecision:
+      type: object
+      required: [provider, model, effort, policyVersion, reasonCode, sticky]
+      properties:
+        provider:
+          type: string
+          const: codex
+        model:
+          type: string
+        effort:
+          type: string
+        policyVersion:
+          type: string
+        reasonCode:
+          type: string
+        sticky:
+          const: true
+    UsageLedger:
+      type: object
+      required:
+        [
+          inputTokens,
+          cachedInputTokens,
+          outputTokens,
+          codexCredits,
+          apiEquivalentUsd,
+          quotaUsedPercentBefore,
+          quotaUsedPercentAfter,
+          quotaWindowDeltaPercent,
+          allocatedSubscriptionUsd,
+        ]
+      properties:
+        inputTokens:
+          type: integer
+          minimum: 0
+        cachedInputTokens:
+          type: integer
+          minimum: 0
+        outputTokens:
+          type: integer
+          minimum: 0
+        codexCredits:
+          type: [number, "null"]
+          description: Codex subscription credits calculated from the official credit rate card
+        apiEquivalentUsd:
+          type: [number, "null"]
+          description: Estimated token-only cost at official API rates; not an actual subscription charge
+        quotaUsedPercentBefore:
+          type: [number, "null"]
+          description: Observed quota-window usage before the task
+        quotaUsedPercentAfter:
+          type: [number, "null"]
+          description: Observed quota-window usage after the task
+        quotaWindowDeltaPercent:
+          type: [number, "null"]
+          description: Observed percentage-point change when both snapshots belong to the same quota window
+        allocatedSubscriptionUsd:
+          type: [number, "null"]
+    QuotaSnapshot:
+      type: object
+      required:
+        [provider, usedPercent, windowDurationMinutes, resetsAt, planType, fetchedAt, source]
+      properties:
+        provider:
+          const: codex
+        usedPercent:
+          type: [number, "null"]
+        windowDurationMinutes:
+          type: [number, "null"]
+        resetsAt:
+          type: [string, "null"]
+          format: date-time
+        planType:
+          type: [string, "null"]
+        fetchedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [app-server, unavailable]
+    ResponsesRequest:
+      type: object
+      required: [input]
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          default: auto
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items: {}
+        instructions:
+          type: string
+        reasoning:
+          type: object
+          properties:
+            effort:
+              type: string
+              enum: [minimal, low, medium, high, xhigh]
+        text:
+          type: object
+          properties:
+            format:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [text, json_schema]
+                name:
+                  type: string
+                schema:
+                  type: object
+                strict:
+                  type: boolean
+        stream:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        max_output_tokens:
+          type: integer
+          minimum: 1
+    Response:
+      type: object
+      required: [id, object, status, model, usage, metadata]
+      properties:
+        id:
+          type: string
+        object:
+          const: response
+        status:
+          type: string
+        model:
+          type: string
+        output: {}
+        error: {}
+        usage:
+          $ref: "#/components/schemas/UsageLedger"
+        metadata:
+          type: object
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details: {}

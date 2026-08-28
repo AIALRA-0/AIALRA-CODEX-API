@@ -1,0 +1,61 @@
+AIALRA Model Router third-party notices
+Version: 0.1.0
+Date: 2026-08-25
+
+This project uses packages distributed under their respective licenses
+
+OpenAI Codex SDK and Codex CLI
+Source: https://github.com/openai/codex
+License: Apache License 2.0
+
+NestJS
+Source: https://github.com/nestjs/nest
+License: MIT License
+
+Next.js and React
+Sources: https://github.com/vercel/next.js and https://github.com/facebook/react
+Licenses: MIT License
+
+Swagger UI
+Source: https://github.com/swagger-api/swagger-ui
+License: Apache License 2.0
+Copyright: 2020-2021 SmartBear Software Inc.
+
+sharp and packaged libvips binaries
+Sources: https://github.com/lovell/sharp and https://github.com/libvips/libvips
+Licenses: Apache License 2.0 for sharp; packaged native components may include LGPL-3.0-or-later terms
+
+caniuse-lite
+Source: https://github.com/browserslist/caniuse-lite
+License: CC-BY-4.0
+
+argparse
+Source: https://github.com/nodeca/argparse
+License: Python-2.0
+
+pg-boss and node-postgres
+Sources: https://github.com/timgit/pg-boss and https://github.com/brianc/node-postgres
+Licenses: MIT License
+
+SimpleWebAuthn
+Source: https://github.com/MasterKale/SimpleWebAuthn
+License: MIT License
+
+Zod, Ajv, Vitest, Turbo, tsup, TypeScript, ESLint, and Prettier
+Licenses: MIT License or the license declared by each upstream package
+
+PostgreSQL container image
+Source: https://github.com/docker-library/postgres
+Database license: PostgreSQL License
+
+Node.js and Debian container base
+Sources: https://github.com/nodejs/node and https://www.debian.org/
+Licenses: Node.js and Debian component licenses as distributed by the upstream images
+
+Codex Pooler was reviewed only as public prior art
+Its Elastic License 2.0 source was not copied into this Apache-2.0 implementation
+
+The dependency graph changes over time. Release artifacts must include an SBOM and the
+license inventory generated from the exact Linux production images. This summary does
+not replace upstream license texts, notices, or source-offer obligations that apply to a
+specific binary distribution.
