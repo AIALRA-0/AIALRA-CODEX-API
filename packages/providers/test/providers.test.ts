@@ -70,7 +70,11 @@ describe("provider utilities", () => {
         {
           id: "gpt-5.5",
           displayName: "GPT-5.5",
-          supportedReasoningEfforts: ["low", "high", "future"],
+          supportedReasoningEfforts: [
+            { reasoningEffort: "low", description: "Fast" },
+            { reasoningEffort: "high", description: "Thorough" },
+            { reasoningEffort: "future", description: "Unknown" },
+          ],
           inputModalities: ["text", "image"],
         },
       ],
