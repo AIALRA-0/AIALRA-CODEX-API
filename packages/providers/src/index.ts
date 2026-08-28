@@ -449,7 +449,14 @@ export function modelCatalogFromAppServer(result: unknown): ModelCatalogSnapshot
         item.supported_reasoning_efforts ??
         []) as unknown[];
       const supportedReasoningEfforts = rawEfforts
-        .map(String)
+        .map((effort) => {
+          if (typeof effort === "string") return effort;
+          if (effort && typeof effort === "object") {
+            const option = effort as Record<string, unknown>;
+            return String(option.reasoningEffort ?? option.reasoning_effort ?? "");
+          }
+          return "";
+        })
         .filter((effort): effort is ReasoningEffort =>
           KNOWN_REASONING_EFFORTS.has(effort as ReasoningEffort),
         );
