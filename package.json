@@ -22,6 +22,11 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "generate:openapi": "openapi-typescript openapi/openapi.yaml -o packages/client/src/generated.ts && prettier --write packages/client/src/generated.ts"
   },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.28.2"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "latest",
     "@swc/core": "latest",
