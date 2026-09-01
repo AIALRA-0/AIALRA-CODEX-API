@@ -2,6 +2,7 @@ import { BRIDGE_TOKEN } from "./runtime-config.js";
 
 const BRIDGE_URL = `ws://127.0.0.1:13216/extension?token=${encodeURIComponent(BRIDGE_TOKEN)}`;
 const CHATGPT_URL = "https://chatgpt.com/";
+const TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
 const STORAGE_KEY = "aialra.chatgpt.single-page-v1.slot";
 const ADAPTER_VERSION = "single-page-v1";
 const READY_STABILITY_MS = 2_000;
@@ -131,8 +132,9 @@ async function createSlot() {
   return slot;
 }
 
-async function navigateToFreshChat(slot, active) {
+async function navigateToFreshChat(slot, active, temporaryChat = false) {
   const tab = await chrome.tabs.get(slot.tabId);
+  const targetUrl = temporaryChat ? TEMPORARY_CHAT_URL : CHATGPT_URL;
   const currentPage = await sendToTab(
     slot.tabId,
     { type: "aialra.probe", discoverModels: false },
@@ -152,9 +154,9 @@ async function navigateToFreshChat(slot, active) {
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
     const navigation =
-      tab.url === CHATGPT_URL
+      tab.url === targetUrl
         ? chrome.tabs.reload(slot.tabId)
-        : chrome.tabs.update(slot.tabId, { url: CHATGPT_URL, active });
+        : chrome.tabs.update(slot.tabId, { url: targetUrl, active });
     void navigation.catch((error) => {
       clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(onUpdated);
@@ -322,10 +324,15 @@ async function prepareSlot(slot, invocation) {
     documentToken: null,
     quarantinedUntil: null,
   });
-  const previousDocumentToken = await navigateToFreshChat(slot, true);
+  const previousDocumentToken = await navigateToFreshChat(slot, true, true);
   const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken);
   const diagnostics = page.diagnostics ?? {};
-  if (!diagnostics.freshConversation || !diagnostics.documentToken) {
+  if (
+    !diagnostics.freshConversation ||
+    !diagnostics.documentToken ||
+    diagnostics.temporaryChatEnabled !== true ||
+    diagnostics.temporaryChatPersonalized !== false
+  ) {
     throw new Error("chatgpt_ui_changed");
   }
   await patchSlot(slot, { state: "ready", documentToken: diagnostics.documentToken });

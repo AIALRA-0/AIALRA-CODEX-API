@@ -358,8 +358,39 @@ function temporaryChatControls() {
   );
 }
 
+function temporaryChatUrlEnabled() {
+  try {
+    const url = new URL(window.location.href);
+    return (
+      url.origin === "https://chatgpt.com" &&
+      url.pathname === "/" &&
+      url.searchParams.get("temporary-chat") === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function temporaryChatSemanticMarker() {
+  return [
+    ...document.querySelectorAll(
+      "main h1, main h2, main [role='heading'], [contenteditable='true'], textarea",
+    ),
+  ].some((element) => {
+    const marker = normalizedText(
+      [
+        visibleText(element),
+        element.getAttribute("aria-label") ?? "",
+        element.getAttribute("data-placeholder") ?? "",
+        element.getAttribute("placeholder") ?? "",
+      ].join(" "),
+    );
+    return /(^|\s)(temporary chat|临时聊天)(\s|$)/i.test(marker);
+  });
+}
+
 function temporaryChatEnabled() {
-  return temporaryChatControls().some((element) => {
+  const explicitControlState = temporaryChatControls().some((element) => {
     const label = `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`;
     const explicitState =
       element.getAttribute("aria-pressed") === "true" ||
@@ -372,14 +403,37 @@ function temporaryChatEnabled() {
       )
     );
   });
+  return explicitControlState || (temporaryChatUrlEnabled() && temporaryChatSemanticMarker());
 }
 
 function temporaryChatPersonalized() {
   if (!temporaryChatEnabled()) return null;
-  const pageText = normalizedText(document.body?.innerText ?? "").toLowerCase();
-  return /personalized temporary chat|temporary chat.*personalized|个性化临时聊天|临时聊天.*个性化/i.test(
-    pageText,
-  );
+  const labels = [...document.querySelectorAll("button, [role='button'], [role='menuitem']")]
+    .map((element) =>
+      normalizedText(
+        `${element.getAttribute("aria-label") ?? ""} ${element.getAttribute("title") ?? ""} ${visibleText(element)}`,
+      ),
+    )
+    .filter(Boolean);
+  if (
+    labels.some((label) =>
+      /unpersonalized|non-personalized|not personalized|without personalization|不使用个性化|非个性化|不启用个性化/i.test(
+        label,
+      ),
+    )
+  ) {
+    return false;
+  }
+  if (
+    labels.some((label) =>
+      /(^|\s)personalized(\s|$)|personalization enabled|个性化临时聊天|临时聊天.*个性化/i.test(
+        label,
+      ),
+    )
+  ) {
+    return true;
+  }
+  return null;
 }
 
 async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
