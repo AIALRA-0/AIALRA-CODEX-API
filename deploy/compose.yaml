@@ -50,6 +50,8 @@ services:
       AUTHENTIK_TRUST_PROXY: ${AUTHENTIK_TRUST_PROXY:-false}
       AUTHENTIK_REQUIRED_GROUP: ${AUTHENTIK_REQUIRED_GROUP:-aialra:access:model-router}
       JOB_SUBMISSION_ENABLED: ${JOB_SUBMISSION_ENABLED:-true}
+      CHATGPT_WEB_ADAPTER_ENABLED: ${CHATGPT_WEB_ADAPTER_ENABLED:-false}
+      SESSION_THREAD_TTL_MS: ${SESSION_THREAD_TTL_MS:-86400000}
       INTERNAL_PROXY_SECRET_FILE: /run/secrets/internal_proxy_secret
     secrets:
       - database_url
@@ -145,12 +147,21 @@ services:
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
       PAYLOAD_MASTER_KEY_FILE: /run/secrets/payload_master_key
+      RUNNER_API_TOKEN_FILE: /run/secrets/runner_api_token
       RUNNER_URL: http://runner:13214
       CODEX_MAX_CONCURRENCY: ${CODEX_MAX_CONCURRENCY:-1}
+      CHATGPT_WEB_ADAPTER_ENABLED: ${CHATGPT_WEB_ADAPTER_ENABLED:-false}
+      CHATGPT_BRIDGE_URL: http://chatgpt-browser:13216
+      CHATGPT_BRIDGE_API_TOKEN_FILE: /run/secrets/chatgpt_bridge_api_token
+      CHATGPT_WEB_DIAGNOSTIC_TOKEN_FILE: /run/secrets/chatgpt_web_diagnostic_token
+      SESSION_THREAD_TTL_MS: ${SESSION_THREAD_TTL_MS:-86400000}
       METRICS_PORT: 13212
     secrets:
       - database_url
       - payload_master_key
+      - runner_api_token
+      - chatgpt_bridge_api_token
+      - chatgpt_web_diagnostic_token
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m,uid=${ROUTER_UID:-1000},gid=${ROUTER_GID:-1000}
     depends_on:
@@ -161,6 +172,7 @@ services:
     networks:
       - backend
       - runner_control
+      - chatgpt_control
       - metrics
     ports:
       - "127.0.0.1:13212:13212"
@@ -197,8 +209,12 @@ services:
       CODEX_BIN: codex
       CODEX_HOME: /codex-auth
       CODEX_PERSIST_SESSIONS: "false"
+      CODEX_SESSION_TTL_MS: ${CODEX_SESSION_TTL_MS:-86400000}
       RUNNER_MAX_CONCURRENCY: ${CODEX_MAX_CONCURRENCY:-1}
       RUNNER_PORT: 13214
+      RUNNER_API_TOKEN_FILE: /run/secrets/runner_api_token
+    secrets:
+      - runner_api_token
     volumes:
       - ${CODEX_AUTH_DIR:?Set CODEX_AUTH_DIR to the dedicated Codex home}:/codex-auth
     tmpfs:
@@ -229,6 +245,101 @@ services:
     cap_drop:
       - ALL
 
+  chatgpt-browser:
+    profiles: ["chatgpt-web"]
+    image: ${CHATGPT_BROWSER_IMAGE:-ghcr.io/aialra-0/aialra-model-router-chatgpt-browser:0.1.0}
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      target: chatgpt-browser
+    restart: unless-stopped
+    group_add:
+      - "${ROUTER_GID:-1000}"
+    environment:
+      CHATGPT_WEB_ADAPTER_ENABLED: ${CHATGPT_WEB_ADAPTER_ENABLED:-false}
+      CHATGPT_WEB_DIAGNOSTIC_ENABLED: ${CHATGPT_WEB_DIAGNOSTIC_ENABLED:-false}
+      CHATGPT_WEB_MAX_CONCURRENCY: ${CHATGPT_WEB_MAX_CONCURRENCY:-1}
+      CHATGPT_WEB_MIN_DISPATCH_INTERVAL_MS: ${CHATGPT_WEB_MIN_DISPATCH_INTERVAL_MS:-90000}
+      CHATGPT_WEB_DEFAULT_MODEL_LABEL: ${CHATGPT_WEB_DEFAULT_MODEL_LABEL:-}
+      CHATGPT_CHROMIUM_NO_SANDBOX: ${CHATGPT_CHROMIUM_NO_SANDBOX:-false}
+      CHATGPT_BROWSER_EXTENSION_ENABLED: ${CHATGPT_BROWSER_EXTENSION_ENABLED:-true}
+      CHATGPT_BRIDGE_PORT: 13216
+      CHATGPT_BRIDGE_API_TOKEN_FILE: /run/secrets/chatgpt_bridge_api_token
+      CHATGPT_WEB_DIAGNOSTIC_TOKEN_FILE: /run/secrets/chatgpt_web_diagnostic_token
+    secrets:
+      - chatgpt_bridge_api_token
+      - chatgpt_web_diagnostic_token
+      - chatgpt_vnc_password
+    depends_on:
+      chatgpt-egress-proxy:
+        condition: service_healthy
+    volumes:
+      - chatgpt_browser_profile:/opt/aialra-browser-home/.config/chromium
+    tmpfs:
+      - /tmp:rw,nosuid,size=512m,uid=1100,gid=1100
+      - /run/aialra-chatgpt-bridge:rw,noexec,nosuid,size=1m,uid=1100,gid=1100
+      - /run/aialra-chatgpt-extension:rw,noexec,nosuid,size=8m,uid=1100,gid=1100
+      - /opt/aialra-browser-home/.cache:rw,noexec,nosuid,size=256m,uid=1100,gid=1100
+      - /opt/aialra-browser-home/.local:rw,noexec,nosuid,size=32m,uid=1100,gid=1100
+      - /opt/aialra-browser-home/.vnc:rw,noexec,nosuid,size=1m,uid=1100,gid=1100
+      - /opt/aialra-browser-home/Downloads:rw,noexec,nosuid,size=64m,uid=1100,gid=1100
+    networks:
+      chatgpt_control:
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP:-10.253.240.2}
+      chatgpt_proxy: {}
+    read_only: true
+    shm_size: 1g
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:13216/healthz').then(r=>process.exit([200,503].includes(r.status)?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 3g
+    cpus: 2.0
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=${CHATGPT_BROWSER_SECCOMP_PROFILE:-/etc/aialra-model-router/chromium-seccomp.json}
+      - apparmor=aialra-chatgpt-browser
+    cap_drop:
+      - ALL
+
+  chatgpt-egress-proxy:
+    profiles: ["chatgpt-web"]
+    image: ${CHATGPT_EGRESS_PROXY_IMAGE:-ghcr.io/aialra-0/aialra-model-router-chatgpt-egress-proxy:0.1.0}
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      target: chatgpt-egress-proxy
+    restart: unless-stopped
+    networks:
+      - chatgpt_proxy
+      - chatgpt_egress
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /run:rw,noexec,nosuid,size=8m,uid=13,gid=13
+      - /var/log/squid:rw,noexec,nosuid,size=32m,uid=13,gid=13
+      - /var/spool/squid:rw,noexec,nosuid,size=64m,uid=13,gid=13
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/squid.pid"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
 networks:
   frontend:
     name: aialra_router_frontend
@@ -238,6 +349,23 @@ networks:
   runner_control:
     name: aialra_router_runner_control
     internal: true
+  chatgpt_control:
+    name: aialra_router_chatgpt_control
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CHATGPT_CONTROL_SUBNET:-10.253.240.0/28}
+  chatgpt_proxy:
+    name: aialra_router_chatgpt_proxy
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CHATGPT_PROXY_SUBNET:-10.253.240.16/28}
+  chatgpt_egress:
+    name: aialra_router_chatgpt_egress
+    ipam:
+      config:
+        - subnet: ${CHATGPT_EGRESS_SUBNET:-10.253.240.32/28}
   codex_egress:
     name: aialra_router_codex_egress
   metrics:
@@ -246,6 +374,8 @@ networks:
 volumes:
   router_postgres:
     name: aialra_router_postgres
+  chatgpt_browser_profile:
+    name: aialra_router_chatgpt_browser_profile
 
 secrets:
   postgres_password:
@@ -264,3 +394,11 @@ secrets:
     file: ${SECRETS_DIR:-./secrets}/internal_proxy_secret
   edge_proxy_secret:
     file: ${SECRETS_DIR:-./secrets}/edge_proxy_secret
+  runner_api_token:
+    file: ${SECRETS_DIR:-./secrets}/runner_api_token
+  chatgpt_bridge_api_token:
+    file: ${SECRETS_DIR:-./secrets}/chatgpt_bridge_api_token
+  chatgpt_web_diagnostic_token:
+    file: ${SECRETS_DIR:-./secrets}/chatgpt_web_diagnostic_token
+  chatgpt_vnc_password:
+    file: ${SECRETS_DIR:-./secrets}/chatgpt_vnc_password

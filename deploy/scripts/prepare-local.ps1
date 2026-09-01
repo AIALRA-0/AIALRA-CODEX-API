@@ -41,6 +41,10 @@ $secrets = @{
   bootstrap_admin_token = New-RandomBase64Url 32
   internal_proxy_secret = New-RandomBase64Url 48
   edge_proxy_secret = New-RandomBase64Url 48
+  runner_api_token = New-RandomBase64Url 48
+  chatgpt_bridge_api_token = New-RandomBase64Url 48
+  chatgpt_web_diagnostic_token = New-RandomBase64Url 48
+  chatgpt_vnc_password = New-RandomBase64Url 24
 }
 foreach ($entry in $secrets.GetEnumerator()) {
   [IO.File]::WriteAllText((Join-Path $secretRoot $entry.Key), $entry.Value, $utf8)
@@ -51,6 +55,15 @@ $environment = @(
   "SECRETS_DIR=./secrets"
   "CODEX_AUTH_DIR=$($resolvedCodexAuthDir.Path -replace '\\', '/')"
   "CODEX_MAX_CONCURRENCY=1"
+  "CHATGPT_WEB_ADAPTER_ENABLED=false"
+  "CHATGPT_WEB_DIAGNOSTIC_ENABLED=false"
+  "CHATGPT_WEB_MAX_CONCURRENCY=1"
+  "CHATGPT_CHROMIUM_NO_SANDBOX=false"
+  "CHATGPT_BROWSER_SECCOMP_PROFILE=./chatgpt-browser/chromium-seccomp.json"
+  "CHATGPT_BROWSER_CONTROL_IP=10.253.240.2"
+  "CHATGPT_CONTROL_SUBNET=10.253.240.0/28"
+  "CHATGPT_PROXY_SUBNET=10.253.240.16/28"
+  "CHATGPT_EGRESS_SUBNET=10.253.240.32/28"
   "WEBAUTHN_RP_ID=localhost"
   "WEBAUTHN_ORIGIN=http://localhost:13211"
   "SESSION_COOKIE_SECURE=false"

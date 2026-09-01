@@ -36,6 +36,10 @@ write_secret_once session_pepper "$(openssl rand -base64 48 | tr -d '\n')"
 write_secret_once bootstrap_admin_token "$(openssl rand -base64 32 | tr -d '\n')"
 write_secret_once internal_proxy_secret "$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 64)"
 write_secret_once edge_proxy_secret "$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 64)"
+write_secret_once runner_api_token "$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 64)"
+write_secret_once chatgpt_bridge_api_token "$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 64)"
+write_secret_once chatgpt_web_diagnostic_token "$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 64)"
+write_secret_once chatgpt_vnc_password "$(openssl rand -base64 24 | tr -d '\n/+=' | head -c 24)"
 
 router_uid="$(id -u "$ROUTER_USER")"
 router_gid="$(id -g "$ROUTER_USER")"
@@ -50,6 +54,15 @@ AUTH_MODE=authentik
 AUTHENTIK_TRUST_PROXY=true
 AUTHENTIK_REQUIRED_GROUP=aialra:access:model-router
 JOB_SUBMISSION_ENABLED=false
+CHATGPT_WEB_ADAPTER_ENABLED=false
+CHATGPT_WEB_DIAGNOSTIC_ENABLED=false
+CHATGPT_WEB_MAX_CONCURRENCY=1
+CHATGPT_CHROMIUM_NO_SANDBOX=false
+CHATGPT_BROWSER_SECCOMP_PROFILE=/etc/aialra-model-router/chromium-seccomp.json
+CHATGPT_BROWSER_CONTROL_IP=10.253.240.2
+CHATGPT_CONTROL_SUBNET=10.253.240.0/28
+CHATGPT_PROXY_SUBNET=10.253.240.16/28
+CHATGPT_EGRESS_SUBNET=10.253.240.32/28
 WEBAUTHN_RP_ID=$ROUTER_HOST
 WEBAUTHN_ORIGIN=https://$ROUTER_HOST
 SESSION_COOKIE_SECURE=true
@@ -57,3 +70,4 @@ EOF
 
 echo "Production secrets and environment are ready"
 echo "Codex jobs remain disabled until the dedicated login and isolation canary pass"
+echo "The ChatGPT web experiment remains disabled until the visible-browser probe passes"

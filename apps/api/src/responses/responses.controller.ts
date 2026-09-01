@@ -35,25 +35,60 @@ export class ResponsesController {
       return;
     }
     const value = parsed.data;
-    const model = ["auto", "luna", "terra", "sol"].includes(value.model)
-      ? (value.model as "auto" | "luna" | "terra" | "sol")
-      : "auto";
+    const executionChannel =
+      value.aialra?.execution_channel ??
+      (value.model.startsWith("chatgpt-web.") ? "chatgpt_web" : "codex");
+    const chatgptMode = value.aialra?.chatgpt_mode ?? "chat";
+    const deadlineMs =
+      value.aialra?.deadline_ms ??
+      (executionChannel === "chatgpt_web"
+        ? chatgptMode === "deep_research"
+          ? 3_600_000
+          : 600_000
+        : 120_000);
     const task = TaskContractSchema.parse({
       objective: [value.instructions, inputToText(value.input)].filter(Boolean).join("\n\n"),
       taskKind: value.text?.format?.type === "json_schema" ? "bounded" : "general",
       expectedOutput: "Return the final response for the caller.",
       validation: {
         responseSchema: value.text?.format?.schema,
+        checks: [],
         acceptanceTests: [],
       },
-      model,
+      permissions: value.aialra?.permission_preset
+        ? { preset: value.aialra.permission_preset }
+        : undefined,
+      model: value.model,
       effort: value.reasoning?.effort ?? "medium",
-      budget: { maxOutputTokens: value.max_output_tokens ?? 8_192, maxAttempts: 2 },
+      executionChannel,
+      chatgptWeb:
+        executionChannel === "chatgpt_web"
+          ? {
+              mode: chatgptMode,
+              conversationMode: value.aialra?.conversation_mode ?? "temporary_per_request",
+              temporaryChat: value.aialra?.temporary_chat ?? true,
+              personalized: false,
+              requireSources: value.aialra?.require_sources ?? chatgptMode !== "chat",
+            }
+          : undefined,
+      sessionKey: value.aialra?.session_key,
+      sessionMode:
+        executionChannel === "chatgpt_web"
+          ? "ephemeral"
+          : (value.aialra?.session_mode ??
+            (value.aialra?.session_key ? "persistent" : "ephemeral")),
+      deadlineMs,
+      budget: {
+        maxOutputTokens: value.max_output_tokens ?? 8_192,
+        maxAttempts: executionChannel === "chatgpt_web" ? 1 : 2,
+      },
     });
     const job = await this.jobs.create(
       { task, metadata: value.metadata },
       request.callerId ?? "unknown",
       idempotencyKey,
+      request.executionPolicy,
+      request.scopes ?? [],
     );
 
     if (value.stream) {
@@ -67,7 +102,7 @@ export class ResponsesController {
         object: "response",
         status: "in_progress",
         model: job.task.model,
-        metadata: { job_id: job.id },
+        metadata: { job_id: job.id, session_key: job.task.sessionKey ?? null },
       };
       response.write(`event: response.created\n`);
       response.write(`data: ${JSON.stringify(created)}\n\n`);
@@ -118,7 +153,7 @@ export class ResponsesController {
         ? { code: completed.errorCode, message: completed.errorMessage }
         : null,
       usage: completed.usage,
-      metadata: { job_id: completed.id },
+      metadata: { job_id: completed.id, session_key: completed.task.sessionKey ?? null },
     });
   }
 }

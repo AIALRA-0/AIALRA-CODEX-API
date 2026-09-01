@@ -23,6 +23,7 @@ backups/
 tmp/
 *.log
 output/
+.artifacts/
 .playwright-cli/
 
 # Editor and operating-system files

@@ -1,0 +1,264 @@
+{
+  "meta": {
+    "contract_version": "1.0",
+    "title": "ChatGPT Pro 可见网页桥接阶段检查",
+    "mode": "checkpoint",
+    "as_of": "2026-08-28",
+    "status": "complete",
+    "scope": "只判断是否可以继续本地可逆实现和合成测试，不批准生产启用或 GitHub 发布",
+    "exclusions": [
+      "不读取 Cookie 或网页登录令牌",
+      "不调用私有 backend-api",
+      "不绕过验证码或反自动化保护",
+      "不批准生产启用"
+    ]
+  },
+  "decision_problem": {
+    "project_classification": "公开仓库中的默认关闭实验适配器",
+    "risk_level": "high",
+    "decision_owner": "仓库所有者",
+    "desired_outcome": "在不提取网页凭据的条件下验证可见浏览器桥接能否可靠返回明确归属的最终正文",
+    "current_state": "本地协议、扩展、合成页面、Router 契约和可选部署结构已经建立，真实 ChatGPT 网页探针尚未运行",
+    "decision": "是否允许继续本地可逆实现，同时把生产启用和公开发布留给后续深度门禁",
+    "success_metrics": [
+      "合成页面重复发送为 0",
+      "合成页面错误任务归属为 0",
+      "真实网页探针至少 9/10 成功后才允许启用",
+      "实验功能默认关闭"
+    ],
+    "constraints": [
+      "专用可见浏览器",
+      "管理员手动登录和处理验证",
+      "最小扩展权限",
+      "不自动重试已发送任务"
+    ],
+    "irreversible_actions": ["生产启用", "向公开远端推送", "把实验通道宣传为稳定接口"],
+    "research_budget": {
+      "overall_limit": "本轮完成本地实现、合成测试和容器验证后停止",
+      "parallel_capacity": 0,
+      "paid_or_private_access": ["当前仓库", "公开官方文档"],
+      "cutoff_policy": "缺少真实网页结果时保持功能关闭，不外推稳定性"
+    },
+    "reversal_evidence": ["任意错误任务归属", "任意重复发送", "账号警告", "连续 3 次页面识别失败"]
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "可见网页桥接是否足以支持继续本地实验而不批准生产启用",
+      "critical": true,
+      "internal_probe": "运行桥接协议、扩展认证和合成 DOM 任务归属测试",
+      "internal_status": "answered",
+      "internal_source_ids": ["S1", "S2"],
+      "external_probe": "核对 OpenAI 条款边界和 Chrome 扩展 WebSocket 生命周期文档",
+      "external_status": "answered",
+      "external_source_ids": ["S3", "S4"],
+      "internal_gap": "",
+      "external_gap": ""
+    }
+  ],
+  "source_map": [
+    {
+      "id": "M1",
+      "question_ids": ["Q1"],
+      "origin": "internal",
+      "channel": "仓库代码与自动测试",
+      "target": "桥接服务、Chrome 扩展和合成 DOM 契约",
+      "decision_use": "证明本地实现可以区分任务并拒绝不完整结果",
+      "priority": "high",
+      "access_status": "searched"
+    },
+    {
+      "id": "M2",
+      "question_ids": ["Q1"],
+      "origin": "external",
+      "channel": "官方产品和浏览器扩展文档",
+      "target": "OpenAI Terms of Use 与 Chrome WebSocket 指南",
+      "decision_use": "限制实现边界并确认扩展连接机制",
+      "priority": "high",
+      "access_status": "searched"
+    }
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "origin": "internal",
+      "title": "ChatGPT 网页桥接实现",
+      "location": "apps/chatgpt-bridge",
+      "source_type": "source-code",
+      "date": "2026-08-28",
+      "accessed_at": "2026-08-28",
+      "applicability": "直接说明桥接认证、标签绑定、单次发送和正文稳定规则",
+      "limitations": "代码存在不能证明真实 ChatGPT 页面长期兼容",
+      "retrieval_method": "读取当前工作树并运行类型检查和单元测试",
+      "observed_content": "扩展不申请 Cookie 权限，桥接只接受回环扩展连接，已发送任务没有自动重试",
+      "direct": true,
+      "independence_group": "current-repository"
+    },
+    {
+      "id": "S2",
+      "origin": "internal",
+      "title": "合成 DOM 浏览器探针",
+      "location": "apps/chatgpt-bridge/test/fixtures/chatgpt-synthetic.html",
+      "source_type": "test-observation",
+      "date": "2026-08-28",
+      "accessed_at": "2026-08-28",
+      "applicability": "验证模型发现、任务回显、生成结束、正文稳定和来源提取",
+      "limitations": "合成页面不能证明真实账号登录、验证码、搜索和深度研究流程",
+      "retrieval_method": "使用真实 Chromium 加载本地合成页面并执行内容脚本",
+      "observed_content": "单次发送后返回 SYNTHETIC_WEB_OK 和 1 个公网来源",
+      "direct": true,
+      "independence_group": "current-repository-tests"
+    },
+    {
+      "id": "S3",
+      "origin": "external",
+      "title": "OpenAI Terms of Use",
+      "location": "https://openai.com/policies/terms-of-use/",
+      "source_type": "official-doc",
+      "date": "2026-01-01",
+      "accessed_at": "2026-08-28",
+      "applicability": "约束网页自动化、程序化提取和保护规避",
+      "limitations": "本记录不是法律意见，条款日期需要在生产启用前重新核对",
+      "retrieval_method": "打开官方条款页面并核对自动提取和保护措施条款",
+      "observed_content": "官方条款禁止自动或程序化提取数据或输出并禁止规避保护措施",
+      "direct": true,
+      "independence_group": "openai-policy"
+    },
+    {
+      "id": "S4",
+      "origin": "external",
+      "title": "Chrome 扩展 Service Worker WebSocket 指南",
+      "location": "https://developer.chrome.com/docs/extensions/how-to/web-platform/websockets",
+      "source_type": "official-doc",
+      "date": "2024-02-26",
+      "accessed_at": "2026-08-28",
+      "applicability": "说明 Manifest V3 扩展维持本地 WebSocket 连接的官方机制",
+      "limitations": "不证明 ChatGPT 页面选择器或服务条款允许性",
+      "retrieval_method": "打开 Chrome for Developers 官方页面",
+      "observed_content": "Chrome 116 起通过短于 30 秒的 WebSocket 活动可以延长扩展 Service Worker 生命周期",
+      "direct": true,
+      "independence_group": "chrome-documentation"
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "statement": "当前证据足以继续默认关闭的本地可逆实验，不能批准生产启用或稳定性宣传",
+      "kind": "inference",
+      "impact": "high",
+      "confidence": "medium",
+      "support_source_ids": ["S1", "S2", "S4"],
+      "contradict_source_ids": ["S3"],
+      "falsifier": "合成探针出现重复发送或任务串线，或者真实网页探针低于 9/10 成功"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "A1",
+      "statement": "真实 ChatGPT 页面仍提供可识别的编辑器、发送状态和最终消息区域",
+      "critical": true,
+      "status": "untested",
+      "decision_impact": "若不成立则实验通道不能在 VPS 创建任务",
+      "falsifier": "只读页面探针无法识别任一必要元素",
+      "support_source_ids": [],
+      "contradict_source_ids": []
+    }
+  ],
+  "search_branches": [
+    {
+      "name": "adjacent",
+      "status": "pending",
+      "reason": "公开发布前进入深度审计",
+      "round_ids": []
+    },
+    {
+      "name": "code",
+      "status": "pending",
+      "reason": "已有种子候选，公开发布前核对实际能力和许可",
+      "round_ids": []
+    },
+    {
+      "name": "failure",
+      "status": "pending",
+      "reason": "公开发布前扩展页面改版和账号限制案例",
+      "round_ids": []
+    },
+    {
+      "name": "mechanism",
+      "status": "pending",
+      "reason": "公开发布前核对浏览器桥接和扩展机制",
+      "round_ids": []
+    },
+    {
+      "name": "patent",
+      "status": "pending",
+      "reason": "本阶段不作权利结论",
+      "round_ids": []
+    },
+    {
+      "name": "problem",
+      "status": "pending",
+      "reason": "公开发布前核对同类个人订阅桥接需求",
+      "round_ids": []
+    },
+    {
+      "name": "product",
+      "status": "pending",
+      "reason": "公开发布前核对可直接替代的产品",
+      "round_ids": []
+    },
+    {
+      "name": "research",
+      "status": "pending",
+      "reason": "公开发布前核对浏览器自动化可靠性研究",
+      "round_ids": []
+    }
+  ],
+  "search_rounds": [],
+  "candidates": [],
+  "novelty": {
+    "applicable": false,
+    "applicability_reason": "本阶段只决定是否继续本地可逆实验，不形成原创性或公开发布结论",
+    "assessment": "not-assessed",
+    "stop_reason": "not-applicable",
+    "saturation_round_ids": [],
+    "languages": [],
+    "regions": [],
+    "access_gaps": [
+      {
+        "resource": "真实 ChatGPT 网页 10 项探针",
+        "impact": "阻止生产启用和稳定性判断",
+        "critical": true
+      }
+    ],
+    "scope_statement": "仅记录当前代码、合成浏览器测试和两项官方边界资料"
+  },
+  "perspectives": [],
+  "real_world_validations": [],
+  "alignment_questions": [
+    {
+      "id": "U1",
+      "question": "是否允许在真实网页探针通过前启用生产实验通道",
+      "decision_changing": true,
+      "status": "defaulted",
+      "default_value": "保持关闭"
+    }
+  ],
+  "recommendation": {
+    "verdict": "proceed",
+    "action": "继续本地实现、合成测试和容器验证；保持生产开关关闭，不向 GitHub 推送",
+    "rationale": "内部测试支持继续低成本可逆实验，真实网页兼容性和条款风险仍未关闭",
+    "strongest_counterevidence": "官方条款限制程序化提取，真实页面和账号行为尚未验收",
+    "minimum_test": "在 VPS 可见浏览器运行 4 个聊天、4 个搜索和 2 个深度研究匿名任务",
+    "failure_response": "任意串线、重复发送、账号警告或低于 9/10 成功时关闭通道并保留 Codex 稳定通道",
+    "reversal_condition": "官方提供正式订阅执行接口，或者真实网页门槛无法达到",
+    "support_source_ids": ["S1", "S2", "S4"],
+    "counter_source_ids": ["S3"]
+  },
+  "review_triggers": [
+    "准备向公开 GitHub 远端推送前升级为 deep 审计",
+    "准备在 VPS 将 CHATGPT_WEB_ADAPTER_ENABLED 改为 true",
+    "ChatGPT 页面、条款或账号警告发生变化",
+    "任意重复发送或错误任务归属"
+  ]
+}

@@ -15,9 +15,16 @@ import {
   Req,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
-import { TaskContractSchema, type RuntimeModel } from "@aialra/contracts";
+import {
+  ChatGptWebQualificationRunSchema,
+  ChatGptWebQualificationSuiteSchema,
+  TaskContractSchema,
+  type ChatGptWebQualificationItem,
+  type RuntimeModel,
+} from "@aialra/contracts";
 import type { JobRepository } from "@aialra/persistence";
 import { requestHash } from "@aialra/security";
 
@@ -25,8 +32,60 @@ import type { AuthenticatedRequest } from "../common/api-key.guard.js";
 import { zodHttpError } from "../common/http-errors.js";
 import { RequireScopes } from "../common/scopes.decorator.js";
 import { JobsService } from "../jobs/jobs.service.js";
+import type { JobQueue } from "../queue/job-queue.js";
 import { QuotaService } from "../quota/quota.service.js";
-import { JOB_REPOSITORY } from "../tokens.js";
+import { JOB_QUEUE, JOB_REPOSITORY } from "../tokens.js";
+
+function qualificationRunId(actorId: string, idempotencyKey: string): string {
+  const bytes = createHash("sha256")
+    .update(`${actorId}\0${idempotencyKey}`)
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function qualificationItems(suite: z.infer<typeof ChatGptWebQualificationSuiteSchema>) {
+  const definitions =
+    suite === "readiness"
+      ? []
+      : suite === "chat_3"
+        ? Array.from({ length: 3 }, (_, index) => [`chat-${index + 1}`, "chat"] as const)
+        : suite === "chat_10"
+          ? Array.from({ length: 10 }, (_, index) => [`chat-${index + 1}`, "chat"] as const)
+          : suite === "deep_2"
+            ? Array.from(
+                { length: 2 },
+                (_, index) => [`deep-${index + 1}`, "deep_research"] as const,
+              )
+            : [
+                ...Array.from({ length: 4 }, (_, index) => [`chat-${index + 1}`, "chat"] as const),
+                ...Array.from(
+                  { length: 4 },
+                  (_, index) => [`search-${index + 1}`, "search"] as const,
+                ),
+                ...Array.from(
+                  { length: 2 },
+                  (_, index) => [`deep-${index + 1}`, "deep_research"] as const,
+                ),
+              ];
+  return definitions.map(([name, mode], index): ChatGptWebQualificationItem => ({
+    index: index + 1,
+    name,
+    mode,
+    status: "pending",
+    durationMs: null,
+    outputLength: null,
+    outputSha256: null,
+    sourceCount: null,
+    errorCode: null,
+    submittedCount: 0,
+    recoveryCount: 0,
+    ownershipMatched: null,
+  }));
+}
 
 @Controller("api/v1")
 export class GovernanceController {
@@ -34,10 +93,12 @@ export class GovernanceController {
     @Inject(JobsService) private readonly jobs: JobsService,
     @Inject(QuotaService) private readonly quota: QuotaService,
     @Inject(JOB_REPOSITORY) private readonly repository: JobRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   private async modelCatalog(): Promise<RuntimeModel[]> {
     const runtime = await this.repository.latestModelCatalog();
+    const webStatus = await this.repository.readChatGptWebStatus();
     const settings = new Map(
       (await this.repository.listModelSettings()).map((setting) => [
         setting.modelId,
@@ -97,23 +158,39 @@ export class GovernanceController {
         "USD",
         "https://developers.openai.com/api/docs/models/compare",
       );
+      const provider = found?.provider ?? "codex";
       return {
         ...(found ?? {
           id,
           displayName,
+          provider: "codex" as const,
           available: false,
           hidden: false,
           isDefault: false,
           supportedReasoningEfforts: [],
           defaultReasoningEffort: null,
           inputModalities: ["text"],
+          streamingMode: "delta" as const,
           discoveredAt: runtime?.fetchedAt ?? new Date(0).toISOString(),
         }),
         displayName,
+        available:
+          provider === "chatgpt_web"
+            ? Boolean(
+                found?.available &&
+                webStatus.configuredEnabled &&
+                webStatus.effectiveConcurrency > 0 &&
+                webStatus.circuitState === "closed" &&
+                ["clear", "observation"].includes(webStatus.rateLimitState),
+              )
+            : (found?.available ?? false),
         enabled: settings.get(id) ?? false,
-        creditRate,
-        apiRate,
-        rateStatus: creditRate && apiRate ? ("available" as const) : ("unavailable" as const),
+        creditRate: found?.provider === "chatgpt_web" ? null : creditRate,
+        apiRate: found?.provider === "chatgpt_web" ? null : apiRate,
+        rateStatus:
+          found?.provider !== "chatgpt_web" && creditRate && apiRate
+            ? ("available" as const)
+            : ("unavailable" as const),
       };
     });
   }
@@ -145,7 +222,7 @@ export class GovernanceController {
     }
     if (parsed.data.enabled && !model.available) {
       throw new ConflictException({
-        error: { code: "model_unavailable", message: "当前 Codex 账号无法使用该模型。" },
+        error: { code: "model_unavailable", message: "当前执行通道无法使用该模型。" },
       });
     }
     try {
@@ -184,22 +261,170 @@ export class GovernanceController {
     return this.quota.read();
   }
 
+  @Get("chatgpt-web/status")
+  @RequireScopes("admin")
+  async chatGptWebStatus() {
+    const status = await this.repository.readChatGptWebStatus();
+    const cooldownRetryAfter = status.cooldownUntil
+      ? Math.max(0, Math.ceil((new Date(status.cooldownUntil).getTime() - Date.now()) / 1_000))
+      : status.retryAfter;
+    const recoveryRetryAfter = status.lastSubmissionAt
+      ? Math.max(
+          1,
+          90 - Math.floor((Date.now() - new Date(status.lastSubmissionAt).getTime()) / 1_000),
+        )
+      : 90;
+    return {
+      ...status,
+      retryAfter:
+        status.rateLimitState === "cooldown"
+          ? cooldownRetryAfter
+          : status.rateLimitState === "recovery_probe"
+            ? recoveryRetryAfter
+            : null,
+    };
+  }
+
+  @Post("chatgpt-web/qualification-runs")
+  @RequireScopes("admin")
+  async createChatGptWebQualificationRun(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException({
+        error: { code: "idempotency_key_required", message: "Idempotency-Key is required." },
+      });
+    }
+    const parsed = z.object({ suite: ChatGptWebQualificationSuiteSchema }).strict().safeParse(body);
+    if (!parsed.success) throw zodHttpError(parsed.error);
+    const actorId = request.callerId ?? "unknown";
+    const id = qualificationRunId(actorId, idempotencyKey);
+    const existing = await this.repository.findChatGptWebQualificationRun(id);
+    if (existing) {
+      if (existing.suite !== parsed.data.suite) {
+        throw new ConflictException({
+          error: { code: "idempotency_conflict", message: "该幂等键已用于另一种验收套件。" },
+        });
+      }
+      return { ...existing, replayed: true };
+    }
+    const activeRun = (await this.repository.listChatGptWebQualificationRuns(100)).find(
+      (candidate) => candidate.status === "accepted" || candidate.status === "running",
+    );
+    if (activeRun) {
+      throw new ConflictException({
+        error: {
+          code: "qualification_in_progress",
+          message: "已有一组 ChatGPT 网页验收正在运行",
+          activeRunId: activeRun.id,
+        },
+      });
+    }
+    const now = new Date().toISOString();
+    const items = qualificationItems(parsed.data.suite);
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id,
+      suite: parsed.data.suite,
+      status: "accepted",
+      total: items.length,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items,
+      errorCode: null,
+      createdBy: actorId,
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+    try {
+      await this.repository.createChatGptWebQualificationRun(run);
+    } catch {
+      const replay = await this.repository.findChatGptWebQualificationRun(id);
+      if (replay?.suite === parsed.data.suite) return { ...replay, replayed: true };
+      const concurrentRun = (await this.repository.listChatGptWebQualificationRuns(100)).find(
+        (candidate) => candidate.status === "accepted" || candidate.status === "running",
+      );
+      if (concurrentRun) {
+        throw new ConflictException({
+          error: {
+            code: "qualification_in_progress",
+            message: "已有一组 ChatGPT 网页验收正在运行",
+            activeRunId: concurrentRun.id,
+          },
+        });
+      }
+      throw new ConflictException({
+        error: { code: "idempotency_conflict", message: "该幂等键发生冲突。" },
+      });
+    }
+    await this.queue.enqueueChatGptWebQualification(id);
+    await this.repository.appendAudit({
+      id: randomUUID(),
+      actorId,
+      action: "chatgpt_web.qualification_started",
+      resourceType: "chatgpt_web_qualification",
+      resourceId: id,
+      metadata: { suite: parsed.data.suite },
+      createdAt: now,
+    });
+    return { ...run, replayed: false };
+  }
+
+  @Get("chatgpt-web/qualification-runs")
+  @RequireScopes("admin")
+  async listChatGptWebQualificationRuns(
+    @Query("limit", new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return { data: await this.repository.listChatGptWebQualificationRuns(limit) };
+  }
+
+  @Get("chatgpt-web/qualification-runs/:id")
+  @RequireScopes("admin")
+  async chatGptWebQualificationRun(@Param("id") id: string) {
+    const run = await this.repository.findChatGptWebQualificationRun(id);
+    if (!run) {
+      throw new NotFoundException({
+        error: { code: "qualification_run_not_found", message: "找不到这次验收运行。" },
+      });
+    }
+    return run;
+  }
+
   @Get("usage")
   @RequireScopes("jobs:read")
   async usage() {
     const jobs = await this.jobs.list(500);
     const acceptedTasks = jobs.filter((job) => job.status === "succeeded").length;
-    const codexCredits = jobs.reduce((sum, job) => sum + (job.usage.codexCredits ?? 0), 0);
-    const apiEquivalentUsd = jobs.reduce(
+    const succeededCodexJobs = jobs.filter(
+      (job) => job.status === "succeeded" && job.task.executionChannel !== "chatgpt_web",
+    );
+    const succeededChatGptWebJobs = jobs.filter(
+      (job) => job.status === "succeeded" && job.task.executionChannel === "chatgpt_web",
+    );
+    const codexCredits = succeededCodexJobs.reduce(
+      (sum, job) => sum + (job.usage.codexCredits ?? 0),
+      0,
+    );
+    const apiEquivalentUsd = succeededCodexJobs.reduce(
       (sum, job) => sum + (job.usage.apiEquivalentUsd ?? (job.usage.codexCredits ?? 0) * 0.04),
       0,
     );
     return {
       accepted_tasks: acceptedTasks,
+      accepted_codex_tasks: succeededCodexJobs.length,
+      accepted_chatgpt_web_tasks: succeededChatGptWebJobs.length,
       codex_credits: codexCredits,
       api_equivalent_usd: apiEquivalentUsd,
-      credits_per_accepted_task: acceptedTasks ? codexCredits / acceptedTasks : null,
-      api_equivalent_usd_per_accepted_task: acceptedTasks ? apiEquivalentUsd / acceptedTasks : null,
+      credits_per_accepted_task: succeededCodexJobs.length
+        ? codexCredits / succeededCodexJobs.length
+        : null,
+      api_equivalent_usd_per_accepted_task: succeededCodexJobs.length
+        ? apiEquivalentUsd / succeededCodexJobs.length
+        : null,
       allocated_subscription_usd: jobs.reduce(
         (sum, job) => sum + (job.usage.allocatedSubscriptionUsd ?? 0),
         0,

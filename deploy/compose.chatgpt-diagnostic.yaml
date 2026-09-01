@@ -1,0 +1,14 @@
+services:
+  chatgpt-browser:
+    environment:
+      # 诊断配置默认关闭 Router 扩展，只保留可见浏览器和 noVNC
+      CHATGPT_BROWSER_EXTENSION_ENABLED: ${CHATGPT_BROWSER_EXTENSION_ENABLED:-false}
+      CHATGPT_WEB_ADAPTER_ENABLED: "false"
+      CHATGPT_WEB_DIAGNOSTIC_ENABLED: "false"
+    volumes:
+      # 使用独立卷，不读取或覆盖生产浏览器的登录配置
+      - chatgpt_browser_diagnostic_profile:/opt/aialra-browser-home/.config/chromium
+
+volumes:
+  chatgpt_browser_diagnostic_profile:
+    name: ${CHATGPT_BROWSER_DIAGNOSTIC_PROFILE_VOLUME:-aialra_router_chatgpt_browser_diagnostic_profile}

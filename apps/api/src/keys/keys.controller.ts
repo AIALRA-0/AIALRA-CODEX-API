@@ -16,6 +16,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
+import { ExecutionPolicySchema, type ExecutionPolicy } from "@aialra/contracts";
 import type { JobRepository, StoredApiKey } from "@aialra/persistence";
 import { generateApiKey, hashApiKey, requestHash } from "@aialra/security";
 
@@ -29,11 +30,23 @@ const CreateKeySchema = z
     name: z.string().min(1).max(100),
     scopes: z
       .array(
-        z.enum(["admin", "jobs:read", "jobs:write", "quota:read", "keys:write", "approvals:write"]),
+        z.enum([
+          "admin",
+          "jobs:read",
+          "jobs:write",
+          "quota:read",
+          "keys:write",
+          "approvals:write",
+          "chatgpt:web",
+        ]),
       )
       .min(1),
     rateLimitPerMinute: z.number().int().min(1).max(10_000).default(60),
     expiresAt: z.string().datetime().nullable().optional(),
+    executionPolicy: ExecutionPolicySchema.default({
+      defaultPreset: "restricted",
+      allowedPresets: ["restricted"],
+    }),
   })
   .strict()
   .superRefine((value, context) => {
@@ -58,7 +71,13 @@ export class KeysController {
   private async createRecord(
     body: unknown,
     actorId: string,
-    options: { idempotencyKey?: string; actorScopes: string[]; isAdmin: boolean },
+    options: {
+      idempotencyKey?: string;
+      actorScopes: string[];
+      actorExecutionPolicy: ExecutionPolicy;
+      isAdmin: boolean;
+      recentAuthentication: boolean;
+    },
   ) {
     const parsed = CreateKeySchema.safeParse(body);
     if (!parsed.success) {
@@ -87,6 +106,29 @@ export class KeysController {
         },
       });
     }
+    if (
+      input.executionPolicy.allowedPresets.some(
+        (preset) => !options.actorExecutionPolicy.allowedPresets.includes(preset),
+      )
+    ) {
+      throw new ForbiddenException({
+        error: {
+          code: "permission_ceiling_exceeded",
+          message: "新密钥的执行权限不能超过创建者自己的权限上限。",
+        },
+      });
+    }
+    if (
+      input.executionPolicy.allowedPresets.includes("full") &&
+      (!options.isAdmin || !options.recentAuthentication)
+    ) {
+      throw new ForbiddenException({
+        error: {
+          code: "recent_authentication_required",
+          message: "授予可信 Agent 隔离区完全访问需要管理员在五分钟内重新认证。",
+        },
+      });
+    }
     if (input.expiresAt === null && !options.isAdmin) {
       throw new ForbiddenException({
         error: {
@@ -109,6 +151,7 @@ export class KeysController {
       prefix: generated.prefix,
       digest: hashApiKey(generated.plaintext, pepper),
       scopes: input.scopes,
+      executionPolicy: input.executionPolicy,
       rateLimitPerMinute: input.rateLimitPerMinute,
       expiresAt:
         input.expiresAt === undefined
@@ -151,6 +194,7 @@ export class KeysController {
       metadata: {
         prefix: saved.record.prefix,
         scopes: saved.record.scopes,
+        executionPolicy: saved.record.executionPolicy,
         replayed: saved.replayed,
       },
       createdAt: new Date().toISOString(),
@@ -160,6 +204,7 @@ export class KeysController {
       name: saved.record.name,
       prefix: saved.record.prefix,
       scopes: saved.record.scopes,
+      executionPolicy: saved.record.executionPolicy,
       rateLimitPerMinute: saved.record.rateLimitPerMinute,
       expiresAt: saved.record.expiresAt,
       revokedAt: saved.record.revokedAt,
@@ -184,9 +229,21 @@ export class KeysController {
         ...((body ?? {}) as object),
         name: "Bootstrap administrator",
         scopes: ["admin"],
+        executionPolicy: {
+          defaultPreset: "full",
+          allowedPresets: ["restricted", "confirm", "full"],
+        },
       },
       "bootstrap",
-      { actorScopes: ["admin"], isAdmin: true },
+      {
+        actorScopes: ["admin"],
+        actorExecutionPolicy: {
+          defaultPreset: "full",
+          allowedPresets: ["restricted", "confirm", "full"],
+        },
+        isAdmin: true,
+        recentAuthentication: true,
+      },
     );
   }
 
@@ -220,7 +277,12 @@ export class KeysController {
     return this.createRecord(body, request.callerId ?? "unknown", {
       idempotencyKey,
       actorScopes: request.scopes ?? [],
+      actorExecutionPolicy: request.executionPolicy ?? {
+        defaultPreset: "restricted",
+        allowedPresets: ["restricted"],
+      },
       isAdmin: request.isAdmin === true,
+      recentAuthentication: recentAuthentication === true,
     });
   }
 

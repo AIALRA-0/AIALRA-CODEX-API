@@ -2,27 +2,40 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 
+import Ajv from "ajv";
+
 import {
-  type CreateJobRequest,
+  type CreateJobRequestInput,
+  type ExecutionPolicy,
   type Job,
   type JobEvent,
+  parseLegacyValidationCheck,
+  permissionProfileForPreset,
+  type RouteDecision,
+  type SessionThread,
   TaskContractSchema,
 } from "@aialra/contracts";
 import type { JobRepository } from "@aialra/persistence";
-import { selectRoute } from "@aialra/router";
+import { DEFAULT_ROUTING_POLICY, selectRoute } from "@aialra/router";
 import { requestHash } from "@aialra/security";
 
 import type { JobQueue } from "../queue/job-queue.js";
 import { QuotaService } from "../quota/quota.service.js";
 import { JOB_QUEUE, JOB_REPOSITORY } from "../tokens.js";
 
-const TERMINAL_STATUSES = new Set(["succeeded", "needs_review", "failed", "cancelled", "expired"]);
+const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired"]);
+const RESTRICTED_EXECUTION_POLICY: ExecutionPolicy = {
+  defaultPreset: "restricted",
+  allowedPresets: ["restricted"],
+};
 
 @Injectable()
 export class JobsService {
@@ -32,7 +45,10 @@ export class JobsService {
     @Inject(QuotaService) private readonly quotaService: QuotaService,
   ) {}
 
-  private async assertRoutableModel(modelId: string): Promise<void> {
+  private async assertRoutableModel(
+    modelId: string,
+    provider: RouteDecision["provider"],
+  ): Promise<void> {
     const settings = await this.repository.listModelSettings();
     const setting = settings.find((candidate) => candidate.modelId === modelId);
     if (setting?.enabled === false || (!setting && !modelId.startsWith("gpt-5.6-"))) {
@@ -43,18 +59,25 @@ export class JobsService {
     const catalog = await this.repository.latestModelCatalog();
     if (
       catalog &&
-      !catalog.models.some((candidate) => candidate.id === modelId && candidate.available)
+      !catalog.models.some(
+        (candidate) =>
+          candidate.id === modelId &&
+          candidate.available &&
+          (candidate.provider ?? "codex") === provider,
+      )
     ) {
       throw new ConflictException({
-        error: { code: "model_unavailable", message: "当前 Codex 账号无法使用该模型。" },
+        error: { code: "model_unavailable", message: "当前执行通道无法使用该模型。" },
       });
     }
   }
 
   async create(
-    input: CreateJobRequest,
+    input: CreateJobRequestInput,
     callerId: string,
     idempotencyKey: string | null,
+    executionPolicy: ExecutionPolicy = RESTRICTED_EXECUTION_POLICY,
+    callerScopes: string[] = [],
   ): Promise<Job> {
     if (process.env.JOB_SUBMISSION_ENABLED === "false") {
       throw new BadRequestException({
@@ -64,26 +87,120 @@ export class JobsService {
         },
       });
     }
-    const task = TaskContractSchema.parse(input.task);
-    if (task.permissions.network !== "none") {
-      throw new BadRequestException({
+    const parsedTask = TaskContractSchema.parse(input.task);
+    if (parsedTask.executionChannel === "chatgpt_web") {
+      if (process.env.CHATGPT_WEB_ADAPTER_ENABLED !== "true") {
+        throw new ConflictException({
+          error: { code: "chatgpt_web_disabled", message: "ChatGPT 网页实验通道尚未启用。" },
+        });
+      }
+      if (!callerScopes.includes("admin") && !callerScopes.includes("chatgpt:web")) {
+        throw new ForbiddenException({
+          error: {
+            code: "chatgpt_web_scope_required",
+            message: "当前 API 密钥没有 ChatGPT 网页实验通道权限。",
+          },
+        });
+      }
+      const webStatus = await this.repository.readChatGptWebStatus();
+      const cooldownRetryAfter = webStatus.cooldownUntil
+        ? Math.max(0, Math.ceil((new Date(webStatus.cooldownUntil).getTime() - Date.now()) / 1_000))
+        : Math.max(1, webStatus.retryAfter ?? 1);
+      const recoveryRetryAfter = webStatus.lastSubmissionAt
+        ? Math.max(
+            1,
+            90 - Math.floor((Date.now() - new Date(webStatus.lastSubmissionAt).getTime()) / 1_000),
+          )
+        : 90;
+      const cooldownActive =
+        webStatus.rateLimitState === "cooldown" &&
+        (!webStatus.cooldownUntil || cooldownRetryAfter > 0);
+      const recoveryProbeActive = webStatus.rateLimitState === "recovery_probe";
+      if (cooldownActive || recoveryProbeActive) {
+        const retryAfter = recoveryProbeActive ? recoveryRetryAfter : cooldownRetryAfter;
+        throw new HttpException(
+          {
+            error: {
+              code: "chatgpt_rate_limited",
+              message: "ChatGPT 网页通道正在等待限流恢复或恢复探针完成",
+              retryAfter,
+            },
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+    const preset = parsedTask.permissions.preset ?? executionPolicy.defaultPreset;
+    if (!executionPolicy.allowedPresets.includes(preset)) {
+      throw new ForbiddenException({
         error: {
-          code: "unsupported_permission",
-          message: "首版尚未启用可验证的域名出口控制，因此拒绝联网任务。",
+          code: "permission_ceiling_exceeded",
+          message: "请求的执行权限超过当前 API 密钥允许的范围。",
         },
       });
     }
+    const task = {
+      ...parsedTask,
+      permissions: permissionProfileForPreset(preset),
+    };
+    for (const rule of task.validation.acceptanceTests) {
+      if (!parseLegacyValidationCheck(rule)) {
+        throw new BadRequestException({
+          error: {
+            code: "invalid_validation_rule",
+            message: "旧版验收规则只接受 equals: 或 contains: 前缀。",
+          },
+        });
+      }
+    }
+    if (task.validation.responseSchema) {
+      try {
+        new Ajv({ strict: false }).compile(task.validation.responseSchema);
+      } catch (error) {
+        throw new BadRequestException({
+          error: {
+            code: "invalid_response_schema",
+            message: error instanceof Error ? error.message : "JSON Schema 无效。",
+          },
+        });
+      }
+    }
+    let stickyThread: SessionThread | null = null;
     if (task.sessionKey) {
-      throw new BadRequestException({
-        error: {
-          code: "unsupported_parameter",
-          message: "安全清理模式不保留 Codex 会话，因此暂不支持 sessionKey。",
-        },
-      });
+      stickyThread = await this.repository.findSessionThread(task.sessionKey);
+      if (!stickyThread || new Date(stickyThread.expiresAt).getTime() <= Date.now()) {
+        throw new ConflictException({
+          error: {
+            code: "session_expired",
+            message: "会话线程不存在或已到期，请开始新的对话。",
+          },
+        });
+      }
+      if (stickyThread.callerId !== callerId) {
+        throw new ForbiddenException({
+          error: {
+            code: "session_access_denied",
+            message: "不能继续使用其他调用者的会话线程。",
+          },
+        });
+      }
     }
-    const route = selectRoute(task, await this.quotaService.read());
-    await this.assertRoutableModel(route.model);
-    const hash = requestHash(input);
+    const route: RouteDecision = stickyThread
+      ? {
+          provider: "codex",
+          model: stickyThread.model,
+          effort: stickyThread.effort,
+          policyVersion: DEFAULT_ROUTING_POLICY.version,
+          reasonCode: "session_sticky",
+          sticky: true,
+        }
+      : selectRoute(
+          task,
+          task.executionChannel === "chatgpt_web" ? null : await this.quotaService.read(),
+        );
+    await this.assertRoutableModel(route.model, route.provider);
+    const normalizedInput = { ...input, task };
+    const hash = requestHash(normalizedInput);
     if (idempotencyKey) {
       const existing = await this.repository.findByIdempotency(callerId, idempotencyKey);
       if (existing) {
@@ -107,7 +224,7 @@ export class JobsService {
       idempotencyKey,
       callerId,
       task,
-      route: null,
+      route,
       output: null,
       errorCode: null,
       errorMessage: null,
@@ -121,6 +238,10 @@ export class JobsService {
         quotaUsedPercentAfter: null,
         quotaWindowDeltaPercent: null,
         allocatedSubscriptionUsd: null,
+        measurementStatus: route.provider === "codex" ? "measured" : "unavailable",
+        subscriptionChannel: route.provider === "codex" ? "codex" : "chatgpt_pro_web",
+        sourceCount: null,
+        durationMs: null,
       },
       validation: null,
       createdAt: now.toISOString(),
@@ -139,45 +260,61 @@ export class JobsService {
       createdAt: now.toISOString(),
     });
     await this.repository.appendEvent(job.id, "status", { status: "accepted" });
-    await this.repository.transitionJob(
-      job.id,
-      { status: "queued" },
-      {
-        id: randomUUID(),
-        actorId: callerId,
-        action: "job.queued",
-        resourceType: "job",
-        resourceId: job.id,
-        metadata: {},
-        createdAt: new Date().toISOString(),
-      },
-    );
-    const approvalRequired =
-      (job.task.permissions.filesystem === "write" &&
-        job.task.permissions.requireApprovalForWrites) ||
-      (job.task.permissions.network === "allowlist" &&
-        job.task.permissions.requireApprovalForExternalActions);
-    if (approvalRequired) {
+    if (preset === "confirm") {
+      await this.repository.transitionJob(
+        job.id,
+        { status: "awaiting_approval" },
+        {
+          id: randomUUID(),
+          actorId: callerId,
+          action: "job.awaiting_approval",
+          resourceType: "job",
+          resourceId: job.id,
+          metadata: { permissionPreset: preset },
+          createdAt: new Date().toISOString(),
+        },
+      );
       await this.repository.appendEvent(job.id, "approval", {
         status: "requested",
-        writes: job.task.permissions.filesystem === "write",
-        network: job.task.permissions.network === "allowlist",
-        allowedHosts: job.task.permissions.allowedHosts,
+        permissionPreset: preset,
+        writes: true,
+        network: true,
       });
     } else {
+      await this.repository.transitionJob(
+        job.id,
+        { status: "queued" },
+        {
+          id: randomUUID(),
+          actorId: callerId,
+          action: "job.queued",
+          resourceType: "job",
+          resourceId: job.id,
+          metadata: { permissionPreset: preset },
+          createdAt: new Date().toISOString(),
+        },
+      );
       await this.queue.enqueue(job.id);
     }
     return (await this.repository.findById(job.id)) as Job;
   }
 
   async createBatch(
-    requests: CreateJobRequest[],
+    requests: CreateJobRequestInput[],
     callerId: string,
     batchKey: string | null,
+    executionPolicy: ExecutionPolicy = RESTRICTED_EXECUTION_POLICY,
+    callerScopes: string[] = [],
   ): Promise<Job[]> {
     return Promise.all(
       requests.map((request, index) =>
-        this.create(request, callerId, batchKey ? `${batchKey}:${index}` : null),
+        this.create(
+          request,
+          callerId,
+          batchKey ? `${batchKey}:${index}` : null,
+          executionPolicy,
+          callerScopes,
+        ),
       ),
     );
   }
@@ -234,6 +371,14 @@ export class JobsService {
     const job = await this.get(id);
     if (TERMINAL_STATUSES.has(job.status)) {
       return job;
+    }
+    if (job.status !== "awaiting_approval") {
+      throw new ConflictException({
+        error: {
+          code: "invalid_approval_state",
+          message: "只有等待授权的调用可以批准或拒绝。",
+        },
+      });
     }
     await this.queue.cancel(id);
     return this.repository.transitionJob(
@@ -304,9 +449,9 @@ export class JobsService {
       return this.repository.transitionJob(
         id,
         {
-          status: "needs_review",
+          status: "cancelled",
           errorCode: "approval_denied",
-          errorMessage: "The requested elevated operation was denied.",
+          errorMessage: "The requested execution permission was denied.",
         },
         {
           id: randomUUID(),
@@ -319,21 +464,41 @@ export class JobsService {
         },
       );
     }
+    await this.repository.transitionJob(
+      id,
+      { status: "queued", errorCode: null, errorMessage: null },
+      {
+        id: randomUUID(),
+        actorId,
+        action: "job.queued_after_approval",
+        resourceType: "job",
+        resourceId: id,
+        metadata: {},
+        createdAt: new Date().toISOString(),
+      },
+    );
     await this.queue.enqueue(id);
     return this.get(id);
   }
 
   async preview(taskInput: unknown) {
-    const task = TaskContractSchema.parse(taskInput);
-    const quota = await this.quotaService.read();
+    const parsed = TaskContractSchema.parse(taskInput);
+    const task = {
+      ...parsed,
+      permissions: permissionProfileForPreset(parsed.permissions.preset ?? "restricted"),
+    };
+    const quota = task.executionChannel === "chatgpt_web" ? null : await this.quotaService.read();
     try {
       const route = selectRoute(task, quota);
-      await this.assertRoutableModel(route.model);
+      await this.assertRoutableModel(route.model, route.provider);
       return route;
     } catch (error) {
       const code = error instanceof Error ? error.message : "routing_rejected";
       throw new ConflictException({
-        error: { code, message: "The current Codex quota policy rejected this automatic route." },
+        error: {
+          code,
+          message: "The current routing policy rejected this execution channel or model.",
+        },
       });
     }
   }

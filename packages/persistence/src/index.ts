@@ -1,17 +1,155 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  type ExecutionPolicy,
+  ChatGptWebQualificationRunSchema,
+  type ChatGptWebQualificationRun,
+  ChatGptWebStatusSchema,
+  type ChatGptWebStatus,
+  parseLegacyValidationCheck,
+  TaskContractSchema,
   UsageLedgerSchema,
   type Job,
   type JobEvent,
   type JobStatus,
   type ModelCatalogSnapshot,
   type QuotaSnapshot,
+  type SessionThread,
+  type ValidationResult,
 } from "@aialra/contracts";
 import { decryptRecord, encryptRecord, isEncryptedRecord } from "@aialra/security";
 import pg from "pg";
 
 const { Pool } = pg;
+
+export function defaultChatGptWebStatus(now = new Date()): ChatGptWebStatus {
+  return {
+    configuredEnabled: false,
+    effectiveConcurrency: 0,
+    maximumConcurrency: 1,
+    activeTabs: 0,
+    queuedJobs: 0,
+    sandboxVerified: false,
+    extensionConnected: false,
+    pageReady: false,
+    authenticated: false,
+    circuitState: "qualification_required",
+    circuitReason: "qualification_not_completed",
+    cooldownUntil: null,
+    rateLimitState: "clear",
+    retryAfter: null,
+    lastRateLimitAt: null,
+    consecutiveRateLimits: 0,
+    conversationMode: "temporary_per_request",
+    temporaryChatVerified: false,
+    lastRecoveryProbeAt: null,
+    lastRecoveryProbePassed: null,
+    lastSubmissionAt: null,
+    successesAtCurrentLevel: 0,
+    attemptsAtCurrentLevel: 0,
+    severeErrorsAtCurrentLevel: 0,
+    lastQualifiedAt: null,
+    lastQualificationPassed: null,
+    lastQualificationSucceeded: null,
+    adapterVersion: "single-page-v1",
+    phase: "idle",
+    activeJobId: null,
+    activeAttempt: null,
+    lastHeartbeatAt: null,
+    lastFailureCode: null,
+    lastResetAt: null,
+    quarantinedTabs: 0,
+    slots: [],
+    lastQualificationRunId: null,
+    updatedAt: now.toISOString(),
+  };
+}
+
+export function parseChatGptWebStatus(value: unknown, now = new Date()): ChatGptWebStatus {
+  const stored = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return ChatGptWebStatusSchema.parse({
+    ...defaultChatGptWebStatus(now),
+    ...stored,
+  });
+}
+
+function classifyLegacyReview(
+  taskValue: unknown,
+  output: unknown,
+  storedValidation: ValidationResult | null,
+  errorCode: string | null,
+): {
+  status: "succeeded" | "failed" | "cancelled";
+  validation: ValidationResult | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+} {
+  if (errorCode === "approval_required" || errorCode === "approval_denied") {
+    return {
+      status: "cancelled",
+      validation: storedValidation,
+      errorCode: "approval_denied",
+      errorMessage: "The execution permission was not granted.",
+    };
+  }
+  if (output === null) {
+    return {
+      status: "failed",
+      validation: storedValidation,
+      errorCode: errorCode ?? "legacy_review_failed",
+      errorMessage: "The historical call did not produce an output that could be validated.",
+    };
+  }
+  const task = TaskContractSchema.parse(taskValue);
+  const text = typeof output === "string" ? output : JSON.stringify(output);
+  const messages: string[] = [];
+  let passed = !task.validation.responseSchema || storedValidation?.schemaPassed === true;
+  let testsPassed = 0;
+  let testsFailed = 0;
+  for (const rule of task.validation.acceptanceTests) {
+    const check = parseLegacyValidationCheck(rule, true);
+    const checkPassed =
+      check?.type === "equals"
+        ? (check.trim ? text.trim() : text) ===
+          (check.trim ? check.expected.trim() : check.expected)
+        : check?.type === "contains"
+          ? text.includes(check.expected)
+          : false;
+    if (checkPassed) testsPassed += 1;
+    else {
+      testsFailed += 1;
+      messages.push(check ? `legacy_validation_failed:${rule}` : `invalid_validation_rule:${rule}`);
+    }
+  }
+  for (const check of task.validation.checks) {
+    const checkPassed =
+      check.type === "equals"
+        ? (check.trim ? text.trim() : text) ===
+          (check.trim ? check.expected.trim() : check.expected)
+        : text.includes(check.expected);
+    if (checkPassed) testsPassed += 1;
+    else {
+      testsFailed += 1;
+      messages.push(`${check.type}_failed`);
+    }
+  }
+  passed = passed && testsFailed === 0;
+  const validation: ValidationResult = {
+    passed,
+    schemaPassed: task.validation.responseSchema ? (storedValidation?.schemaPassed ?? false) : null,
+    testsPassed,
+    testsFailed,
+    messages,
+  };
+  return passed
+    ? { status: "succeeded", validation, errorCode: null, errorMessage: null }
+    : {
+        status: "failed",
+        validation,
+        errorCode: "validation_failed",
+        errorMessage: "The historical output did not satisfy its declared validation rules.",
+      };
+}
 
 export interface StoredApiKey {
   id: string;
@@ -20,6 +158,7 @@ export interface StoredApiKey {
   prefix: string;
   digest: string;
   scopes: string[];
+  executionPolicy: ExecutionPolicy;
   rateLimitPerMinute: number;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -41,6 +180,7 @@ function apiKeyWithoutDigest(record: StoredApiKey): ApiKeyMetadata {
     name: record.name,
     prefix: record.prefix,
     scopes: record.scopes,
+    executionPolicy: structuredClone(record.executionPolicy),
     rateLimitPerMinute: record.rateLimitPerMinute,
     expiresAt: record.expiresAt,
     revokedAt: record.revokedAt,
@@ -139,6 +279,17 @@ export interface JobRepository {
   latestQuotaSnapshot(): Promise<QuotaSnapshot | null>;
   saveModelCatalog(snapshot: ModelCatalogSnapshot): Promise<void>;
   latestModelCatalog(): Promise<ModelCatalogSnapshot | null>;
+  readChatGptWebStatus(): Promise<ChatGptWebStatus>;
+  saveChatGptWebStatus(status: ChatGptWebStatus): Promise<void>;
+  createChatGptWebQualificationRun(
+    run: ChatGptWebQualificationRun,
+  ): Promise<ChatGptWebQualificationRun>;
+  findChatGptWebQualificationRun(id: string): Promise<ChatGptWebQualificationRun | null>;
+  updateChatGptWebQualificationRun(
+    id: string,
+    patch: Partial<ChatGptWebQualificationRun>,
+  ): Promise<ChatGptWebQualificationRun>;
+  listChatGptWebQualificationRuns(limit?: number): Promise<ChatGptWebQualificationRun[]>;
   listModelSettings(): Promise<ModelSetting[]>;
   setModelEnabled(modelId: string, enabled: boolean, actorId: string): Promise<ModelSetting>;
   setModelEnabledIdempotent(
@@ -148,6 +299,10 @@ export interface JobRepository {
     idempotencyKey: string,
     requestHash: string,
   ): Promise<ModelSettingResult>;
+  upsertSessionThread(thread: SessionThread): Promise<SessionThread>;
+  findSessionThread(sessionKey: string): Promise<SessionThread | null>;
+  listSessionThreads(actorId: string, isAdmin: boolean, limit?: number): Promise<SessionThread[]>;
+  deleteExpiredSessionThreads(now: Date): Promise<number>;
   createApiKey(record: StoredApiKey): Promise<StoredApiKey>;
   createApiKeyIdempotent(
     actorId: string,
@@ -192,6 +347,8 @@ export class InMemoryJobRepository implements JobRepository {
   private readonly eventMap = new Map<string, JobEvent[]>();
   private quotaSnapshot: QuotaSnapshot | null = null;
   private modelCatalog: ModelCatalogSnapshot | null = null;
+  private chatGptWebStatus: ChatGptWebStatus = defaultChatGptWebStatus();
+  private readonly chatGptWebQualificationRuns = new Map<string, ChatGptWebQualificationRun>();
   private readonly modelSettings = new Map<string, ModelSetting>(
     ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"].map((modelId) => [
       modelId,
@@ -202,6 +359,7 @@ export class InMemoryJobRepository implements JobRepository {
     string,
     { requestHash: string; setting: ModelSetting }
   >();
+  private readonly sessionThreads = new Map<string, SessionThread>();
   private readonly apiKeys = new Map<string, StoredApiKey>();
   private readonly apiKeyRequests = new Map<
     string,
@@ -300,6 +458,50 @@ export class InMemoryJobRepository implements JobRepository {
     return this.modelCatalog ? structuredClone(this.modelCatalog) : null;
   }
 
+  async readChatGptWebStatus(): Promise<ChatGptWebStatus> {
+    return structuredClone(this.chatGptWebStatus);
+  }
+
+  async saveChatGptWebStatus(status: ChatGptWebStatus): Promise<void> {
+    this.chatGptWebStatus = parseChatGptWebStatus(structuredClone(status));
+  }
+
+  async createChatGptWebQualificationRun(
+    run: ChatGptWebQualificationRun,
+  ): Promise<ChatGptWebQualificationRun> {
+    const parsed = ChatGptWebQualificationRunSchema.parse(structuredClone(run));
+    this.chatGptWebQualificationRuns.set(parsed.id, parsed);
+    return structuredClone(parsed);
+  }
+
+  async findChatGptWebQualificationRun(id: string): Promise<ChatGptWebQualificationRun | null> {
+    const run = this.chatGptWebQualificationRuns.get(id);
+    return run ? structuredClone(run) : null;
+  }
+
+  async updateChatGptWebQualificationRun(
+    id: string,
+    patch: Partial<ChatGptWebQualificationRun>,
+  ): Promise<ChatGptWebQualificationRun> {
+    const current = this.chatGptWebQualificationRuns.get(id);
+    if (!current) throw new Error("chatgpt_web_qualification_not_found");
+    const updated = ChatGptWebQualificationRunSchema.parse({
+      ...current,
+      ...structuredClone(patch),
+      id,
+      updatedAt: new Date().toISOString(),
+    });
+    this.chatGptWebQualificationRuns.set(id, updated);
+    return structuredClone(updated);
+  }
+
+  async listChatGptWebQualificationRuns(limit = 20): Promise<ChatGptWebQualificationRun[]> {
+    return [...this.chatGptWebQualificationRuns.values()]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, Math.min(limit, 100))
+      .map((run) => structuredClone(run));
+  }
+
   async listModelSettings(): Promise<ModelSetting[]> {
     return [...this.modelSettings.values()].map((setting) => structuredClone(setting));
   }
@@ -326,6 +528,39 @@ export class InMemoryJobRepository implements JobRepository {
     const setting = await this.setModelEnabled(modelId, enabled, actorId);
     this.modelSettingRequests.set(key, { requestHash, setting: structuredClone(setting) });
     return { setting, replayed: false };
+  }
+
+  async upsertSessionThread(thread: SessionThread): Promise<SessionThread> {
+    this.sessionThreads.set(thread.sessionKey, structuredClone(thread));
+    return structuredClone(thread);
+  }
+
+  async findSessionThread(sessionKey: string): Promise<SessionThread | null> {
+    const thread = this.sessionThreads.get(sessionKey);
+    return thread ? structuredClone(thread) : null;
+  }
+
+  async listSessionThreads(
+    actorId: string,
+    isAdmin: boolean,
+    limit = 100,
+  ): Promise<SessionThread[]> {
+    return [...this.sessionThreads.values()]
+      .filter((thread) => isAdmin || thread.callerId === actorId)
+      .sort((left, right) => right.lastUsedAt.localeCompare(left.lastUsedAt))
+      .slice(0, limit)
+      .map((thread) => structuredClone(thread));
+  }
+
+  async deleteExpiredSessionThreads(now: Date): Promise<number> {
+    let deleted = 0;
+    for (const [sessionKey, thread] of this.sessionThreads.entries()) {
+      if (new Date(thread.expiresAt) <= now) {
+        this.sessionThreads.delete(sessionKey);
+        deleted += 1;
+      }
+    }
+    return deleted;
   }
 
   async createApiKey(record: StoredApiKey): Promise<StoredApiKey> {
@@ -599,6 +834,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
   prefix TEXT UNIQUE NOT NULL,
   digest TEXT NOT NULL,
   scopes TEXT[] NOT NULL,
+  execution_default_preset TEXT NOT NULL DEFAULT 'restricted',
+  execution_allowed_presets TEXT[] NOT NULL DEFAULT ARRAY['restricted']::TEXT[],
   rate_limit_per_minute INTEGER NOT NULL,
   expires_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
@@ -607,6 +844,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS execution_default_preset TEXT NOT NULL DEFAULT 'restricted';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS execution_allowed_presets TEXT[] NOT NULL DEFAULT ARRAY['restricted']::TEXT[];
 
 CREATE TABLE IF NOT EXISTS api_key_requests (
   actor_id TEXT NOT NULL,
@@ -644,6 +883,26 @@ CREATE TABLE IF NOT EXISTS model_catalog_current (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS chatgpt_web_status (
+  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+  status JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chatgpt_web_qualification_runs (
+  id UUID PRIMARY KEY,
+  run JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chatgpt_web_qualification_runs_created_at
+  ON chatgpt_web_qualification_runs(created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chatgpt_web_qualification_runs_one_active
+  ON chatgpt_web_qualification_runs ((1))
+  WHERE run->>'status' IN ('accepted', 'running');
+
 CREATE TABLE IF NOT EXISTS model_settings (
   model_id TEXT PRIMARY KEY,
   enabled BOOLEAN NOT NULL,
@@ -665,6 +924,22 @@ INSERT INTO model_settings (model_id, enabled, updated_at, updated_by) VALUES
   ('gpt-5.6-terra', TRUE, NOW(), 'migration'),
   ('gpt-5.6-sol', TRUE, NOW(), 'migration')
 ON CONFLICT (model_id) DO NOTHING;
+
+-- session_threads stores only conversation governance metadata (no payload content),
+-- so it stays plaintext like model_settings.
+CREATE TABLE IF NOT EXISTS session_threads (
+  session_key TEXT PRIMARY KEY,
+  caller_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  effort TEXT NOT NULL,
+  turn_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL,
+  last_used_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS session_threads_caller_idx ON session_threads (caller_id, last_used_at DESC);
+CREATE INDEX IF NOT EXISTS session_threads_expiry_idx ON session_threads (expires_at);
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id UUID PRIMARY KEY,
@@ -789,6 +1064,76 @@ export class PostgresJobRepository implements JobRepository {
       await client.query(
         "INSERT INTO schema_migrations (version) VALUES (1) ON CONFLICT (version) DO NOTHING",
       );
+      const permissionPolicyMigration = await client.query(
+        "SELECT 1 FROM schema_migrations WHERE version=2",
+      );
+      if (!permissionPolicyMigration.rowCount) {
+        await client.query(
+          `UPDATE api_keys
+           SET execution_default_preset='full',
+               execution_allowed_presets=ARRAY['restricted','confirm','full']::TEXT[]
+           WHERE 'admin'=ANY(scopes)`,
+        );
+        await client.query("INSERT INTO schema_migrations (version) VALUES (2)");
+      }
+      const statusMigration = await client.query("SELECT 1 FROM schema_migrations WHERE version=3");
+      if (!statusMigration.rowCount) {
+        const legacyRows = await client.query("SELECT * FROM jobs WHERE status='needs_review'");
+        for (const row of legacyRows.rows) {
+          let classified: ReturnType<typeof classifyLegacyReview>;
+          try {
+            classified = classifyLegacyReview(
+              this.decrypt(row.task, `job:${row.id}:task:v2`),
+              row.output === null ? null : this.decrypt(row.output, `job:${row.id}:output:v2`),
+              row.validation,
+              row.error_code,
+            );
+          } catch {
+            classified = {
+              status: "failed",
+              validation: row.validation,
+              errorCode: "legacy_migration_failed",
+              errorMessage: "The historical review record could not be revalidated.",
+            };
+          }
+          await client.query(
+            `UPDATE jobs SET status=$2, validation=$3, error_code=$4, error_message=$5,
+             updated_at=NOW() WHERE id=$1`,
+            [
+              row.id,
+              classified.status,
+              classified.validation,
+              classified.errorCode,
+              classified.errorMessage,
+            ],
+          );
+          const sequenceResult = await client.query(
+            "SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence FROM job_events WHERE job_id=$1",
+            [row.id],
+          );
+          const sequence = Number(sequenceResult.rows[0].sequence);
+          await client.query(
+            `INSERT INTO job_events (id,job_id,sequence,type,data,created_at)
+             VALUES ($1,$2,$3,'status',$4,NOW())`,
+            [
+              randomUUID(),
+              row.id,
+              sequence,
+              this.encrypt(
+                { status: classified.status, migratedFrom: "needs_review" },
+                `job:${row.id}:event:${sequence}:v2`,
+              ),
+            ],
+          );
+          await client.query(
+            `INSERT INTO audit_events
+             (id,actor_id,action,resource_type,resource_id,metadata,created_at)
+             VALUES ($1,'migration','job.status_reclassified','job',$2,$3,NOW())`,
+            [randomUUID(), row.id, { from: "needs_review", to: classified.status }],
+          );
+        }
+        await client.query("INSERT INTO schema_migrations (version) VALUES (3)");
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -1048,6 +1393,72 @@ export class PostgresJobRepository implements JobRepository {
     return result.rowCount ? (result.rows[0].snapshot as ModelCatalogSnapshot) : null;
   }
 
+  async readChatGptWebStatus(): Promise<ChatGptWebStatus> {
+    const result = await this.pool.query(
+      "SELECT status FROM chatgpt_web_status WHERE singleton=TRUE",
+    );
+    return result.rowCount
+      ? parseChatGptWebStatus(result.rows[0].status)
+      : defaultChatGptWebStatus();
+  }
+
+  async saveChatGptWebStatus(status: ChatGptWebStatus): Promise<void> {
+    const parsed = parseChatGptWebStatus(status);
+    await this.pool.query(
+      `INSERT INTO chatgpt_web_status (singleton,status,updated_at)
+       VALUES (TRUE,$1,$2)
+       ON CONFLICT (singleton) DO UPDATE SET status=EXCLUDED.status,updated_at=EXCLUDED.updated_at`,
+      [parsed, parsed.updatedAt],
+    );
+  }
+
+  async createChatGptWebQualificationRun(
+    run: ChatGptWebQualificationRun,
+  ): Promise<ChatGptWebQualificationRun> {
+    const parsed = ChatGptWebQualificationRunSchema.parse(run);
+    await this.pool.query(
+      `INSERT INTO chatgpt_web_qualification_runs (id,run,created_at,updated_at)
+       VALUES ($1,$2,$3,$4)`,
+      [parsed.id, parsed, parsed.createdAt, parsed.updatedAt],
+    );
+    return parsed;
+  }
+
+  async findChatGptWebQualificationRun(id: string): Promise<ChatGptWebQualificationRun | null> {
+    const result = await this.pool.query(
+      "SELECT run FROM chatgpt_web_qualification_runs WHERE id=$1",
+      [id],
+    );
+    return result.rowCount ? ChatGptWebQualificationRunSchema.parse(result.rows[0].run) : null;
+  }
+
+  async updateChatGptWebQualificationRun(
+    id: string,
+    patch: Partial<ChatGptWebQualificationRun>,
+  ): Promise<ChatGptWebQualificationRun> {
+    const current = await this.findChatGptWebQualificationRun(id);
+    if (!current) throw new Error("chatgpt_web_qualification_not_found");
+    const updated = ChatGptWebQualificationRunSchema.parse({
+      ...current,
+      ...patch,
+      id,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.pool.query(
+      "UPDATE chatgpt_web_qualification_runs SET run=$2,updated_at=$3 WHERE id=$1",
+      [id, updated, updated.updatedAt],
+    );
+    return updated;
+  }
+
+  async listChatGptWebQualificationRuns(limit = 20): Promise<ChatGptWebQualificationRun[]> {
+    const result = await this.pool.query(
+      "SELECT run FROM chatgpt_web_qualification_runs ORDER BY created_at DESC LIMIT $1",
+      [Math.min(limit, 100)],
+    );
+    return result.rows.map((row) => ChatGptWebQualificationRunSchema.parse(row.run));
+  }
+
   async listModelSettings(): Promise<ModelSetting[]> {
     const result = await this.pool.query("SELECT * FROM model_settings ORDER BY model_id");
     return result.rows.map((row) => ({
@@ -1121,12 +1532,82 @@ export class PostgresJobRepository implements JobRepository {
     }
   }
 
+  private rowToSessionThread(row: Record<string, any>): SessionThread {
+    return {
+      sessionKey: row.session_key,
+      callerId: row.caller_id,
+      model: row.model,
+      effort: row.effort,
+      turnCount: Number(row.turn_count),
+      createdAt: new Date(row.created_at).toISOString(),
+      lastUsedAt: new Date(row.last_used_at).toISOString(),
+      expiresAt: new Date(row.expires_at).toISOString(),
+    };
+  }
+
+  async upsertSessionThread(thread: SessionThread): Promise<SessionThread> {
+    const result = await this.pool.query(
+      `INSERT INTO session_threads (
+        session_key, caller_id, model, effort, turn_count, created_at, last_used_at, expires_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (session_key) DO UPDATE SET
+        caller_id=EXCLUDED.caller_id,
+        model=EXCLUDED.model,
+        effort=EXCLUDED.effort,
+        turn_count=EXCLUDED.turn_count,
+        created_at=EXCLUDED.created_at,
+        last_used_at=EXCLUDED.last_used_at,
+        expires_at=EXCLUDED.expires_at
+      RETURNING *`,
+      [
+        thread.sessionKey,
+        thread.callerId,
+        thread.model,
+        thread.effort,
+        thread.turnCount,
+        thread.createdAt,
+        thread.lastUsedAt,
+        thread.expiresAt,
+      ],
+    );
+    return this.rowToSessionThread(result.rows[0]);
+  }
+
+  async findSessionThread(sessionKey: string): Promise<SessionThread | null> {
+    const result = await this.pool.query("SELECT * FROM session_threads WHERE session_key=$1", [
+      sessionKey,
+    ]);
+    return result.rowCount ? this.rowToSessionThread(result.rows[0]) : null;
+  }
+
+  async listSessionThreads(
+    actorId: string,
+    isAdmin: boolean,
+    limit = 100,
+  ): Promise<SessionThread[]> {
+    const result = await this.pool.query(
+      isAdmin
+        ? "SELECT * FROM session_threads ORDER BY last_used_at DESC LIMIT $1"
+        : "SELECT * FROM session_threads WHERE caller_id=$1 ORDER BY last_used_at DESC LIMIT $2",
+      isAdmin ? [Math.min(limit, 500)] : [actorId, Math.min(limit, 500)],
+    );
+    return result.rows.map((row) => this.rowToSessionThread(row));
+  }
+
+  async deleteExpiredSessionThreads(now: Date): Promise<number> {
+    const result = await this.pool.query("DELETE FROM session_threads WHERE expires_at <= $1", [
+      now.toISOString(),
+    ]);
+    return result.rowCount ?? 0;
+  }
+
   async createApiKey(record: StoredApiKey): Promise<StoredApiKey> {
     const result = await this.pool.query(
       `INSERT INTO api_keys (
-        id, created_by, name, prefix, digest, scopes, rate_limit_per_minute, expires_at,
-        revoked_at, created_at, last_used_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        id, created_by, name, prefix, digest, scopes, execution_default_preset,
+        execution_allowed_presets, rate_limit_per_minute, expires_at, revoked_at, created_at,
+        last_used_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         record.id,
         record.createdBy,
@@ -1134,6 +1615,8 @@ export class PostgresJobRepository implements JobRepository {
         record.prefix,
         record.digest,
         record.scopes,
+        record.executionPolicy.defaultPreset,
+        record.executionPolicy.allowedPresets,
         record.rateLimitPerMinute,
         record.expiresAt,
         record.revokedAt,
@@ -1169,14 +1652,21 @@ export class PostgresJobRepository implements JobRepository {
           existing.rows[0].response,
           `api-key-request:${actorId}:${idempotencyKey}:v2`,
         );
+        saved.record.executionPolicy ??= {
+          defaultPreset: saved.record.scopes.includes("admin") ? "full" : "restricted",
+          allowedPresets: saved.record.scopes.includes("admin")
+            ? ["restricted", "confirm", "full"]
+            : ["restricted"],
+        };
         await client.query("COMMIT");
         return { ...saved, replayed: true };
       }
       await client.query(
         `INSERT INTO api_keys (
-          id, created_by, name, prefix, digest, scopes, rate_limit_per_minute, expires_at,
-          revoked_at, created_at, last_used_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          id, created_by, name, prefix, digest, scopes, execution_default_preset,
+          execution_allowed_presets, rate_limit_per_minute, expires_at, revoked_at, created_at,
+          last_used_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [
           record.id,
           record.createdBy,
@@ -1184,6 +1674,8 @@ export class PostgresJobRepository implements JobRepository {
           record.prefix,
           record.digest,
           record.scopes,
+          record.executionPolicy.defaultPreset,
+          record.executionPolicy.allowedPresets,
           record.rateLimitPerMinute,
           record.expiresAt,
           record.revokedAt,
@@ -1222,6 +1714,10 @@ export class PostgresJobRepository implements JobRepository {
       prefix: row.prefix,
       digest: row.digest,
       scopes: row.scopes,
+      executionPolicy: {
+        defaultPreset: row.execution_default_preset ?? "restricted",
+        allowedPresets: row.execution_allowed_presets ?? ["restricted"],
+      },
       rateLimitPerMinute: row.rate_limit_per_minute,
       expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
       revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,

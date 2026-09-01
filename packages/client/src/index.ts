@@ -1,10 +1,13 @@
 import type {
+  ChatCompletion,
+  ChatCompletionsRequestInput,
   CreateJobRequest,
   Job,
   JobEvent,
   QuotaSnapshot,
   ResponsesRequest,
   RouteDecision,
+  SessionThread,
   TaskContract,
 } from "@aialra/contracts";
 
@@ -96,7 +99,7 @@ export class ModelRouterClient {
     id: string,
     options: { timeoutMs?: number; pollIntervalMs?: number } = {},
   ): Promise<Job> {
-    const terminal = new Set(["succeeded", "needs_review", "failed", "cancelled", "expired"]);
+    const terminal = new Set(["succeeded", "failed", "cancelled", "expired"]);
     const expires = Date.now() + (options.timeoutMs ?? 120_000);
     while (Date.now() < expires) {
       const job = await this.getJob(id);
@@ -136,6 +139,22 @@ export class ModelRouterClient {
       method: "POST",
       body: JSON.stringify({ task }),
     });
+  }
+
+  async listSessionThreads(limit = 100): Promise<SessionThread[]> {
+    const result = await this.request<{ data: SessionThread[] }>(`/api/v1/threads?limit=${limit}`);
+    return result.data;
+  }
+
+  async createChatCompletion(
+    request: ChatCompletionsRequestInput,
+    idempotencyKey?: string,
+  ): Promise<ChatCompletion> {
+    return this.request(
+      "/v1/chat/completions",
+      { method: "POST", body: JSON.stringify({ ...request, stream: false }) },
+      idempotencyKey,
+    );
   }
 
   async createResponse(request: ResponsesRequest, idempotencyKey: string): Promise<unknown> {

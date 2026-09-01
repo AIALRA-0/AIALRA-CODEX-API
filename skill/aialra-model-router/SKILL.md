@@ -19,6 +19,8 @@ description: Convert a bounded AI task into a governed AIALRA Model Router job, 
 
 MCP 不可用时，运行 `scripts/invoke.mjs`；批量任务运行 `scripts/batch.mjs`
 
+需要多轮对话时，第一轮使用 `--session persistent` 保留线程，之后用 `--session-key` 续聊；线程默认 24 小时到期
+
 第三步，预览路由
 
 高风险或额度接近阈值时，先调用 `preview_route` 或给脚本传入 `--preview`
@@ -29,9 +31,9 @@ MCP 不可用时，运行 `scripts/invoke.mjs`；批量任务运行 `scripts/bat
 
 为每次写调用生成稳定的幂等键
 
-结构化任务必须提供 JSON Schema；可自动检查的文本条件使用 `contains:<文本>`
+结构化任务必须提供 JSON Schema；可自动检查的文本条件使用结构化的 `equals` 或 `contains`
 
-Schema、测试或质量检查失败时接受 `needs_review`，等待人工确认或显式重跑
+没有验收规则时，模型正常返回即为成功；明确的 Schema 或文本检查不通过时记为失败
 
 第五步，记录结果
 
@@ -51,8 +53,9 @@ Schema、测试或质量检查失败时接受 `needs_review`，等待人工确�
 
 ## 3 安全边界
 
-- 默认使用只读文件系统、无网络和 120 秒期限
-- 写入或联网必须在任务合同中明确申请，并等待审批事件
+- 普通 API 密钥默认使用 `restricted`，即只读工作区、无网络和 120 秒期限
+- `confirm` 在执行前等待权限确认；`full` 只开放本次一次性工作区和公开互联网
+- `full` 不代表宿主机完全访问，仍禁止读取身份、密钥、其他工作区、私网和容器套接字
 - 委派深度固定为 1，子任务不得再次委派
 - 同一父任务最多创建 4 个逻辑子任务
 - 禁止把 Codex 认证、Tailnet 凭据或 Router API Key 写入提示、日志或输出

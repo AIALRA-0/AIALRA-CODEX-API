@@ -41,6 +41,21 @@ export function selectRoute(
   quota: QuotaSnapshot | null,
   policy: RoutingPolicy = DEFAULT_ROUTING_POLICY,
 ): RouteDecision {
+  if (task.executionChannel === "chatgpt_web") {
+    const model = task.model === "auto" ? "chatgpt-web.auto" : task.model;
+    if (!model.startsWith("chatgpt-web.")) {
+      throw new Error("chatgpt_web_model_required");
+    }
+    return {
+      provider: "chatgpt_web",
+      model,
+      effort: task.effort,
+      policyVersion: policy.version,
+      reasonCode: "explicit_chatgpt_web_channel",
+      sticky: true,
+    };
+  }
+
   if (task.model !== "auto") {
     const model =
       task.model === "luna" || task.model === "terra" || task.model === "sol"

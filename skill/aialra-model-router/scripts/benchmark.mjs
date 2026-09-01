@@ -19,7 +19,9 @@ const report = {
   tasks: jobs.length,
   accepted: accepted.length,
   pass_at_1: jobs.length ? accepted.length / jobs.length : 0,
-  needs_review: jobs.filter((job) => job.status === "needs_review").length,
+  validation_failed: jobs.filter(
+    (job) => job.status === "failed" && job.error?.code === "validation_failed",
+  ).length,
   codex_credits: codexCredits,
   credits_per_accepted_task: accepted.length ? codexCredits / accepted.length : null,
 };

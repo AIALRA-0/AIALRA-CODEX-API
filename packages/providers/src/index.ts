@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -23,6 +23,7 @@ export interface ProviderEvent {
 
 export interface ProviderInvocation {
   jobId?: string;
+  attempt?: number;
   task: TaskContract;
   route: RouteDecision;
   workingDirectory?: string;
@@ -35,10 +36,12 @@ export interface ProviderResult {
   outputText: string;
   threadId: string | null;
   usage: UsageLedger;
+  sources?: string[];
+  conversationUrl?: string | null;
 }
 
 export interface ModelProvider {
-  readonly name: "codex";
+  readonly name: "codex" | "chatgpt_web";
   readonly workspaceMode?: "caller" | "provider";
   invoke(invocation: ProviderInvocation): Promise<ProviderResult>;
 }
@@ -47,6 +50,21 @@ export interface CodexProviderOptions {
   codexPathOverride?: string;
   environment?: Record<string, string>;
   authDirectory?: string;
+}
+
+export function codexThreadPermissionOptions(preset: "restricted" | "confirm" | "full"): {
+  sandboxMode: "read-only" | "workspace-write";
+  networkAccessEnabled: boolean;
+  webSearchMode: "disabled" | "live";
+  approvalPolicy: "never";
+} {
+  const networkAccessEnabled = preset === "confirm" || preset === "full";
+  return {
+    sandboxMode: preset === "restricted" ? "read-only" : "workspace-write",
+    networkAccessEnabled,
+    webSearchMode: networkAccessEnabled ? "live" : "disabled",
+    approvalPolicy: "never",
+  };
 }
 
 export const CODEX_CREDIT_RATE_CARD = {
@@ -81,6 +99,7 @@ export function buildTaskPrompt(task: TaskContract): string {
     required_context: task.requiredContext,
     constraints: task.constraints,
     expected_output: task.expectedOutput,
+    validation_checks: task.validation.checks,
     acceptance_tests: task.validation.acceptanceTests,
     permissions: task.permissions,
   };
@@ -192,9 +211,8 @@ export class CodexProvider implements ModelProvider {
 
   async invoke(invocation: ProviderInvocation): Promise<ProviderResult> {
     const { task, route } = invocation;
-    if (task.permissions.network !== "none") {
-      throw new Error("network_allowlist_not_enforced");
-    }
+    const permissionPreset = task.permissions.preset ?? "restricted";
+    const runtimePermissions = codexThreadPermissionOptions(permissionPreset);
     const authDirectory = resolve(
       this.options.authDirectory ??
         this.options.environment?.CODEX_HOME ??
@@ -205,7 +223,7 @@ export class CodexProvider implements ModelProvider {
     const filesystemOverride = codexFilesystemPermissionOverride(
       authDirectory,
       workingDirectory,
-      task.permissions.filesystem,
+      permissionPreset === "restricted" ? "read" : "write",
     );
     const codex = new Codex({
       codexPathOverride: this.options.codexPathOverride,
@@ -218,9 +236,7 @@ export class CodexProvider implements ModelProvider {
       workingDirectory,
       skipGitRepoCheck: true,
       modelReasoningEffort: route.effort,
-      networkAccessEnabled: false,
-      webSearchMode: "disabled" as const,
-      approvalPolicy: "never" as const,
+      ...runtimePermissions,
       threadSource: "aialra-model-router",
     } as const;
     const thread = task.sessionKey
@@ -289,15 +305,23 @@ export class CodexProvider implements ModelProvider {
       quotaUsedPercentAfter: null,
       quotaWindowDeltaPercent: null,
       allocatedSubscriptionUsd: null,
+      measurementStatus: "measured",
+      subscriptionChannel: "codex",
+      sourceCount: null,
+      durationMs: null,
     };
     await invocation.onEvent?.({ type: "usage", data: usage });
+    const persistSession =
+      task.sessionMode === "persistent" ||
+      Boolean(task.sessionKey) ||
+      process.env.CODEX_PERSIST_SESSIONS === "true";
     const result = {
       output: parseStructuredOutput(outputText, task),
       outputText,
       threadId,
       usage,
     };
-    if (threadId && process.env.CODEX_PERSIST_SESSIONS !== "true") {
+    if (threadId && !persistSession) {
       await removeCodexSession(authDirectory, threadId);
       result.threadId = null;
     }
@@ -349,6 +373,41 @@ export async function removeCodexSession(authDirectory: string, threadId: string
       } else if (entry.isFile() && entry.name.includes(threadId)) {
         await rm(target, { force: true });
         removed += 1;
+      }
+    }
+  }
+  await visit(sessionRoot);
+  return removed;
+}
+
+export async function cleanupExpiredCodexSessions(
+  authDirectory: string,
+  ttlMs: number,
+  now: Date = new Date(),
+): Promise<number> {
+  const sessionRoot = resolve(authDirectory, "sessions");
+  const separator = process.platform === "win32" ? "\\" : "/";
+  let removed = 0;
+  async function visit(directory: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const target = resolve(directory, entry.name);
+      if (!target.startsWith(`${sessionRoot}${separator}`)) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        await visit(target);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        const fileStat = await stat(target).catch(() => null);
+        if (fileStat && now.getTime() - fileStat.mtimeMs > ttlMs) {
+          await rm(target, { force: true });
+          removed += 1;
+        }
       }
     }
   }
@@ -432,6 +491,7 @@ const KNOWN_REASONING_EFFORTS = new Set<ReasoningEffort>([
   "medium",
   "high",
   "xhigh",
+  "max",
 ]);
 
 export function modelCatalogFromAppServer(result: unknown): ModelCatalogSnapshot {
@@ -468,6 +528,7 @@ export function modelCatalogFromAppServer(result: unknown): ModelCatalogSnapshot
         {
           id,
           displayName: String(item.displayName ?? item.display_name ?? item.name ?? id),
+          provider: "codex" as const,
           available: true,
           hidden: Boolean(item.hidden),
           isDefault: Boolean(item.isDefault ?? item.is_default),
@@ -479,6 +540,7 @@ export function modelCatalogFromAppServer(result: unknown): ModelCatalogSnapshot
           creditRate: null,
           apiRate: null,
           rateStatus: "unavailable" as const,
+          streamingMode: "delta" as const,
           discoveredAt,
         },
       ];

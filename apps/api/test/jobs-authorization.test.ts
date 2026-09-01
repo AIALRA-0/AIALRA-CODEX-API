@@ -10,6 +10,7 @@ describe("job object authorization", () => {
     const repository = new InMemoryJobRepository();
     const queue = {
       enqueue: async () => undefined,
+      enqueueChatGptWebQualification: async () => undefined,
       cancel: async () => undefined,
       close: async () => undefined,
     };

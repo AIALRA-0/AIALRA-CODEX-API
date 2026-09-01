@@ -24,8 +24,8 @@ function result(value: unknown) {
 
 const taskInput = {
   objective: z.string().min(1),
-  model: z.enum(["auto", "luna", "terra", "sol"]).default("auto"),
-  effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).default("medium"),
+  model: z.string().min(1).max(128).default("auto"),
+  effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).default("medium"),
   task_kind: z
     .enum(["bounded", "coding", "review", "planning", "batch", "general"])
     .default("general"),
@@ -33,6 +33,9 @@ const taskInput = {
     .enum(["public", "internal", "confidential", "restricted"])
     .default("internal"),
   deadline_ms: z.number().int().min(1_000).max(3_600_000).default(120_000),
+  permission_preset: z.enum(["restricted", "confirm", "full"]).optional(),
+  session_key: z.string().min(1).max(256).optional(),
+  session_mode: z.enum(["ephemeral", "persistent"]).optional(),
 };
 
 server.registerTool(
@@ -50,6 +53,56 @@ server.registerTool(
       taskKind: input.task_kind,
       dataClassification: input.data_classification,
       deadlineMs: input.deadline_ms,
+      permissions: { preset: input.permission_preset },
+      sessionKey: input.session_key,
+      sessionMode: input.session_mode ?? (input.session_key ? "persistent" : undefined),
+      constraints: ["Do not delegate to another agent."],
+    });
+    return result(
+      await client.createJob(
+        { task, metadata: { delegate_depth: "1", child_can_delegate: "false" } },
+        randomUUID(),
+      ),
+    );
+  },
+);
+
+server.registerTool(
+  "delegate_chatgpt",
+  {
+    description:
+      "Delegate a text, web-search, or deep-research task to the experimental visible ChatGPT Pro web channel. The tool returns a job id and never delegates recursively.",
+    inputSchema: {
+      objective: z.string().min(1),
+      mode: z.enum(["chat", "search", "deep_research"]).default("search"),
+      model: z.string().min(1).max(128).default("chatgpt-web.auto"),
+      require_sources: z.boolean().default(true),
+      deadline_ms: z.number().int().min(1_000).max(3_600_000).optional(),
+    },
+  },
+  async (input) => {
+    const deadlineMs = input.deadline_ms ?? (input.mode === "deep_research" ? 3_600_000 : 600_000);
+    const task = TaskContractSchema.parse({
+      objective: input.objective,
+      model: input.model,
+      effort: "medium",
+      taskKind: input.mode === "deep_research" ? "planning" : "general",
+      dataClassification: "internal",
+      deadlineMs,
+      executionChannel: "chatgpt_web",
+      chatgptWeb: {
+        mode: input.mode,
+        conversationMode: "temporary_per_request",
+        temporaryChat: true,
+        personalized: false,
+        requireSources: input.require_sources,
+      },
+      sessionMode: "ephemeral",
+      permissions: { preset: "restricted" },
+      budget: {
+        maxOutputTokens: 8_192,
+        maxAttempts: 1,
+      },
       constraints: ["Do not delegate to another agent."],
     });
     return result(
@@ -77,6 +130,7 @@ server.registerTool(
           taskKind: input.task_kind,
           dataClassification: input.data_classification,
           deadlineMs: input.deadline_ms,
+          permissions: { preset: input.permission_preset },
         }),
       ),
     ),

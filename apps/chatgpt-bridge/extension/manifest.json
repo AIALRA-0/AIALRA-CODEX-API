@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "116",
+  "name": "AIALRA ChatGPT Web Bridge",
+  "version": "0.1.0",
+  "description": "Connects a visible ChatGPT tab to the private AIALRA Model Router bridge.",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1:13216/*"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "AIALRA ChatGPT Web Bridge"
+  }
+}

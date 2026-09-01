@@ -2,15 +2,21 @@ import { PgBoss } from "pg-boss";
 
 export interface JobQueue {
   enqueue(jobId: string): Promise<void>;
+  enqueueChatGptWebQualification(runId: string): Promise<void>;
   cancel(jobId: string): Promise<void>;
   close(): Promise<void>;
 }
 
 export class NoopJobQueue implements JobQueue {
   readonly enqueued: string[] = [];
+  readonly enqueuedQualifications: string[] = [];
 
   async enqueue(jobId: string): Promise<void> {
     this.enqueued.push(jobId);
+  }
+
+  async enqueueChatGptWebQualification(runId: string): Promise<void> {
+    this.enqueuedQualifications.push(runId);
   }
 
   async cancel(): Promise<void> {
@@ -36,6 +42,7 @@ export class PgBossJobQueue implements JobQueue {
     }
     await this.boss.start();
     await this.boss.createQueue("model-router-jobs");
+    await this.boss.createQueue("chatgpt-web-qualifications");
     this.started = true;
   }
 
@@ -45,6 +52,15 @@ export class PgBossJobQueue implements JobQueue {
       "model-router-jobs",
       { jobId },
       { id: jobId, singletonKey: jobId, retryLimit: 0 },
+    );
+  }
+
+  async enqueueChatGptWebQualification(runId: string): Promise<void> {
+    await this.start();
+    await this.boss.send(
+      "chatgpt-web-qualifications",
+      { runId },
+      { id: runId, singletonKey: runId, retryLimit: 0 },
     );
   }
 

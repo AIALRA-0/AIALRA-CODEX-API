@@ -1,0 +1,30 @@
+# Docker's default profile with one explicit addition: Chromium may create its
+# own unprivileged user namespace. The container still has no Linux
+# capabilities, no-new-privileges, a read-only root filesystem and a filtered
+# network path.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile aialra-chatgpt-browser flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  umount,
+  userns,
+
+  deny mount,
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+
+  ptrace (trace,read,tracedby,readby) peer=aialra-chatgpt-browser,
+  signal (receive) peer=unconfined,
+  signal (send,receive) peer=aialra-chatgpt-browser,
+}

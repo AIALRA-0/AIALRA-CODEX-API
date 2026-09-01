@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { TaskContractSchema, type Job } from "@aialra/contracts";
+import {
+  ChatGptWebQualificationRunSchema,
+  TaskContractSchema,
+  type Job,
+  type SessionThread,
+} from "@aialra/contracts";
 
 import { InMemoryJobRepository } from "../src/index.js";
 
@@ -34,6 +39,21 @@ function jobFixture(): Job {
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 86_400_000).toISOString(),
+  };
+}
+
+function sessionThreadFixture(overrides: Partial<SessionThread> = {}): SessionThread {
+  const now = Date.now();
+  return {
+    sessionKey: "session-1",
+    callerId: "caller",
+    model: "gpt-5.6-luna",
+    effort: "medium",
+    turnCount: 1,
+    createdAt: new Date(now).toISOString(),
+    lastUsedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + 86_400_000).toISOString(),
+    ...overrides,
   };
 }
 
@@ -112,6 +132,10 @@ describe("InMemoryJobRepository", () => {
       prefix: "amr_000000000000",
       digest: "synthetic-digest",
       scopes: ["jobs:read"],
+      executionPolicy: {
+        defaultPreset: "restricted" as const,
+        allowedPresets: ["restricted" as const],
+      },
       rateLimitPerMinute: 60,
       expiresAt: null,
       revokedAt: null,
@@ -137,5 +161,123 @@ describe("InMemoryJobRepository", () => {
     expect(second.replayed).toBe(true);
     expect(second.record.id).toBe(record.id);
     expect(await repository.apiKeyCount()).toBe(1);
+  });
+
+  it("inserts then replaces a session thread on upsert", async () => {
+    const repository = new InMemoryJobRepository();
+    const thread = sessionThreadFixture({ sessionKey: "session-1" });
+
+    const inserted = await repository.upsertSessionThread(thread);
+    expect(inserted.turnCount).toBe(1);
+
+    const replaced = await repository.upsertSessionThread({
+      ...thread,
+      turnCount: thread.turnCount + 1,
+      lastUsedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+    expect(replaced.turnCount).toBe(2);
+    expect((await repository.findSessionThread("session-1"))?.turnCount).toBe(2);
+  });
+
+  it("finds a session thread by key and returns null for a miss", async () => {
+    const repository = new InMemoryJobRepository();
+    await repository.upsertSessionThread(sessionThreadFixture({ sessionKey: "session-1" }));
+
+    expect(await repository.findSessionThread("session-1")).toMatchObject({
+      sessionKey: "session-1",
+      callerId: "caller",
+    });
+    expect(await repository.findSessionThread("missing")).toBeNull();
+  });
+
+  it("lists session threads for the caller, all for admins, ordered by last use", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = Date.now();
+    await repository.upsertSessionThread(
+      sessionThreadFixture({
+        sessionKey: "mine-old",
+        callerId: "caller",
+        lastUsedAt: new Date(now - 2_000).toISOString(),
+      }),
+    );
+    await repository.upsertSessionThread(
+      sessionThreadFixture({
+        sessionKey: "other",
+        callerId: "other-caller",
+        lastUsedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await repository.upsertSessionThread(
+      sessionThreadFixture({
+        sessionKey: "mine-new",
+        callerId: "caller",
+        lastUsedAt: new Date(now).toISOString(),
+      }),
+    );
+
+    const mine = await repository.listSessionThreads("caller", false);
+    expect(mine.map((thread) => thread.sessionKey)).toEqual(["mine-new", "mine-old"]);
+
+    const all = await repository.listSessionThreads("caller", true);
+    expect(all.map((thread) => thread.sessionKey)).toEqual(["mine-new", "other", "mine-old"]);
+
+    const limited = await repository.listSessionThreads("caller", true, 2);
+    expect(limited).toHaveLength(2);
+  });
+
+  it("deletes only expired session threads and returns the count", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = Date.now();
+    await repository.upsertSessionThread(
+      sessionThreadFixture({
+        sessionKey: "expired",
+        expiresAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await repository.upsertSessionThread(
+      sessionThreadFixture({
+        sessionKey: "active",
+        expiresAt: new Date(now + 86_400_000).toISOString(),
+      }),
+    );
+
+    expect(await repository.deleteExpiredSessionThreads(new Date(now))).toBe(1);
+    expect(await repository.findSessionThread("expired")).toBeNull();
+    expect(await repository.findSessionThread("active")).not.toBeNull();
+    expect(await repository.deleteExpiredSessionThreads(new Date(now))).toBe(0);
+  });
+
+  it("persists only the secret-free ChatGPT web qualification record", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = new Date().toISOString();
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id: randomUUID(),
+      suite: "chat_3",
+      status: "accepted",
+      total: 3,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: [],
+      errorCode: null,
+      createdBy: "admin",
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+
+    await repository.createChatGptWebQualificationRun(run);
+    const updated = await repository.updateChatGptWebQualificationRun(run.id, {
+      status: "running",
+      startedAt: now,
+    });
+
+    expect(updated.status).toBe("running");
+    expect(await repository.findChatGptWebQualificationRun(run.id)).toMatchObject({
+      id: run.id,
+      suite: "chat_3",
+    });
+    expect(await repository.listChatGptWebQualificationRuns()).toHaveLength(1);
   });
 });

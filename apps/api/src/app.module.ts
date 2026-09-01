@@ -1,10 +1,12 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 
 import { InMemoryJobRepository, PostgresJobRepository } from "@aialra/persistence";
 
 import { ApiKeyGuard } from "./common/api-key.guard.js";
+import { RetryAfterFilter } from "./common/retry-after.filter.js";
 import { AuthController } from "./auth/auth.controller.js";
+import { ChatCompletionsController } from "./chat/chat.controller.js";
 import { GovernanceController } from "./governance/governance.controller.js";
 import { HealthController } from "./health/health.controller.js";
 import { BatchesController, JobsController } from "./jobs/jobs.controller.js";
@@ -13,6 +15,7 @@ import { JobsService } from "./jobs/jobs.service.js";
 import { NoopJobQueue, PgBossJobQueue } from "./queue/job-queue.js";
 import { QuotaService, RepositoryQuotaProvider } from "./quota/quota.service.js";
 import { ResponsesController } from "./responses/responses.controller.js";
+import { ThreadsController } from "./threads/threads.controller.js";
 import { JOB_QUEUE, JOB_REPOSITORY, QUOTA_PROVIDER } from "./tokens.js";
 
 @Module({
@@ -21,6 +24,8 @@ import { JOB_QUEUE, JOB_REPOSITORY, QUOTA_PROVIDER } from "./tokens.js";
     JobsController,
     BatchesController,
     ResponsesController,
+    ChatCompletionsController,
+    ThreadsController,
     GovernanceController,
     KeysController,
     AuthController,
@@ -60,6 +65,7 @@ import { JOB_QUEUE, JOB_REPOSITORY, QUOTA_PROVIDER } from "./tokens.js";
         new RepositoryQuotaProvider(repository),
     },
     { provide: APP_GUARD, useClass: ApiKeyGuard },
+    { provide: APP_FILTER, useClass: RetryAfterFilter },
   ],
   exports: [JobsService, QuotaService, JOB_REPOSITORY, JOB_QUEUE],
 })

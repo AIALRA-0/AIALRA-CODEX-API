@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/install-runner-egress-policy.sh",
+      "match_sha256": "b0d56c1d28390f7e4ece0ae355b30ebe8c8618788c2d769736a939a7e0bb4dd4",
+      "occurrences": 1,
+      "reason": "Required standard private CIDR used by the public Runner egress-deny policy"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/install-runner-egress-policy.sh",
+      "match_sha256": "4fb0798e0eb02d5310d95142b51ddadf3d03fcd929382309589f573c0f923264",
+      "occurrences": 1,
+      "reason": "Required standard private CIDR used by the public Runner egress-deny policy"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/install-runner-egress-policy.sh",
+      "match_sha256": "5da4236dba69f926f858153f06d49edc73f54ce8cd226d7239d1948e663610e0",
+      "occurrences": 1,
+      "reason": "Required standard private CIDR used by the public Runner egress-deny policy"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/verify-runner-egress.sh",
+      "match_sha256": "f5047344122f0dee9974ba6761e61c6b8649e1f3968d13a635ebbf7be53a3a0d",
+      "occurrences": 1,
+      "reason": "Synthetic private endpoint required to verify the public Runner egress-deny policy"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/verify-runner-egress.sh",
+      "match_sha256": "f9863b6fa829fa6e80ffce0a30779b91c9affd96c0ee47f303c2c000b84a7b24",
+      "occurrences": 1,
+      "reason": "Synthetic private endpoint required to verify the public Runner egress-deny policy"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/verify-runner-egress.sh",
+      "match_sha256": "37d7a80604871e579850a658c7add2ae7557d0c6abcc9b31ecddc4424207eba3",
+      "occurrences": 1,
+      "reason": "Synthetic private endpoint required to verify the public Runner egress-deny policy"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/compose.yaml",
+      "match_sha256": "f2a429112528f7d9d1cc2a91db5b6aa570d9de4b3a84f84b1a11085d4b3b3fa4",
+      "occurrences": 1,
+      "reason": "Container-only control address in the generic deployment template"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/compose.yaml",
+      "match_sha256": "d73a5ef8539e6fa2693541acf5320f91b376e0b379d90632fcda54c6e1d1a32b",
+      "occurrences": 1,
+      "reason": "Container-only control subnet in the generic deployment template"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/compose.yaml",
+      "match_sha256": "1fdec272f33b2502e52d7eb7e2d7974b1d0992f010750a6e7b37e94457e395f6",
+      "occurrences": 1,
+      "reason": "Container-only proxy subnet in the generic deployment template"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/compose.yaml",
+      "match_sha256": "360021fdc91d32dcd3ea4979ea681883d264c3d8d93536c9c40d7771f9b6c196",
+      "occurrences": 1,
+      "reason": "Container-only egress subnet in the generic deployment template"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/prepare-production.sh",
+      "match_sha256": "f2a429112528f7d9d1cc2a91db5b6aa570d9de4b3a84f84b1a11085d4b3b3fa4",
+      "occurrences": 1,
+      "reason": "Template default for the container-only browser control address"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/prepare-production.sh",
+      "match_sha256": "d73a5ef8539e6fa2693541acf5320f91b376e0b379d90632fcda54c6e1d1a32b",
+      "occurrences": 1,
+      "reason": "Template default for the container-only control subnet"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/prepare-production.sh",
+      "match_sha256": "1fdec272f33b2502e52d7eb7e2d7974b1d0992f010750a6e7b37e94457e395f6",
+      "occurrences": 1,
+      "reason": "Template default for the container-only proxy subnet"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/prepare-production.sh",
+      "match_sha256": "360021fdc91d32dcd3ea4979ea681883d264c3d8d93536c9c40d7771f9b6c196",
+      "occurrences": 1,
+      "reason": "Template default for the container-only egress subnet"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/render-nginx.sh",
+      "match_sha256": "f2a429112528f7d9d1cc2a91db5b6aa570d9de4b3a84f84b1a11085d4b3b3fa4",
+      "occurrences": 1,
+      "reason": "Container-only browser address used by the generic Nginx template"
+    },
+    {
+      "code": "PRIVATE_IPV4",
+      "path": "deploy/scripts/render-nginx.sh",
+      "match_sha256": "d73a5ef8539e6fa2693541acf5320f91b376e0b379d90632fcda54c6e1d1a32b",
+      "occurrences": 1,
+      "reason": "Container-only control subnet used by the generic Nginx template"
+    }
+  ]
+}

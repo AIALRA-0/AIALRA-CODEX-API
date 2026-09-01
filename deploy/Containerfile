@@ -59,3 +59,43 @@ COPY --from=build /workspace/apps/web/.next/static ./apps/web/.next/static
 USER node
 EXPOSE 13211
 CMD ["node", "apps/web/server.js"]
+
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS chatgpt-browser
+ENV NODE_ENV=production
+ENV HOME=/opt/aialra-browser-home
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+      ca-certificates \
+      chromium \
+      fonts-noto-cjk \
+      novnc \
+      openbox \
+      websockify \
+      x11vnc \
+      xclip \
+      xdotool \
+      xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --home-dir /opt/aialra-browser-home --uid 1100 --shell /usr/sbin/nologin browser
+WORKDIR /app
+COPY --chown=browser:browser --from=build /workspace/node_modules ./node_modules
+COPY --chown=browser:browser --from=build /workspace/apps/chatgpt-bridge ./apps/chatgpt-bridge
+COPY --chown=browser:browser --from=build /workspace/packages ./packages
+COPY --chown=browser:browser --from=build /workspace/package.json ./package.json
+COPY --chown=browser:browser apps/chatgpt-bridge/extension /opt/aialra/chatgpt-extension
+COPY deploy/chatgpt-browser/entrypoint.sh /usr/local/bin/aialra-chatgpt-browser
+RUN chmod 0555 /usr/local/bin/aialra-chatgpt-browser \
+    && mkdir -p /run/aialra-chatgpt-bridge /run/aialra-chatgpt-extension /opt/aialra-browser-home/.config/chromium \
+    && chown -R browser:browser /run/aialra-chatgpt-bridge /run/aialra-chatgpt-extension /opt/aialra-browser-home
+USER browser
+EXPOSE 13216 6080
+ENTRYPOINT ["/usr/local/bin/aialra-chatgpt-browser"]
+
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS chatgpt-egress-proxy
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends squid ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY deploy/chatgpt-browser/squid.conf /etc/squid/squid.conf
+USER proxy
+EXPOSE 3128
+CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]

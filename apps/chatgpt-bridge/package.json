@@ -1,0 +1,25 @@
+{
+  "name": "@aialra/chatgpt-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsup src/main.ts --format esm --sourcemap --clean",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aialra/contracts": "workspace:*",
+    "@aialra/security": "workspace:*",
+    "ws": "^8.18.3",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
+}

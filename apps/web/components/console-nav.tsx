@@ -11,19 +11,22 @@ const groups = [
       ["在线调用", "/console/playground"],
       ["路由试算", "/console/routing"],
       ["调用记录", "/console/jobs"],
+      ["会话线程", "/console/threads"],
     ],
   },
   {
     label: "资源管理",
     items: [
       ["用量与模型", "/console/models"],
+      ["ChatGPT 网页通道", "/console/chatgpt-web"],
       ["API 密钥", "/console/keys"],
     ],
   },
-  { label: "测试", items: [["评测方法", "/evals"]] },
+  { label: "测试", items: [["评测方法", "/console/evals"]] },
   {
     label: "安全记录",
     items: [
+      ["权限确认", "/console/approvals"],
       ["操作日志", "/console/audit"],
       ["数据清理记录", "/console/retention"],
     ],

@@ -52,7 +52,7 @@ Worker 首次产生输出或工具副作用后会保持原路由
 
 生产入口使用 HTTPS 域名示例 `https://router.example.com`
 
-`Nginx` 只绑定 Tailscale 接口。根路径与控制台进入 Authentik，`/api/v1` 与 `/v1` 还要求作用域 API 密钥
+`Nginx` 只绑定 Tailscale 接口；根路径与控制台进入 Authentik，`/api/v1` 与 `/v1` 还要求作用域 API 密钥
 
 `VPS` 需要满足以下条件：
 
@@ -73,7 +73,7 @@ Worker 首次产生输出或工具副作用后会保持原路由
 ```powershell
 $RouterUrl = "https://router.example.com" # 使用实际 HTTPS 域名替换示例地址
 $BootstrapToken = Read-Host "Bootstrap token" # 从安全渠道读取一次性引导令牌，避免写入命令历史
-$BootstrapHeaders = @{ "X-Bootstrap-Token" = $BootstrapToken } # 只在首次管理员密钥请求中发送引导令牌
+$BootstrapHeaders = @{ "X-Bootstrap-Token" = ${BootstrapToken} } # 只在首次管理员密钥请求中发送引导令牌
 $BootstrapBody = @{ name = "Bootstrap administrator"; scopes = @("admin") } | ConvertTo-Json # 创建具有管理员作用域的首个密钥请求
 $CreatedKey = Invoke-RestMethod -Method Post -Uri "$RouterUrl/api/v1/bootstrap/keys" -Headers $BootstrapHeaders -ContentType "application/json" -Body $BootstrapBody # 调用只能成功一次的引导接口
 $env:MODEL_ROUTER_API_KEY = $CreatedKey.key # 把一次显示的密钥保存在当前 PowerShell 进程，关闭终端后自动清除
@@ -127,7 +127,7 @@ $Response | Select-Object status, model, output, usage # 查看任务状态、�
 
 成功响应包含 `status`、实际 `model`、`output`、`usage` 和内部 `job_id`
 
-`Schema` 或验收规则失败时，任务进入 `needs_review`
+`Schema` 或验收规则失败时，调用进入 `failed`，错误码为 `validation_failed`
 
 系统不会自动从 `Luna` 连跳到 `Terra` 或 `Sol`
 
@@ -138,6 +138,48 @@ $Response | Select-Object status, model, output, usage # 查看任务状态、�
 调用方需要忽略无法识别的新事件，并在收到 `[DONE]` 后关闭读取循环
 
 `TypeScript` 流式解析实现见 [`ModelRouterClient.streamResponse`](../packages/client/src/index.ts)
+
+### 4.4 多轮会话
+
+默认调用是一次性的：执行结束后 Runner 立即删除会话文件；需要连续多轮对话时，第一轮在 `aialra` 命名空间声明 `session_mode: "persistent"`，成功响应的 `metadata.session_key` 就是可续聊的线程标识；后续请求携带 `aialra.session_key` 即可继续同一线程，模型和推理档位自动粘住第一轮
+
+原生 `Jobs` 接口对应字段是任务合同里的 `sessionMode` 和 `sessionKey`
+
+线程默认 `24` 小时到期，可用环境变量 `SESSION_THREAD_TTL_MS` 调整；会话文件只保存在 Runner 的 Codex 目录，由 Runner 按 `CODEX_SESSION_TTL_MS` 定期清理，不进入数据库、日志或备份；`GET /api/v1/threads` 列出当前调用方可见的线程
+
+### 4.5 `Chat Completions` 兼容接口
+
+`POST /v1/chat/completions` 接受标准 OpenAI Chat Completions 请求体，任何官方 SDK 只需更换 `base_url` 和密钥即可调用
+
+- 支持 `messages`、`stream`、`stream_options.include_usage`、`max_tokens`、`max_completion_tokens`、`response_format`（`text`、`json_object`、`json_schema`）、`reasoning_effort`、`metadata` 和 `aialra` 扩展
+- 多轮对话由客户端携带完整消息历史；也可以在 `aialra.session_key` 中传入线程标识，此时只发送最新一条用户消息，上下文由 Codex 线程保留
+- `Idempotency-Key` 在此接口可选；提供时按原生接口同一规则去重
+- 未支持字段返回 `400 unsupported_parameter`；等待超时但调用仍在执行时返回 `504 gateway_timeout` 并附带任务编号，可转到 `Jobs` 接口查询结果
+
+### 4.6 ChatGPT Pro 网页实验通道
+
+网页实验通道只在调用方显式设置 `execution_channel: "chatgpt_web"` 时使用；普通 Codex 请求不会暗中切换通道
+
+管理员需要先通过受 Tailnet 和 Authentik 保护的 noVNC 页面手动登录 ChatGPT，再从页面动态发现并启用可见模型
+
+```powershell
+$WebRequest = @{ # 创建明确选择网页实验通道的 Responses 请求
+    model = "chatgpt-web.auto" # 使用管理员启用的网页自动模型入口
+    input = "调查一个合成主题，并列出公网来源" # 避免在实验任务中放入凭据和个人信息
+    aialra = @{ # 使用 AIALRA 命名空间，避免伪装成 OpenAI 官方字段
+        execution_channel = "chatgpt_web" # 明确选择网页通道
+        chatgpt_mode = "search" # 选择普通对话、搜索或深度研究之一
+        require_sources = $true # 要求提取最终回答中的公网来源
+    } # 完成实验参数
+} | ConvertTo-Json -Depth 8 # 保留嵌套字段
+Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers -ContentType "application/json" -Body $WebRequest # 等待最终完整正文
+```
+
+网页流式请求只发送状态和 1 次最终完整正文，不伪造逐 Token 增量
+
+ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 等效价格；接口返回 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”
+
+启用、真实网页探针、安全边界和完整错误说明见[ChatGPT Pro 网页实验通道](chatgpt-web-experiment.md)
 
 ## 5 原生 `Jobs` 接口
 
@@ -163,7 +205,7 @@ $JobRequest = @{ # 使用完整任务合同描述审查目标和边界
         constraints = @("只报告可以由代码证明的问题", "不要修改文件") # 约束输出范围和副作用
         expectedOutput = "按严重度返回问题、证据和修复建议" # 说明合格结果的结构
         dataClassification = "internal" # 标记任务数据等级
-        permissions = @{ filesystem = "read"; network = "none" } # 使用只读且无网络的安全默认权限
+        permissions = @{ preset = "restricted" } # 使用只读且无网络的普通 API 密钥默认权限
         deadlineMs = 120000 # 使用契约默认值对应的 120 秒期限
         model = "auto" # 让确定性路由器根据任务类型选择模型
         effort = "medium" # 日常代码审查使用中等推理等级
@@ -180,9 +222,37 @@ $Events.data | Select-Object sequence, type, data # 查看状态、工具、审�
 
 任务状态按照 `accepted → queued → running → validating` 推进
 
-终态为 `succeeded`、`needs_review`、`failed`、`cancelled` 或 `expired`
+终态为 `succeeded`、`failed`、`cancelled` 或 `expired`
 
-### 5.3 批量任务
+`confirm` 权限会先进入 `awaiting_approval`，管理员授权后才进入 `queued`
+
+### 5.3 执行权限
+
+三档权限都只作用于本次调用的一次性隔离工作区：
+
+| 预设         | 文件 | 公开互联网 | 启动前确认 |
+| ------------ | ---- | ---------- | ---------- |
+| `restricted` | 只读 | 禁止       | 不需要     |
+| `confirm`    | 可写 | 允许       | 需要       |
+| `full`       | 可写 | 允许       | 不需要     |
+
+网页管理员和可信 Agent 密钥省略权限时使用 `full`，普通 API 密钥省略权限时使用 `restricted`
+
+`full` 不会启用 Codex 的 `danger-full-access`，也不允许读取宿主机、Codex 身份、数据库秘密或其他调用工作区
+
+Responses 接口使用命名空间扩展：
+
+```json
+{
+  "model": "gpt-5.6-luna",
+  "input": "搜索并总结公开资料",
+  "aialra": {
+    "permission_preset": "full"
+  }
+}
+```
+
+### 5.4 批量任务
 
 `POST /api/v1/batches` 每次接受 1 到 100 个任务，这个范围来自 [`BatchesController`](../apps/api/src/jobs/jobs.controller.ts)
 
@@ -197,7 +267,8 @@ $Events.data | Select-Object sequence, type, data # 查看状态、工具、审�
 ```powershell
 $env:MODEL_ROUTER_URL = "https://router.example.com" # 指向受保护 HTTPS 入口
 $env:MODEL_ROUTER_API_KEY = "<在安全终端中设置的作用域密钥>" # 使用当前进程环境变量提供密钥，禁止提交到仓库
-node apps/cli/dist/main.js call --task "把合成日志分为正常、警告、错误" --kind bounded --model luna --effort low # 创建一个 Luna 分类任务
+node apps/cli/dist/main.js call --task "把合成日志分为正常、警告、错误" --kind bounded --model luna --effort low --permission restricted # 创建一个受限权限的 Luna 分类任务
+node apps/cli/dist/main.js research --task "调查一个合成主题" --mode search --model chatgpt-web.auto # 创建显式网页搜索任务并返回任务编号
 node apps/cli/dist/main.js jobs --limit 20 # 查询最近 20 个任务
 node apps/cli/dist/main.js quota # 读取最新 Codex 配额窗口快照
 node apps/cli/dist/main.js cancel --id "<任务 UUID>" # 取消仍在排队或运行的任务
@@ -267,7 +338,7 @@ env_vars = ["MODEL_ROUTER_URL", "MODEL_ROUTER_API_KEY"] # 从 Codex 主机环境
 required = true # MCP 初始化失败时阻止 Agent 在缺少治理工具的情况下继续
 startup_timeout_sec = 10 # 使用官方默认启动等待时间
 tool_timeout_sec = 150 # 由默认任务期限 120 秒加 30 秒传输余量得到
-enabled_tools = ["delegate_codex", "preview_route", "job_status", "cancel_job", "quota_snapshot"] # 只启用首版实现的 5 个工具
+enabled_tools = ["delegate_codex", "delegate_chatgpt", "preview_route", "job_status", "cancel_job", "quota_snapshot"] # 启用 Codex 委派、显式网页委派和 4 个治理工具
 ```
 
 - 第三步，重启 `Codex` 并使用 `/mcp` 检查 `aialra-model-router`
@@ -293,10 +364,11 @@ enabled_tools = ["delegate_codex", "preview_route", "job_status", "cancel_job", 
 | 边界清楚、结构固定、可自动验证 | `Luna low`     | 分类、抽取、格式转换、短摘要 | `JSON Schema` 或 `contains:` 验收规则 |
 | 日常编码、调试、集成和审查     | `Terra medium` | 代码审查、接口接入、失败修复 | 测试、类型检查或人工审查              |
 | 高歧义、高风险或分歧裁决       | `Sol high`     | 架构选择、威胁分析、发布裁决 | 决策记录与独立复核                    |
+| 明确允许网页实验且需要网页搜索 | `chatgpt_web`  | 搜索、深度研究和来源整理     | 来源完整性与任务归属检查              |
 
 </div>
 
-所有任务都由 Codex Luna、Terra 或 Sol 执行
+稳定通道任务由 Codex 模型执行；只有调用方显式选择且管理员启用后，任务才进入 ChatGPT Pro 网页实验通道
 
 ## 10 常见错误
 
@@ -304,16 +376,26 @@ enabled_tools = ["delegate_codex", "preview_route", "job_status", "cancel_job", 
 
 表 10.1 首次接入常见错误
 
-| 错误码                       | 原因                                    | 处理方法                                       |
-| ---------------------------- | --------------------------------------- | ---------------------------------------------- |
-| `invalid_api_key`            | API Key 缺失、过期、吊销或摘要校验失败  | 创建新密钥并检查作用域与到期时间               |
-| `insufficient_scope`         | API Key 缺少接口要求的作用域            | 为调用方签发最小且完整的作用域集合             |
-| `idempotency_key_required`   | 写请求没有幂等键                        | 为每个业务请求创建稳定键，并在网络重试时复用   |
-| `idempotency_conflict`       | 同一键值对应不同请求摘要                | 为新业务请求生成新键，保留旧键用于原请求重试   |
-| `codex_capacity_constrained` | 自动 Terra 或 Sol 任务遇到 85% 配额水位 | 显式指定必要模型，或等待当前额度窗口重置       |
-| `codex_capacity_reserved`    | 自动 Terra 或 Sol 任务遇到 95% 配额水位 | 仅提交必要的显式任务，或等待额度窗口重置       |
-| `provider_unavailable`       | Worker 没有启用 Codex Adapter           | 检查 Codex 登录和 Adapter 开关                 |
-| `needs_review`               | Schema、验收规则或审批没有通过          | 阅读验证事件并由人工决定显式重跑或修改任务合同 |
+| 错误码                          | 原因                                     | 处理方法                                           |
+| ------------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| `invalid_api_key`               | API Key 缺失、过期、吊销或摘要校验失败   | 创建新密钥并检查作用域与到期时间                   |
+| `insufficient_scope`            | API Key 缺少接口要求的作用域             | 为调用方签发最小且完整的作用域集合                 |
+| `idempotency_key_required`      | 写请求没有幂等键                         | 为每个业务请求创建稳定键，并在网络重试时复用       |
+| `idempotency_conflict`          | 同一键值对应不同请求摘要                 | 为新业务请求生成新键，保留旧键用于原请求重试       |
+| `codex_capacity_constrained`    | 自动 Terra 或 Sol 任务遇到 85% 配额水位  | 显式指定必要模型，或等待当前额度窗口重置           |
+| `codex_capacity_reserved`       | 自动 Terra 或 Sol 任务遇到 95% 配额水位  | 仅提交必要的显式任务，或等待额度窗口重置           |
+| `provider_unavailable`          | Worker 没有启用 Codex Adapter            | 检查 Codex 登录和 Adapter 开关                     |
+| `invalid_validation_rule`       | 旧版验收规则没有使用允许的前缀           | 改用结构化 `checks`，或使用 `equals:`、`contains:` |
+| `validation_failed`             | 模型输出没有通过明确的 Schema 或检查规则 | 查看验证消息，修正输入或规则后重新调用             |
+| `permission_ceiling_exceeded`   | 请求权限超过当前 API 密钥上限            | 使用允许该预设的可信 Agent 密钥，或降低权限        |
+| `session_expired`               | 会话线程不存在或已超过保留期限           | 去掉 `sessionKey` 重新开始对话                     |
+| `session_access_denied`         | 试图继续其他调用者的会话线程             | 只使用本人密钥创建的线程                           |
+| `gateway_timeout`               | Chat 兼容接口等待超时但调用仍在执行      | 用返回的任务编号查询 `GET /api/v1/jobs/{id}`       |
+| `chatgpt_login_required`        | 专用可见浏览器没有有效登录状态           | 管理员打开 noVNC 并手动登录                        |
+| `chatgpt_verification_required` | 网页要求验证码或人工验证                 | 管理员在可见页面处理；系统不会绕过                 |
+| `chatgpt_ui_changed`            | 必要页面元素无法识别                     | 关闭实验通道并重新验证页面契约                     |
+| `chatgpt_delivery_uncertain`    | 无法证明网页消息是否已经发送             | 保持失败并检查页面；系统不会自动重发               |
+| `chatgpt_output_incomplete`     | 无法证明最终正文已经稳定                 | 检查可见页面和扩展健康状态                         |
 
 </div>
 

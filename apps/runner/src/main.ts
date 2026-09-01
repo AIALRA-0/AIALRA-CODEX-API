@@ -1,10 +1,17 @@
+import { timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 import type { ModelCatalogSnapshot, QuotaSnapshot } from "@aialra/contracts";
 import { RouteDecisionSchema, TaskContractSchema } from "@aialra/contracts";
-import { CodexAppServerClient, CodexProvider } from "@aialra/providers";
+import {
+  cleanupExpiredCodexSessions,
+  CodexAppServerClient,
+  CodexProvider,
+} from "@aialra/providers";
 import { z } from "zod";
 
 import { codexEnvironment } from "./environment.js";
@@ -19,10 +26,26 @@ const InvocationSchema = z
   .strict();
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const runnerApiToken = readRequiredSecret("RUNNER_API_TOKEN");
 const maxConcurrency = Math.max(1, Number(process.env.RUNNER_MAX_CONCURRENCY ?? 1));
 let activeInvocations = 0;
 let currentQuota: QuotaSnapshot | null = null;
 let currentModels: ModelCatalogSnapshot | null = null;
+
+function readRequiredSecret(name: string): string {
+  const secretPath = process.env[`${name}_FILE`];
+  const value = secretPath && existsSync(secretPath) ? readFileSync(secretPath, "utf8").trim() : "";
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+function isAuthorized(request: IncomingMessage): boolean {
+  const header = request.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return false;
+  const supplied = Buffer.from(header.slice("Bearer ".length));
+  const expected = Buffer.from(runnerApiToken);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
 const appServer = new CodexAppServerClient({
   codexPath: process.env.CODEX_BIN || undefined,
   environment: codexEnvironment(),
@@ -149,10 +172,20 @@ async function models(response: ServerResponse): Promise<void> {
 }
 
 const port = Number(process.env.RUNNER_PORT ?? 13214);
+const sessionTtlMs = Math.max(60_000, Number(process.env.CODEX_SESSION_TTL_MS ?? 86_400_000));
+const codexHome = resolve(process.env.CODEX_HOME ?? join(homedir(), ".codex"));
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/healthz") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ status: "ok", service: "aialra-model-router-runner" }));
+    return;
+  }
+  if (!isAuthorized(request)) {
+    response.writeHead(401, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    });
+    response.end(JSON.stringify({ error: { code: "runner_unauthorized" } }));
     return;
   }
   if (request.method === "GET" && request.url === "/quota") {
@@ -177,8 +210,15 @@ void refreshRuntimeState();
 const runtimeRefreshTimer = setInterval(() => void refreshRuntimeState(), 30_000);
 runtimeRefreshTimer.unref();
 
+const reapExpiredSessions = () =>
+  void cleanupExpiredCodexSessions(codexHome, sessionTtlMs).catch(() => undefined);
+reapExpiredSessions();
+const sessionReaperTimer = setInterval(reapExpiredSessions, 3_600_000);
+sessionReaperTimer.unref();
+
 const shutdown = () => {
   clearInterval(runtimeRefreshTimer);
+  clearInterval(sessionReaperTimer);
   appServer.close();
   server.close(() => process.exit(0));
 };

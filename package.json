@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Private Codex-to-API gateway with quota-aware Luna, Terra, and Sol routing.",
+  "description": "Private Codex subscription-capacity router with an optional visible ChatGPT web experiment.",
   "license": "Apache-2.0",
   "packageManager": "pnpm@10.33.4",
   "engines": {

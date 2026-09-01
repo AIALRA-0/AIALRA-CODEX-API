@@ -481,16 +481,18 @@ h3 {
   display: inline-flex;
 }
 .help-tip-button {
-  display: inline-grid;
-  width: 1.25rem;
-  height: 1.25rem;
-  place-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
+  border: 0;
+  border-bottom: 1px solid var(--muted);
   background: transparent;
-  color: var(--text);
-  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 0.1rem 0;
+  font-size: 0.75rem;
   cursor: help;
+}
+.help-tip-button:hover,
+.help-tip-button:focus-visible {
+  color: var(--text);
+  border-bottom-color: var(--text);
 }
 .help-tip {
   position: absolute;
@@ -507,8 +509,12 @@ h3 {
   font-weight: 450;
   line-height: 1.55;
 }
-.help-tip-wrap:hover .help-tip,
-.help-tip-wrap:focus-within .help-tip,
+.help-tip > * {
+  display: block;
+}
+.help-tip > * + * {
+  margin-top: 0.4rem;
+}
 .help-tip[data-open="true"] {
   display: block;
 }
@@ -575,6 +581,27 @@ h3 {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.review-summary {
+  margin-block: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.review-summary h4 {
+  margin: 0.4rem 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.review-summary p,
+.review-summary ul {
+  margin-block: 0.55rem;
+}
+
+.review-summary ul {
+  padding-inline-start: 1.25rem;
 }
 
 .notice,
@@ -646,6 +673,34 @@ th {
   color: var(--text);
   padding: 0.25rem 0;
   cursor: pointer;
+}
+.section-heading {
+  margin: 1.5rem 0 0.75rem;
+}
+.variable-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 0.5rem 1.5rem;
+  margin: 0 0 1.5rem;
+}
+.variable-list > div {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.75rem;
+  padding-block: 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+.variable-list dt {
+  font-weight: 700;
+}
+.variable-list dd {
+  margin: 0;
+  color: var(--muted);
+}
+.eval-actions {
+  justify-content: flex-start;
+  margin-top: 1rem;
+  flex-wrap: wrap;
 }
 .table-link:hover {
   border-bottom-color: #fff;

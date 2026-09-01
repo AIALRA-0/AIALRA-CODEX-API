@@ -52,6 +52,21 @@ Node.js and Debian container base
 Sources: https://github.com/nodejs/node and https://www.debian.org/
 Licenses: Node.js and Debian component licenses as distributed by the upstream images
 
+Optional ChatGPT web experiment container components
+Chromium source: https://www.chromium.org/Home/
+noVNC source: https://github.com/novnc/noVNC
+websockify source: https://github.com/novnc/websockify
+Squid source: https://github.com/squid-cache/squid
+Openbox source: https://github.com/danakj/openbox
+X.Org X server source: https://www.x.org/wiki/
+Licenses: the licenses declared by each Debian package and its upstream project,
+including Chromium BSD-style notices, noVNC MPL-2.0, websockify LGPL-3.0,
+Squid GPL-2.0-or-later, Openbox GPL-2.0-or-later, and X.Org component notices
+
+The AIALRA ChatGPT web bridge and Chrome extension are clean-room code
+No source code, browser profiles, cookies, tokens, DOM captures, or license text was
+copied from TrilliumFlow, codex-chatgpt-web, ChatGPT-Web2API, or chatgpt-bridge
+
 Codex Pooler was reviewed only as public prior art
 Its Elastic License 2.0 source was not copied into this Apache-2.0 implementation
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { TaskContractSchema } from "@aialra/contracts";
 
@@ -7,9 +10,12 @@ import {
   buildTaskPrompt,
   calculateApiEquivalentUsd,
   calculateCodexCredits,
+  cleanupExpiredCodexSessions,
   codexFilesystemPermissionOverride,
+  codexThreadPermissionOptions,
   modelCatalogFromAppServer,
   quotaSnapshotFromAppServer,
+  removeCodexSession,
 } from "../src/index.js";
 
 const task = TaskContractSchema.parse({
@@ -73,6 +79,7 @@ describe("provider utilities", () => {
           supportedReasoningEfforts: [
             { reasoningEffort: "low", description: "Fast" },
             { reasoningEffort: "high", description: "Thorough" },
+            { reasoningEffort: "max", description: "Maximum" },
             { reasoningEffort: "future", description: "Unknown" },
           ],
           inputModalities: ["text", "image"],
@@ -82,7 +89,7 @@ describe("provider utilities", () => {
     expect(catalog.models[0]).toMatchObject({
       id: "gpt-5.5",
       available: true,
-      supportedReasoningEfforts: ["low", "high"],
+      supportedReasoningEfforts: ["low", "high", "max"],
       inputModalities: ["text", "image"],
     });
   });
@@ -105,5 +112,70 @@ describe("provider utilities", () => {
   it("does not expose a workspace when filesystem permission is none", () => {
     const override = codexFilesystemPermissionOverride("/codex-auth", "/workspace/job-2", "none");
     expect(override).not.toContain(`"${resolve("/workspace/job-2").replaceAll("\\", "/")}"=`);
+  });
+
+  it("maps permission presets without enabling danger-full-access", () => {
+    expect(codexThreadPermissionOptions("restricted")).toEqual({
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+      webSearchMode: "disabled",
+      approvalPolicy: "never",
+    });
+    expect(codexThreadPermissionOptions("full")).toEqual({
+      sandboxMode: "workspace-write",
+      networkAccessEnabled: true,
+      webSearchMode: "live",
+      approvalPolicy: "never",
+    });
+    expect(JSON.stringify(codexThreadPermissionOptions("full"))).not.toContain(
+      "danger-full-access",
+    );
+  });
+});
+
+describe("codex session file lifecycle", () => {
+  it("removes only the session files of the given thread", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aialra-sessions-"));
+    try {
+      const directory = join(root, "sessions", "2026", "08", "28");
+      await mkdir(directory, { recursive: true });
+      const kept = join(directory, "rollout-keep.jsonl");
+      const removed = join(directory, "rollout-drop.jsonl");
+      await writeFile(kept, "{}\n");
+      await writeFile(removed, "{}\n");
+
+      const count = await removeCodexSession(root, "drop");
+
+      expect(count).toBe(1);
+      expect(existsSync(removed)).toBe(false);
+      expect(existsSync(kept)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reaps session files older than the retention window", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aialra-sessions-"));
+    try {
+      const directory = join(root, "sessions", "2026", "08", "28");
+      await mkdir(directory, { recursive: true });
+      const stale = join(directory, "rollout-stale.jsonl");
+      const fresh = join(directory, "rollout-fresh.jsonl");
+      const note = join(directory, "notes.txt");
+      await writeFile(stale, "{}\n");
+      await writeFile(fresh, "{}\n");
+      await writeFile(note, "keep me\n");
+      const old = new Date(Date.now() - 48 * 3_600_000);
+      await utimes(stale, old, old);
+
+      const removed = await cleanupExpiredCodexSessions(root, 86_400_000);
+
+      expect(removed).toBe(1);
+      expect(existsSync(stale)).toBe(false);
+      expect(existsSync(fresh)).toBe(true);
+      expect(existsSync(note)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

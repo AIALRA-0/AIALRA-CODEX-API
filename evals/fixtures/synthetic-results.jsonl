@@ -1,2 +1,2 @@
 {"id":"synthetic-1","status":"succeeded","usage":{"codexCredits":0.4}}
-{"id":"synthetic-2","status":"needs_review","usage":{"codexCredits":0.6}}
+{"id":"synthetic-2","status":"failed","error":{"code":"validation_failed"},"usage":{"codexCredits":0.6}}

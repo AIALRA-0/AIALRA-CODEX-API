@@ -11,12 +11,14 @@ describe("runner boundary", () => {
       DATABASE_URL: "synthetic-database-value",
       PAYLOAD_MASTER_KEY: "synthetic-master-key",
       API_KEY_PEPPER: "synthetic-pepper",
+      RUNNER_API_TOKEN: "synthetic-runner-token",
     });
     expect(result.PATH).toBe("/usr/bin");
     expect(result.CODEX_HOME).toBe("/codex-auth");
     expect(result).not.toHaveProperty("DATABASE_URL");
     expect(result).not.toHaveProperty("PAYLOAD_MASTER_KEY");
     expect(result).not.toHaveProperty("API_KEY_PEPPER");
+    expect(result).not.toHaveProperty("RUNNER_API_TOKEN");
   });
 
   it("returns fixed public errors instead of internal exception text", () => {

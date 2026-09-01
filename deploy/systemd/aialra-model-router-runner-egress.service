@@ -1,0 +1,17 @@
+[Unit]
+Description=Restore AIALRA Model Router Runner egress policy
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aialra-model-router/current
+Environment=PRODUCTION_ENV=/var/lib/aialra-model-router/production.env
+ExecStart=/bin/bash /opt/aialra-model-router/current/deploy/scripts/install-runner-egress-policy.sh
+RemainAfterExit=yes
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

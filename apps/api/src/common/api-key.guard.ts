@@ -11,6 +11,7 @@ import {
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 
+import type { ExecutionPolicy } from "@aialra/contracts";
 import type { JobRepository } from "@aialra/persistence";
 import { apiKeyPrefix, hashApiKey, verifyApiKey, verifySharedSecret } from "@aialra/security";
 
@@ -23,6 +24,7 @@ export interface AuthenticatedRequest extends Request {
   scopes?: string[];
   isAdmin?: boolean;
   authenticatedAt?: string;
+  executionPolicy?: ExecutionPolicy;
 }
 
 @Injectable()
@@ -76,6 +78,10 @@ export class ApiKeyGuard implements CanActivate {
       request.scopes = ["admin"];
       request.isAdmin = true;
       request.authenticatedAt = authentikAuthTime;
+      request.executionPolicy = {
+        defaultPreset: "full",
+        allowedPresets: ["restricted", "confirm", "full"],
+      };
       return true;
     }
     const sessionToken = request.headers.cookie
@@ -98,6 +104,10 @@ export class ApiKeyGuard implements CanActivate {
         request.scopes = ["admin"];
         request.isAdmin = true;
         request.authenticatedAt = session.createdAt;
+        request.executionPolicy = {
+          defaultPreset: "full",
+          allowedPresets: ["restricted", "confirm", "full"],
+        };
         return true;
       }
     }
@@ -107,6 +117,10 @@ export class ApiKeyGuard implements CanActivate {
       request.scopes = ["admin", "jobs:read", "jobs:write", "quota:read"];
       request.isAdmin = true;
       request.authenticatedAt = new Date().toISOString();
+      request.executionPolicy = {
+        defaultPreset: "full",
+        allowedPresets: ["restricted", "confirm", "full"],
+      };
       return true;
     }
     if (!header?.startsWith("Bearer ")) {
@@ -160,6 +174,7 @@ export class ApiKeyGuard implements CanActivate {
     request.callerId = record.id;
     request.scopes = record.scopes;
     request.isAdmin = record.scopes.includes("admin");
+    request.executionPolicy = record.executionPolicy;
     void this.repository.touchApiKey(record.id);
     return true;
   }

@@ -41,7 +41,13 @@ export class JobsController {
     if (!parsed.success) {
       throw zodHttpError(parsed.error);
     }
-    return this.jobs.create(parsed.data, request.callerId ?? "unknown", idempotencyKey ?? null);
+    return this.jobs.create(
+      parsed.data,
+      request.callerId ?? "unknown",
+      idempotencyKey ?? null,
+      request.executionPolicy,
+      request.scopes ?? [],
+    );
   }
 
   @Get()
@@ -191,6 +197,8 @@ export class BatchesController {
         requests,
         request.callerId ?? "unknown",
         idempotencyKey ?? null,
+        request.executionPolicy,
+        request.scopes ?? [],
       ),
     };
   }

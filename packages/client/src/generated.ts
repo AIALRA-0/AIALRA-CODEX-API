@@ -52,6 +52,38 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/chat/completions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["createChatCompletion"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/threads": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listSessionThreads"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/jobs": {
     parameters: {
       query?: never;
@@ -204,6 +236,54 @@ export interface paths {
       cookie?: never;
     };
     get: operations["getQuota"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/chatgpt-web/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getChatGptWebStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/chatgpt-web/qualification-runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listChatGptWebQualificationRuns"];
+    put?: never;
+    post: operations["createChatGptWebQualificationRun"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/chatgpt-web/qualification-runs/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getChatGptWebQualificationRun"];
     put?: never;
     post?: never;
     delete?: never;
@@ -424,6 +504,7 @@ export interface components {
        * @description Omit for the 30-day default; null requests a non-expiring administrator key
        */
       expiresAt?: string | null;
+      executionPolicy?: components["schemas"]["ExecutionPolicy"];
     };
     RevokeApiKeyRequest: {
       confirmationPrefix: string;
@@ -434,6 +515,7 @@ export interface components {
       name: string;
       prefix: string;
       scopes: string[];
+      executionPolicy: components["schemas"]["ExecutionPolicy"];
       rateLimitPerMinute: number;
       /** Format: date-time */
       expiresAt?: string | null;
@@ -473,7 +555,37 @@ export interface components {
       /** Format: date-time */
       metadataDeleteAfter: string;
     };
+    /** @enum {string} */
+    PermissionPreset: "restricted" | "confirm" | "full";
+    AialraExtension: {
+      permission_preset?: components["schemas"]["PermissionPreset"];
+      session_key?: string;
+      /** @enum {string} */
+      session_mode?: "ephemeral" | "persistent";
+      deadline_ms?: number;
+      /** @enum {string} */
+      execution_channel?: "codex" | "chatgpt_web";
+      /** @enum {string} */
+      chatgpt_mode?: "chat" | "search" | "deep_research";
+      /**
+       * @default temporary_per_request
+       * @constant
+       */
+      conversation_mode: "temporary_per_request";
+      /**
+       * @description Every ChatGPT web request uses a new non-personalized Temporary Chat.
+       * @default true
+       * @constant
+       */
+      temporary_chat: true;
+      require_sources?: boolean;
+    };
+    ExecutionPolicy: {
+      defaultPreset: components["schemas"]["PermissionPreset"];
+      allowedPresets: components["schemas"]["PermissionPreset"][];
+    };
     PermissionProfile: {
+      preset?: components["schemas"]["PermissionPreset"];
       /**
        * @default read
        * @enum {string}
@@ -483,7 +595,7 @@ export interface components {
        * @default none
        * @enum {string}
        */
-      network: "none" | "allowlist";
+      network: "none" | "allowlist" | "all";
       allowedHosts?: string[];
       /** @default true */
       requireApprovalForWrites: boolean;
@@ -504,6 +616,20 @@ export interface components {
         responseSchema?: {
           [key: string]: unknown;
         };
+        checks?: (
+          | {
+              /** @constant */
+              type: "equals";
+              expected: string;
+              /** @default true */
+              trim: boolean;
+            }
+          | {
+              /** @constant */
+              type: "contains";
+              expected: string;
+            }
+        )[];
         acceptanceTests?: string[];
       };
       /**
@@ -522,13 +648,43 @@ export interface components {
         maxAttempts: number;
       };
       sessionKey?: string;
+      /**
+       * @default ephemeral
+       * @enum {string}
+       */
+      sessionMode: "ephemeral" | "persistent";
+      /**
+       * @default codex
+       * @enum {string}
+       */
+      executionChannel: "codex" | "chatgpt_web";
+      chatgptWeb?: {
+        /** @enum {string} */
+        mode: "chat" | "search" | "deep_research";
+        /**
+         * @default temporary_per_request
+         * @constant
+         */
+        conversationMode: "temporary_per_request";
+        /**
+         * @default true
+         * @constant
+         */
+        temporaryChat: true;
+        /**
+         * @default false
+         * @constant
+         */
+        personalized: false;
+        requireSources: boolean;
+      };
       /** @default auto */
       model: string;
       /**
        * @default medium
        * @enum {string}
        */
-      effort: "minimal" | "low" | "medium" | "high" | "xhigh";
+      effort: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
       /** @default true */
       replayable: boolean;
       ambiguity?: number;
@@ -546,11 +702,11 @@ export interface components {
       /** @enum {string} */
       status:
         | "accepted"
+        | "awaiting_approval"
         | "queued"
         | "running"
         | "validating"
         | "succeeded"
-        | "needs_review"
         | "failed"
         | "cancelled"
         | "expired";
@@ -582,8 +738,8 @@ export interface components {
       createdAt: string;
     };
     RouteDecision: {
-      /** @constant */
-      provider: "codex";
+      /** @enum {string} */
+      provider: "codex" | "chatgpt_web";
       model: string;
       effort: string;
       policyVersion: string;
@@ -606,6 +762,14 @@ export interface components {
       /** @description Observed percentage-point change when both snapshots belong to the same quota window */
       quotaWindowDeltaPercent: number | null;
       allocatedSubscriptionUsd: number | null;
+      /** @enum {string} */
+      measurementStatus?: "measured" | "unavailable";
+      /** @enum {string} */
+      subscriptionChannel?: "codex" | "chatgpt_pro_web";
+      sourceCount?: number | null;
+      durationMs?: number | null;
+      attemptCount?: number;
+      retryCount?: number;
     };
     QuotaSnapshot: {
       /** @constant */
@@ -636,6 +800,8 @@ export interface components {
     RuntimeModel: {
       id: string;
       displayName: string;
+      /** @enum {string} */
+      provider: "codex" | "chatgpt_web";
       available: boolean;
       enabled: boolean;
       hidden: boolean;
@@ -651,8 +817,215 @@ export interface components {
       } | null;
       /** @enum {string} */
       rateStatus: "available" | "unavailable";
+      /** @enum {string} */
+      streamingMode: "delta" | "final_only";
       /** Format: date-time */
       discoveredAt: string;
+    };
+    ChatGptWebStatus: {
+      configuredEnabled: boolean;
+      effectiveConcurrency: number;
+      maximumConcurrency: number;
+      activeTabs: number;
+      queuedJobs: number;
+      sandboxVerified: boolean;
+      extensionConnected: boolean;
+      pageReady: boolean;
+      authenticated: boolean;
+      /** @enum {string} */
+      circuitState: "closed" | "cooldown" | "open" | "qualification_required";
+      circuitReason: string | null;
+      /** Format: date-time */
+      cooldownUntil: string | null;
+      /** @enum {string} */
+      rateLimitState: "clear" | "cooldown" | "recovery_probe" | "observation";
+      retryAfter: number | null;
+      /** Format: date-time */
+      lastRateLimitAt: string | null;
+      consecutiveRateLimits: number;
+      /** @constant */
+      conversationMode: "temporary_per_request";
+      temporaryChatVerified: boolean;
+      /** Format: date-time */
+      lastRecoveryProbeAt: string | null;
+      lastRecoveryProbePassed: boolean | null;
+      /** Format: date-time */
+      lastSubmissionAt: string | null;
+      successesAtCurrentLevel: number;
+      attemptsAtCurrentLevel: number;
+      severeErrorsAtCurrentLevel: number;
+      /** Format: date-time */
+      lastQualifiedAt: string | null;
+      lastQualificationPassed: boolean | null;
+      lastQualificationSucceeded: number | null;
+      adapterVersion: string;
+      /** @enum {string} */
+      phase:
+        | "idle"
+        | "preparing"
+        | "input_verified"
+        | "submitted"
+        | "generating"
+        | "completed"
+        | "failed"
+        | "resetting";
+      /** Format: uuid */
+      activeJobId: string | null;
+      activeAttempt: number | null;
+      /** Format: date-time */
+      lastHeartbeatAt: string | null;
+      lastFailureCode: string | null;
+      /** Format: date-time */
+      lastResetAt: string | null;
+      quarantinedTabs: number;
+      slots: {
+        /** Format: uuid */
+        slotId: string;
+        /** @enum {string} */
+        state:
+          | "starting"
+          | "idle"
+          | "preparing"
+          | "ready"
+          | "submitted"
+          | "generating"
+          | "completed"
+          | "quarantined";
+        submitted: boolean;
+        /** Format: date-time */
+        quarantinedUntil: string | null;
+        /** Format: date-time */
+        updatedAt: string;
+      }[];
+      /** Format: uuid */
+      lastQualificationRunId: string | null;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    ChatGptWebQualificationItem: {
+      index: number;
+      name: string;
+      /** @enum {string} */
+      mode: "chat" | "search" | "deep_research";
+      /** @enum {string} */
+      status: "pending" | "running" | "succeeded" | "failed";
+      durationMs: number | null;
+      outputLength: number | null;
+      outputSha256: string | null;
+      sourceCount: number | null;
+      errorCode: string | null;
+      submittedCount: number;
+      ownershipMatched: boolean | null;
+    };
+    ChatGptWebQualificationRun: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      suite: "readiness" | "chat_3" | "chat_10" | "deep_2" | "full_10";
+      /** @enum {string} */
+      status: "accepted" | "running" | "succeeded" | "failed" | "cancelled";
+      total: number;
+      completed: number;
+      succeeded: number;
+      failed: number;
+      items: components["schemas"]["ChatGptWebQualificationItem"][];
+      errorCode: string | null;
+      createdBy: string;
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      startedAt: string | null;
+      /** Format: date-time */
+      completedAt: string | null;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    SessionThread: {
+      sessionKey: string;
+      callerId: string;
+      model: string;
+      /** @enum {string} */
+      effort: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+      turnCount: number;
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      lastUsedAt: string;
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    ChatCompletionsRequest: {
+      /** @default auto */
+      model: string;
+      messages: {
+        /** @enum {string} */
+        role: "system" | "developer" | "user" | "assistant";
+        content: string;
+        name?: string;
+      }[];
+      /** @default false */
+      stream: boolean;
+      stream_options?: {
+        /** @default false */
+        include_usage: boolean;
+      };
+      max_tokens?: number;
+      max_completion_tokens?: number;
+      response_format?:
+        | {
+            /** @constant */
+            type?: "text";
+          }
+        | {
+            /** @constant */
+            type?: "json_object";
+          }
+        | {
+            /** @constant */
+            type: "json_schema";
+            json_schema: {
+              name?: string;
+              schema?: {
+                [key: string]: unknown;
+              };
+              strict?: boolean;
+            };
+          };
+      /** @enum {string} */
+      reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+      metadata?: {
+        [key: string]: string;
+      };
+      aialra?: components["schemas"]["AialraExtension"];
+    };
+    ChatCompletion: {
+      id: string;
+      /** @constant */
+      object: "chat.completion";
+      created: number;
+      model: string;
+      choices: {
+        /** @constant */
+        index: 0;
+        message: {
+          /** @constant */
+          role: "assistant";
+          content: string;
+        };
+        /** @enum {string} */
+        finish_reason: "stop" | "length";
+      }[];
+      usage?: {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+      };
+      aialra?: {
+        job_id?: string;
+        session_key?: string | null;
+        /** @enum {string} */
+        measurement_status?: "measured" | "unavailable";
+      };
     };
     ResponsesRequest: {
       /** @default auto */
@@ -661,7 +1034,7 @@ export interface components {
       instructions?: string;
       reasoning?: {
         /** @enum {string} */
-        effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+        effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
       };
       text?: {
         format?: {
@@ -678,6 +1051,7 @@ export interface components {
         [key: string]: string;
       };
       max_output_tokens?: number;
+      aialra?: components["schemas"]["AialraExtension"];
     };
     Response: {
       id: string;
@@ -694,6 +1068,7 @@ export interface components {
       error: {
         code: string;
         message: string;
+        retryAfter?: number;
         details?: unknown;
       };
     };
@@ -711,6 +1086,17 @@ export interface components {
     /** @description Idempotency key reused with a different request digest */
     Conflict: {
       headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ErrorEnvelope"];
+      };
+    };
+    /** @description ChatGPT web cooldown or recovery probe is active (`chatgpt_rate_limited`) */
+    TooManyRequests: {
+      headers: {
+        /** @description Seconds before the caller should try a new request */
+        "Retry-After": number;
         [name: string]: unknown;
       };
       content: {
@@ -738,6 +1124,7 @@ export interface components {
   };
   parameters: {
     IdempotencyKey: string;
+    IdempotencyKeyOptional: string;
     JobId: string;
     BootstrapToken: string;
   };
@@ -814,6 +1201,79 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       409: components["responses"]["Conflict"];
+      429: components["responses"]["TooManyRequests"];
+    };
+  };
+  createChatCompletion: {
+    parameters: {
+      query?: never;
+      header?: {
+        "Idempotency-Key"?: components["parameters"]["IdempotencyKeyOptional"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatCompletionsRequest"];
+      };
+    };
+    responses: {
+      /** @description Completed chat completion or Server-Sent Events stream */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatCompletion"];
+          "text/event-stream": string;
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      409: components["responses"]["Conflict"];
+      429: components["responses"]["TooManyRequests"];
+      /** @description The underlying call failed */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The call is still running; poll the native Jobs API */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  listSessionThreads: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Resumable conversation threads visible to the caller */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            data: components["schemas"]["SessionThread"][];
+          };
+        };
+      };
     };
   };
   listJobs: {
@@ -855,7 +1315,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Job accepted and queued */
+      /** @description Job accepted, queued, or waiting for execution approval */
       201: {
         headers: {
           [name: string]: unknown;
@@ -865,6 +1325,7 @@ export interface operations {
         };
       };
       409: components["responses"]["Conflict"];
+      429: components["responses"]["TooManyRequests"];
     };
   };
   getJob: {
@@ -963,13 +1424,13 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Approval decision recorded */
+      /** @description Approval decision recorded and current job returned */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["JobEvent"];
+          "application/json": components["schemas"]["Job"];
         };
       };
     };
@@ -1002,6 +1463,7 @@ export interface operations {
           };
         };
       };
+      429: components["responses"]["TooManyRequests"];
     };
   };
   previewRoute: {
@@ -1096,6 +1558,101 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["QuotaSnapshot"];
+        };
+      };
+    };
+  };
+  getChatGptWebStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Secret-free health, circuit and qualification state for the experimental web channel */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGptWebStatus"];
+        };
+      };
+    };
+  };
+  listChatGptWebQualificationRuns: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Recent secret-free qualification runs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            data: components["schemas"]["ChatGptWebQualificationRun"][];
+          };
+        };
+      };
+    };
+  };
+  createChatGptWebQualificationRun: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @enum {string} */
+          suite: "readiness" | "chat_3" | "chat_10" | "deep_2" | "full_10";
+        };
+      };
+    };
+    responses: {
+      /** @description Qualification run accepted or replayed */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGptWebQualificationRun"];
+        };
+      };
+    };
+  };
+  getChatGptWebQualificationRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One secret-free qualification run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGptWebQualificationRun"];
         };
       };
     };

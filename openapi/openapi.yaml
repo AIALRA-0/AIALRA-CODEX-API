@@ -59,6 +59,71 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/chat/completions:
+    post:
+      operationId: createChatCompletion
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionsRequest"
+      responses:
+        "200":
+          description: Completed chat completion or Server-Sent Events stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletion"
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          description: The underlying call failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "504":
+          description: The call is still running; poll the native Jobs API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/threads:
+    get:
+      operationId: listSessionThreads
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Resumable conversation threads visible to the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SessionThread"
   /api/v1/jobs:
     post:
       operationId: createJob
@@ -72,13 +137,15 @@ paths:
               $ref: "#/components/schemas/CreateJobRequest"
       responses:
         "201":
-          description: Job accepted and queued
+          description: Job accepted, queued, or waiting for execution approval
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Job"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
     get:
       operationId: listJobs
       parameters:
@@ -183,11 +250,11 @@ paths:
                   maxLength: 2000
       responses:
         "201":
-          description: Approval decision recorded
+          description: Approval decision recorded and current job returned
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/JobEvent"
+                $ref: "#/components/schemas/Job"
   /api/v1/batches:
     post:
       operationId: createBatch
@@ -220,6 +287,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Job"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /api/v1/routes/preview:
     post:
       operationId: previewRoute
@@ -294,6 +363,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/QuotaSnapshot"
+  /api/v1/chatgpt-web/status:
+    get:
+      operationId: getChatGptWebStatus
+      responses:
+        "200":
+          description: Secret-free health, circuit and qualification state for the experimental web channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatGptWebStatus"
+  /api/v1/chatgpt-web/qualification-runs:
+    get:
+      operationId: listChatGptWebQualificationRuns
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Recent secret-free qualification runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChatGptWebQualificationRun" }
+    post:
+      operationId: createChatGptWebQualificationRun
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [suite]
+              properties:
+                suite:
+                  type: string
+                  enum: [readiness, chat_3, chat_10, deep_2, full_10]
+      responses:
+        "201":
+          description: Qualification run accepted or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatGptWebQualificationRun" }
+  /api/v1/chatgpt-web/qualification-runs/{id}:
+    get:
+      operationId: getChatGptWebQualificationRun
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One secret-free qualification run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatGptWebQualificationRun" }
   /api/v1/usage:
     get:
       operationId: getUsage
@@ -599,6 +736,14 @@ components:
         type: string
         minLength: 8
         maxLength: 200
+    IdempotencyKeyOptional:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
     JobId:
       name: id
       in: path
@@ -622,6 +767,19 @@ components:
             $ref: "#/components/schemas/ErrorEnvelope"
     Conflict:
       description: Idempotency key reused with a different request digest
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    TooManyRequests:
+      description: ChatGPT web cooldown or recovery probe is active (`chatgpt_rate_limited`)
+      headers:
+        Retry-After:
+          description: Seconds before the caller should try a new request
+          required: true
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:
@@ -672,6 +830,8 @@ components:
           type: [string, "null"]
           format: date-time
           description: Omit for the 30-day default; null requests a non-expiring administrator key
+        executionPolicy:
+          $ref: "#/components/schemas/ExecutionPolicy"
     RevokeApiKeyRequest:
       type: object
       required: [confirmationPrefix]
@@ -682,7 +842,7 @@ components:
           minLength: 1
     ApiKeyMetadata:
       type: object
-      required: [id, name, prefix, scopes, rateLimitPerMinute, createdAt]
+      required: [id, name, prefix, scopes, executionPolicy, rateLimitPerMinute, createdAt]
       properties:
         id:
           type: string
@@ -695,6 +855,8 @@ components:
           type: array
           items:
             type: string
+        executionPolicy:
+          $ref: "#/components/schemas/ExecutionPolicy"
         rateLimitPerMinute:
           type: integer
         expiresAt:
@@ -758,17 +920,70 @@ components:
         metadataDeleteAfter:
           type: string
           format: date-time
+    PermissionPreset:
+      type: string
+      enum: [restricted, confirm, full]
+    AialraExtension:
+      type: object
+      additionalProperties: false
+      properties:
+        permission_preset:
+          $ref: "#/components/schemas/PermissionPreset"
+        session_key:
+          type: string
+          minLength: 1
+          maxLength: 256
+        session_mode:
+          type: string
+          enum: [ephemeral, persistent]
+        deadline_ms:
+          type: integer
+          minimum: 1000
+          maximum: 3600000
+        execution_channel:
+          type: string
+          enum: [codex, chatgpt_web]
+        chatgpt_mode:
+          type: string
+          enum: [chat, search, deep_research]
+        conversation_mode:
+          type: string
+          const: temporary_per_request
+          default: temporary_per_request
+        temporary_chat:
+          type: boolean
+          const: true
+          default: true
+          description: Every ChatGPT web request uses a new non-personalized Temporary Chat.
+        require_sources:
+          type: boolean
+    ExecutionPolicy:
+      type: object
+      required: [defaultPreset, allowedPresets]
+      additionalProperties: false
+      properties:
+        defaultPreset:
+          $ref: "#/components/schemas/PermissionPreset"
+        allowedPresets:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/PermissionPreset"
     PermissionProfile:
       type: object
       additionalProperties: false
       properties:
+        preset:
+          $ref: "#/components/schemas/PermissionPreset"
         filesystem:
           type: string
           enum: [none, read, write]
           default: read
         network:
           type: string
-          enum: [none, allowlist]
+          enum: [none, allowlist, all]
           default: none
         allowedHosts:
           type: array
@@ -810,6 +1025,24 @@ components:
             responseSchema:
               type: object
               additionalProperties: true
+            checks:
+              type: array
+              maxItems: 32
+              items:
+                oneOf:
+                  - type: object
+                    required: [type, expected]
+                    additionalProperties: false
+                    properties:
+                      type: { const: equals }
+                      expected: { type: string, maxLength: 100000 }
+                      trim: { type: boolean, default: true }
+                  - type: object
+                    required: [type, expected]
+                    additionalProperties: false
+                    properties:
+                      type: { const: contains }
+                      expected: { type: string, minLength: 1, maxLength: 100000 }
             acceptanceTests:
               type: array
               items:
@@ -841,13 +1074,43 @@ components:
               default: 2
         sessionKey:
           type: string
+        sessionMode:
+          type: string
+          enum: [ephemeral, persistent]
+          default: ephemeral
+        executionChannel:
+          type: string
+          enum: [codex, chatgpt_web]
+          default: codex
+        chatgptWeb:
+          type: object
+          additionalProperties: false
+          required: [mode, conversationMode, temporaryChat, personalized, requireSources]
+          properties:
+            mode:
+              type: string
+              enum: [chat, search, deep_research]
+            conversationMode:
+              type: string
+              const: temporary_per_request
+              default: temporary_per_request
+            temporaryChat:
+              type: boolean
+              const: true
+              default: true
+            personalized:
+              type: boolean
+              const: false
+              default: false
+            requireSources:
+              type: boolean
         model:
           type: string
           pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
           default: auto
         effort:
           type: string
-          enum: [minimal, low, medium, high, xhigh]
+          enum: [minimal, low, medium, high, xhigh, max]
           default: medium
         replayable:
           type: boolean
@@ -883,11 +1146,11 @@ components:
           enum:
             [
               accepted,
+              awaiting_approval,
               queued,
               running,
               validating,
               succeeded,
-              needs_review,
               failed,
               cancelled,
               expired,
@@ -941,7 +1204,7 @@ components:
       properties:
         provider:
           type: string
-          const: codex
+          enum: [codex, chatgpt_web]
         model:
           type: string
         effort:
@@ -993,6 +1256,24 @@ components:
           description: Observed percentage-point change when both snapshots belong to the same quota window
         allocatedSubscriptionUsd:
           type: [number, "null"]
+        measurementStatus:
+          type: string
+          enum: [measured, unavailable]
+        subscriptionChannel:
+          type: string
+          enum: [codex, chatgpt_pro_web]
+        sourceCount:
+          type: [integer, "null"]
+          minimum: 0
+        durationMs:
+          type: [integer, "null"]
+          minimum: 0
+        attemptCount:
+          type: integer
+          minimum: 0
+        retryCount:
+          type: integer
+          minimum: 0
     QuotaSnapshot:
       type: object
       required:
@@ -1057,6 +1338,7 @@ components:
         [
           id,
           displayName,
+          provider,
           available,
           enabled,
           hidden,
@@ -1067,11 +1349,13 @@ components:
           creditRate,
           apiRate,
           rateStatus,
+          streamingMode,
           discoveredAt,
         ]
       properties:
         id: { type: string }
         displayName: { type: string }
+        provider: { type: string, enum: [codex, chatgpt_web] }
         available: { type: boolean }
         enabled: { type: boolean }
         hidden: { type: boolean }
@@ -1086,7 +1370,294 @@ components:
         creditRate: { type: [object, "null"], additionalProperties: true }
         apiRate: { type: [object, "null"], additionalProperties: true }
         rateStatus: { type: string, enum: [available, unavailable] }
+        streamingMode: { type: string, enum: [delta, final_only] }
         discoveredAt: { type: string, format: date-time }
+    ChatGptWebStatus:
+      type: object
+      required:
+        [
+          configuredEnabled,
+          effectiveConcurrency,
+          maximumConcurrency,
+          activeTabs,
+          queuedJobs,
+          sandboxVerified,
+          extensionConnected,
+          pageReady,
+          authenticated,
+          circuitState,
+          circuitReason,
+          cooldownUntil,
+          rateLimitState,
+          retryAfter,
+          lastRateLimitAt,
+          consecutiveRateLimits,
+          conversationMode,
+          temporaryChatVerified,
+          lastRecoveryProbeAt,
+          lastRecoveryProbePassed,
+          lastSubmissionAt,
+          successesAtCurrentLevel,
+          attemptsAtCurrentLevel,
+          severeErrorsAtCurrentLevel,
+          lastQualifiedAt,
+          lastQualificationPassed,
+          lastQualificationSucceeded,
+          adapterVersion,
+          phase,
+          activeJobId,
+          activeAttempt,
+          lastHeartbeatAt,
+          lastFailureCode,
+          lastResetAt,
+          quarantinedTabs,
+          slots,
+          lastQualificationRunId,
+          updatedAt,
+        ]
+      properties:
+        configuredEnabled: { type: boolean }
+        effectiveConcurrency: { type: integer, minimum: 0, maximum: 4 }
+        maximumConcurrency: { type: integer, minimum: 1, maximum: 4 }
+        activeTabs: { type: integer, minimum: 0 }
+        queuedJobs: { type: integer, minimum: 0 }
+        sandboxVerified: { type: boolean }
+        extensionConnected: { type: boolean }
+        pageReady: { type: boolean }
+        authenticated: { type: boolean }
+        circuitState: { type: string, enum: [closed, cooldown, open, qualification_required] }
+        circuitReason: { type: [string, "null"] }
+        cooldownUntil: { type: [string, "null"], format: date-time }
+        rateLimitState: { type: string, enum: [clear, cooldown, recovery_probe, observation] }
+        retryAfter: { type: [integer, "null"], minimum: 0 }
+        lastRateLimitAt: { type: [string, "null"], format: date-time }
+        consecutiveRateLimits: { type: integer, minimum: 0 }
+        conversationMode: { type: string, const: temporary_per_request }
+        temporaryChatVerified: { type: boolean }
+        lastRecoveryProbeAt: { type: [string, "null"], format: date-time }
+        lastRecoveryProbePassed: { type: [boolean, "null"] }
+        lastSubmissionAt: { type: [string, "null"], format: date-time }
+        successesAtCurrentLevel: { type: integer, minimum: 0 }
+        attemptsAtCurrentLevel: { type: integer, minimum: 0 }
+        severeErrorsAtCurrentLevel: { type: integer, minimum: 0 }
+        lastQualifiedAt: { type: [string, "null"], format: date-time }
+        lastQualificationPassed: { type: [boolean, "null"] }
+        lastQualificationSucceeded: { type: [integer, "null"], minimum: 0, maximum: 10 }
+        adapterVersion: { type: string }
+        phase:
+          type: string
+          enum:
+            [idle, preparing, input_verified, submitted, generating, completed, failed, resetting]
+        activeJobId: { type: [string, "null"], format: uuid }
+        activeAttempt: { type: [integer, "null"], minimum: 1, maximum: 2 }
+        lastHeartbeatAt: { type: [string, "null"], format: date-time }
+        lastFailureCode: { type: [string, "null"] }
+        lastResetAt: { type: [string, "null"], format: date-time }
+        quarantinedTabs: { type: integer, minimum: 0 }
+        slots:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [slotId, state, submitted, quarantinedUntil, updatedAt]
+            properties:
+              slotId: { type: string, format: uuid }
+              state:
+                type: string
+                enum:
+                  [starting, idle, preparing, ready, submitted, generating, completed, quarantined]
+              submitted: { type: boolean }
+              quarantinedUntil: { type: [string, "null"], format: date-time }
+              updatedAt: { type: string, format: date-time }
+        lastQualificationRunId: { type: [string, "null"], format: uuid }
+        updatedAt: { type: string, format: date-time }
+    ChatGptWebQualificationItem:
+      type: object
+      required:
+        [
+          index,
+          name,
+          mode,
+          status,
+          durationMs,
+          outputLength,
+          outputSha256,
+          sourceCount,
+          errorCode,
+          submittedCount,
+          ownershipMatched,
+        ]
+      properties:
+        index: { type: integer, minimum: 1, maximum: 10 }
+        name: { type: string }
+        mode: { type: string, enum: [chat, search, deep_research] }
+        status: { type: string, enum: [pending, running, succeeded, failed] }
+        durationMs: { type: [integer, "null"], minimum: 0 }
+        outputLength: { type: [integer, "null"], minimum: 0 }
+        outputSha256: { type: [string, "null"], pattern: "^[a-f0-9]{64}$" }
+        sourceCount: { type: [integer, "null"], minimum: 0 }
+        errorCode: { type: [string, "null"] }
+        submittedCount: { type: integer, minimum: 0 }
+        ownershipMatched: { type: [boolean, "null"] }
+    ChatGptWebQualificationRun:
+      type: object
+      required:
+        [
+          id,
+          suite,
+          status,
+          total,
+          completed,
+          succeeded,
+          failed,
+          items,
+          errorCode,
+          createdBy,
+          createdAt,
+          startedAt,
+          completedAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        suite: { type: string, enum: [readiness, chat_3, chat_10, deep_2, full_10] }
+        status: { type: string, enum: [accepted, running, succeeded, failed, cancelled] }
+        total: { type: integer, minimum: 0, maximum: 10 }
+        completed: { type: integer, minimum: 0, maximum: 10 }
+        succeeded: { type: integer, minimum: 0, maximum: 10 }
+        failed: { type: integer, minimum: 0, maximum: 10 }
+        items:
+          type: array
+          maxItems: 10
+          items: { $ref: "#/components/schemas/ChatGptWebQualificationItem" }
+        errorCode: { type: [string, "null"] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SessionThread:
+      type: object
+      required: [sessionKey, callerId, model, effort, turnCount, createdAt, lastUsedAt, expiresAt]
+      properties:
+        sessionKey: { type: string }
+        callerId: { type: string }
+        model: { type: string }
+        effort:
+          type: string
+          enum: [minimal, low, medium, high, xhigh, max]
+        turnCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    ChatCompletionsRequest:
+      type: object
+      required: [messages]
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          default: auto
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            type: object
+            required: [role, content]
+            additionalProperties: false
+            properties:
+              role:
+                type: string
+                enum: [system, developer, user, assistant]
+              content:
+                type: string
+                maxLength: 100000
+              name:
+                type: string
+                maxLength: 64
+        stream:
+          type: boolean
+          default: false
+        stream_options:
+          type: object
+          additionalProperties: false
+          properties:
+            include_usage: { type: boolean, default: false }
+        max_tokens: { type: integer, minimum: 1 }
+        max_completion_tokens: { type: integer, minimum: 1 }
+        response_format:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              properties:
+                type: { const: text }
+            - type: object
+              additionalProperties: false
+              properties:
+                type: { const: json_object }
+            - type: object
+              required: [type, json_schema]
+              additionalProperties: false
+              properties:
+                type: { const: json_schema }
+                json_schema:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    name: { type: string, maxLength: 64 }
+                    schema: { type: object, additionalProperties: true }
+                    strict: { type: boolean }
+        reasoning_effort:
+          type: string
+          enum: [minimal, low, medium, high, xhigh, max]
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        aialra:
+          $ref: "#/components/schemas/AialraExtension"
+    ChatCompletion:
+      type: object
+      required: [id, object, created, model, choices]
+      properties:
+        id: { type: string }
+        object: { const: chat.completion }
+        created: { type: integer }
+        model: { type: string }
+        choices:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            required: [index, message, finish_reason]
+            properties:
+              index: { const: 0 }
+              message:
+                type: object
+                required: [role, content]
+                properties:
+                  role: { const: assistant }
+                  content: { type: string }
+              finish_reason:
+                type: string
+                enum: [stop, length]
+        usage:
+          type: object
+          required: [prompt_tokens, completion_tokens, total_tokens]
+          properties:
+            prompt_tokens: { type: integer }
+            completion_tokens: { type: integer }
+            total_tokens: { type: integer }
+        aialra:
+          type: object
+          properties:
+            job_id: { type: string }
+            session_key: { type: [string, "null"] }
+            measurement_status:
+              type: string
+              enum: [measured, unavailable]
     ResponsesRequest:
       type: object
       required: [input]
@@ -1107,7 +1678,7 @@ components:
           properties:
             effort:
               type: string
-              enum: [minimal, low, medium, high, xhigh]
+              enum: [minimal, low, medium, high, xhigh, max]
         text:
           type: object
           properties:
@@ -1133,6 +1704,8 @@ components:
         max_output_tokens:
           type: integer
           minimum: 1
+        aialra:
+          $ref: "#/components/schemas/AialraExtension"
     Response:
       type: object
       required: [id, object, status, model, usage, metadata]
@@ -1163,4 +1736,7 @@ components:
               type: string
             message:
               type: string
+            retryAfter:
+              type: integer
+              minimum: 1
             details: {}

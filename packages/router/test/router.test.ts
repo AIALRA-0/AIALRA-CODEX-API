@@ -70,4 +70,21 @@ describe("selectRoute", () => {
       }),
     ).toThrow("codex_capacity_constrained");
   });
+
+  it("routes an explicit ChatGPT web task without consulting Codex quota", () => {
+    const task = TaskContractSchema.parse({
+      objective: "Search a synthetic topic",
+      executionChannel: "chatgpt_web",
+      model: "chatgpt-web.auto",
+      chatgptWeb: { mode: "search", temporaryChat: true, requireSources: true },
+      deadlineMs: 600_000,
+    });
+
+    expect(selectRoute(task, null)).toMatchObject({
+      provider: "chatgpt_web",
+      model: "chatgpt-web.auto",
+      reasonCode: "explicit_chatgpt_web_channel",
+      sticky: true,
+    });
+  });
 });

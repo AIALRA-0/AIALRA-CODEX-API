@@ -23,6 +23,7 @@
     "@nestjs/core": "latest",
     "@nestjs/platform-express": "latest",
     "@nestjs/swagger": "latest",
+    "ajv": "latest",
     "pg-boss": "latest",
     "reflect-metadata": "latest",
     "rxjs": "latest",
