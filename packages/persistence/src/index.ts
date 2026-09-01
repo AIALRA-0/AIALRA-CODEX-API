@@ -11,6 +11,7 @@ import {
   UsageLedgerSchema,
   type Job,
   type JobEvent,
+  JobStatusSchema,
   type JobStatus,
   type ModelCatalogSnapshot,
   type QuotaSnapshot,
@@ -150,6 +151,100 @@ function classifyLegacyReview(
         errorMessage: "The historical output did not satisfy its declared validation rules.",
       };
 }
+
+const HISTORICAL_STATUS_BY_AUDIT_ACTION: Readonly<Record<string, JobStatus>> = {
+  "job.created": "accepted",
+  "job.awaiting_approval": "awaiting_approval",
+  "job.queued": "queued",
+  "job.queued_after_approval": "queued",
+  "job.approval_denied": "cancelled",
+  "job.cancelled": "cancelled",
+  "worker.running": "running",
+  "worker.validating": "validating",
+  "worker.succeeded": "succeeded",
+  "worker.failed": "failed",
+  "worker.provider_unavailable": "failed",
+  "worker.session_expired": "failed",
+  "worker.expired": "expired",
+};
+
+export type HistoricalAuditStatusRecord = {
+  action: string;
+  createdAt: string;
+};
+
+export type HistoricalJobEventRecovery = {
+  events: Array<{
+    status: JobStatus;
+    createdAt: string;
+    data: Record<string, unknown>;
+    source: "audit_events" | "jobs.status";
+  }>;
+  auditDerivedEvents: number;
+  currentStatusEvents: number;
+  ignoredAuditActions: number;
+  hasUnresolvedHistory: boolean;
+};
+
+export function reconstructHistoricalJobEventData(
+  currentStatus: JobStatus,
+  updatedAt: string,
+  auditEvents: readonly HistoricalAuditStatusRecord[],
+): HistoricalJobEventRecovery {
+  const events: HistoricalJobEventRecovery["events"] = [];
+  let ignoredAuditActions = 0;
+  const orderedAudits = [...auditEvents].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt),
+  );
+  for (const audit of orderedAudits) {
+    const status = HISTORICAL_STATUS_BY_AUDIT_ACTION[audit.action];
+    if (!status) {
+      ignoredAuditActions += 1;
+      continue;
+    }
+    events.push({
+      status,
+      createdAt: audit.createdAt,
+      data: {
+        status,
+        historicalRecovery: true,
+        reconstructedFrom: "audit_events",
+        sourceAction: audit.action,
+      },
+      source: "audit_events",
+    });
+  }
+  const currentStatusMatches = events.at(-1)?.status === currentStatus;
+  if (!currentStatusMatches) {
+    events.push({
+      status: currentStatus,
+      createdAt: updatedAt,
+      data: {
+        status: currentStatus,
+        historicalRecovery: true,
+        reconstructedFrom: "jobs.status",
+      },
+      source: "jobs.status",
+    });
+  }
+  return {
+    events,
+    auditDerivedEvents: events.filter((event) => event.source === "audit_events").length,
+    currentStatusEvents: events.filter((event) => event.source === "jobs.status").length,
+    ignoredAuditActions,
+    hasUnresolvedHistory: !currentStatusMatches || ignoredAuditActions > 0,
+  };
+}
+
+export type HistoricalJobEventRecoveryReport = {
+  version: 4;
+  candidateJobs: number;
+  insertedEvents: number;
+  auditDerivedEvents: number;
+  currentStatusEvents: number;
+  jobsWithUnresolvedHistory: number;
+  ignoredAuditActions: number;
+};
 
 export interface StoredApiKey {
   id: string;
@@ -1133,6 +1228,80 @@ export class PostgresJobRepository implements JobRepository {
           );
         }
         await client.query("INSERT INTO schema_migrations (version) VALUES (3)");
+      }
+      const historicalEventMigration = await client.query(
+        "SELECT 1 FROM schema_migrations WHERE version=4",
+      );
+      if (!historicalEventMigration.rowCount) {
+        const candidateRows = await client.query(`
+          SELECT j.id, j.status, j.updated_at
+          FROM jobs AS j
+          WHERE NOT EXISTS (
+            SELECT 1 FROM job_events AS e WHERE e.job_id = j.id
+          )
+          ORDER BY j.created_at ASC, j.id ASC
+          FOR UPDATE OF j
+        `);
+        const jobIds = candidateRows.rows.map((row) => String(row.id));
+        const auditRows = jobIds.length
+          ? await client.query(
+              `SELECT resource_id, action, created_at
+               FROM audit_events
+               WHERE resource_type='job' AND resource_id = ANY($1::text[])
+               ORDER BY created_at ASC, id ASC`,
+              [jobIds],
+            )
+          : { rows: [] };
+        const auditsByJob = new Map<string, HistoricalAuditStatusRecord[]>();
+        for (const row of auditRows.rows) {
+          const jobId = String(row.resource_id);
+          const audits = auditsByJob.get(jobId) ?? [];
+          audits.push({
+            action: String(row.action),
+            createdAt: new Date(row.created_at).toISOString(),
+          });
+          auditsByJob.set(jobId, audits);
+        }
+        const report: HistoricalJobEventRecoveryReport = {
+          version: 4,
+          candidateJobs: candidateRows.rows.length,
+          insertedEvents: 0,
+          auditDerivedEvents: 0,
+          currentStatusEvents: 0,
+          jobsWithUnresolvedHistory: 0,
+          ignoredAuditActions: 0,
+        };
+        for (const row of candidateRows.rows) {
+          const currentStatus = JobStatusSchema.parse(row.status);
+          const reconstructed = reconstructHistoricalJobEventData(
+            currentStatus,
+            new Date(row.updated_at).toISOString(),
+            auditsByJob.get(String(row.id)) ?? [],
+          );
+          if (reconstructed.hasUnresolvedHistory) report.jobsWithUnresolvedHistory += 1;
+          report.ignoredAuditActions += reconstructed.ignoredAuditActions;
+          for (const [sequence, event] of reconstructed.events.entries()) {
+            const inserted = await client.query(
+              `INSERT INTO job_events (id,job_id,sequence,type,data,created_at)
+               VALUES ($1,$2,$3,'status',$4,$5)
+               ON CONFLICT (job_id, sequence) DO NOTHING`,
+              [
+                randomUUID(),
+                row.id,
+                sequence,
+                this.encrypt(event.data, `job:${row.id}:event:${sequence}:v2`),
+                event.createdAt,
+              ],
+            );
+            if (inserted.rowCount) {
+              report.insertedEvents += inserted.rowCount ?? 0;
+              if (event.source === "audit_events") report.auditDerivedEvents += 1;
+              else report.currentStatusEvents += 1;
+            }
+          }
+        }
+        console.info(`[persistence] historical job event recovery ${JSON.stringify(report)}`);
+        await client.query("INSERT INTO schema_migrations (version) VALUES (4)");
       }
       await client.query("COMMIT");
     } catch (error) {

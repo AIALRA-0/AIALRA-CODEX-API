@@ -9,7 +9,7 @@ import {
   type SessionThread,
 } from "@aialra/contracts";
 
-import { InMemoryJobRepository } from "../src/index.js";
+import { InMemoryJobRepository, reconstructHistoricalJobEventData } from "../src/index.js";
 
 function jobFixture(): Job {
   const now = new Date();
@@ -72,6 +72,25 @@ describe("InMemoryJobRepository", () => {
     await repository.appendEvent(job.id, "status", { status: "running" });
 
     expect((await repository.events(job.id)).map((event) => event.sequence)).toEqual([0, 1]);
+  });
+
+  it("reconstructs only status evidence and marks missing history", () => {
+    const recovered = reconstructHistoricalJobEventData("succeeded", "2026-09-01T12:00:00.000Z", [
+      { action: "job.created", createdAt: "2026-09-01T11:58:00.000Z" },
+      { action: "job.queued", createdAt: "2026-09-01T11:59:00.000Z" },
+      { action: "legacy.unknown", createdAt: "2026-09-01T11:59:30.000Z" },
+    ]);
+
+    expect(recovered.events.map((event) => event.status)).toEqual([
+      "accepted",
+      "queued",
+      "succeeded",
+    ]);
+    expect(recovered.auditDerivedEvents).toBe(2);
+    expect(recovered.currentStatusEvents).toBe(1);
+    expect(recovered.ignoredAuditActions).toBe(1);
+    expect(recovered.hasUnresolvedHistory).toBe(true);
+    expect(recovered.events.every((event) => event.data.historicalRecovery === true)).toBe(true);
   });
 
   it("records a status transition and its audit together", async () => {

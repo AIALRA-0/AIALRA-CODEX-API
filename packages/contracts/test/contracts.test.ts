@@ -8,6 +8,8 @@ import {
   ResponsesRequestSchema,
   sessionThreadTtlMs,
   TaskContractSchema,
+  ChatGptWebQualificationItemSchema,
+  ChatGptWebQualificationSuiteSchema,
 } from "../src/index.js";
 
 describe("ReasoningEffortSchema", () => {
@@ -21,6 +23,27 @@ describe("ReasoningEffortSchema", () => {
       validation: { checks: [{ type: "equals", expected: "OK" }] },
     });
     expect(task.validation.checks).toEqual([{ type: "equals", expected: "OK", trim: true }]);
+  });
+});
+
+describe("ChatGPT web qualification contract", () => {
+  it("accepts the single probe suite and defaults its verification field", () => {
+    expect(ChatGptWebQualificationSuiteSchema.parse("single_probe")).toBe("single_probe");
+    expect(
+      ChatGptWebQualificationItemSchema.parse({
+        index: 1,
+        name: "chat-1",
+        mode: "chat",
+        status: "pending",
+        durationMs: null,
+        outputLength: null,
+        outputSha256: null,
+        sourceCount: null,
+        errorCode: null,
+        submittedCount: 0,
+        ownershipMatched: null,
+      }).temporaryChatVerified,
+    ).toBe(false);
   });
 });
 

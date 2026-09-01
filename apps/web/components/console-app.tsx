@@ -164,7 +164,8 @@ interface ChatGptWebStatus {
   updatedAt: string;
 }
 
-type ChatGptWebQualificationSuite = "readiness" | "chat_3" | "chat_10" | "deep_2" | "full_10";
+type ChatGptWebQualificationSuite =
+  "readiness" | "single_probe" | "chat_3" | "chat_10" | "deep_2" | "full_10";
 
 interface ChatGptWebQualificationRun {
   id: string;
@@ -190,6 +191,7 @@ interface ChatGptWebQualificationRun {
     submittedCount: number;
     recoveryCount: number;
     ownershipMatched: boolean | null;
+    temporaryChatVerified: boolean;
   }>;
 }
 
@@ -1574,6 +1576,7 @@ function Routing() {
 
 const QUALIFICATION_LABELS: Record<ChatGptWebQualificationSuite, string> = {
   readiness: "只读检查",
+  single_probe: "真实单次探针",
   chat_3: "普通聊天 3 次",
   chat_10: "单页面基线 10 次",
   deep_2: "深度研究 2 次",
@@ -1670,7 +1673,7 @@ function ChatGptWebChannel() {
       <PageHeading
         eyebrow="实验执行通道"
         title="ChatGPT 网页通道"
-        copy="查看可见浏览器、单页面代理和真实验收状态；完整门禁通过前不会接收生产调用"
+        copy="查看可见浏览器、单页面代理和真实验收状态；单次真实探针通过前不会接收生产调用"
         action={
           <a
             className="button"
@@ -1753,7 +1756,7 @@ function ChatGptWebChannel() {
         <div className="row action-row">
           {(Object.keys(QUALIFICATION_LABELS) as ChatGptWebQualificationSuite[]).map((suite) => (
             <button
-              className={suite === "full_10" ? "button primary" : "button"}
+              className={suite === "single_probe" ? "button primary" : "button"}
               key={suite}
               disabled={Boolean(activeRun)}
               onClick={() => setConfirmSuite(suite)}
@@ -1768,6 +1771,7 @@ function ChatGptWebChannel() {
             {activeRun.total}
           </p>
         ) : null}
+        <p className="muted">单次真实探针是启用网页通道的最低门槛；其余套件用于可选强化观察。</p>
       </section>
 
       <section className="console-section">

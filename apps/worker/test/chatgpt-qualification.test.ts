@@ -27,6 +27,7 @@ function items(count: number): ChatGptWebQualificationItem[] {
     submittedCount: 0,
     recoveryCount: 0,
     ownershipMatched: null,
+    temporaryChatVerified: false,
   }));
 }
 
@@ -95,6 +96,7 @@ describe("ChatGPT web qualification", () => {
         sources: [],
         submittedCount: 1,
         recoveryCount: 0,
+        temporaryChatVerified: true,
       }),
     );
 
@@ -105,5 +107,91 @@ describe("ChatGPT web qualification", () => {
     expect(
       saved?.items.every((item) => item.outputSha256 && !JSON.stringify(item).includes("合成回答")),
     ).toBe(true);
+  });
+
+  it("passes a single probe only after Temporary Chat and ownership are verified", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = new Date().toISOString();
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id: randomUUID(),
+      suite: "single_probe",
+      status: "accepted",
+      total: 1,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: items(1),
+      errorCode: null,
+      createdBy: "admin",
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+    await repository.createChatGptWebQualificationRun(run);
+    const client = new ChatGptWebDiagnosticClient(
+      "http://127.0.0.1:1",
+      "synthetic-api",
+      "synthetic-diagnostic",
+    );
+    vi.spyOn(client, "invoke").mockImplementation(
+      async (definition: Parameters<ChatGptWebDiagnosticClient["invoke"]>[0]) => ({
+        outputText: `合成回答 ${definition.marker}`,
+        sources: [],
+        submittedCount: 1,
+        recoveryCount: 0,
+        temporaryChatVerified: true,
+      }),
+    );
+
+    await processChatGptWebQualification(repository, client, run.id);
+    const saved = await repository.findChatGptWebQualificationRun(run.id);
+
+    expect(saved).toMatchObject({ status: "succeeded", total: 1, completed: 1, succeeded: 1 });
+    expect(saved?.items[0]).toMatchObject({
+      submittedCount: 1,
+      ownershipMatched: true,
+      temporaryChatVerified: true,
+    });
+    expect((await repository.readChatGptWebStatus()).configuredEnabled).toBe(false);
+  });
+
+  it("does not pass a single probe when Temporary Chat evidence is absent", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = new Date().toISOString();
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id: randomUUID(),
+      suite: "single_probe",
+      status: "accepted",
+      total: 1,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: items(1),
+      errorCode: null,
+      createdBy: "admin",
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+    await repository.createChatGptWebQualificationRun(run);
+    const client = new ChatGptWebDiagnosticClient(
+      "http://127.0.0.1:1",
+      "synthetic-api",
+      "synthetic-diagnostic",
+    );
+    vi.spyOn(client, "invoke").mockImplementation(
+      async (definition: Parameters<ChatGptWebDiagnosticClient["invoke"]>[0]) => ({
+        outputText: `合成回答 ${definition.marker}`,
+        sources: [],
+        submittedCount: 1,
+        recoveryCount: 0,
+        temporaryChatVerified: false,
+      }),
+    );
+
+    await processChatGptWebQualification(repository, client, run.id);
+    expect((await repository.findChatGptWebQualificationRun(run.id))?.status).toBe("failed");
   });
 });

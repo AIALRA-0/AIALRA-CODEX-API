@@ -915,13 +915,17 @@ export interface components {
       sourceCount: number | null;
       errorCode: string | null;
       submittedCount: number;
+      /** @default 0 */
+      recoveryCount: number;
       ownershipMatched: boolean | null;
+      /** @default false */
+      temporaryChatVerified: boolean;
     };
     ChatGptWebQualificationRun: {
       /** Format: uuid */
       id: string;
       /** @enum {string} */
-      suite: "readiness" | "chat_3" | "chat_10" | "deep_2" | "full_10";
+      suite: "readiness" | "single_probe" | "chat_3" | "chat_10" | "deep_2" | "full_10";
       /** @enum {string} */
       status: "accepted" | "running" | "succeeded" | "failed" | "cancelled";
       total: number;
@@ -1619,7 +1623,7 @@ export interface operations {
       content: {
         "application/json": {
           /** @enum {string} */
-          suite: "readiness" | "chat_3" | "chat_10" | "deep_2" | "full_10";
+          suite: "readiness" | "single_probe" | "chat_3" | "chat_10" | "deep_2" | "full_10";
         };
       };
     };

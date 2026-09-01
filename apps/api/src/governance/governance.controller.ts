@@ -51,26 +51,31 @@ function qualificationItems(suite: z.infer<typeof ChatGptWebQualificationSuiteSc
   const definitions =
     suite === "readiness"
       ? []
-      : suite === "chat_3"
-        ? Array.from({ length: 3 }, (_, index) => [`chat-${index + 1}`, "chat"] as const)
-        : suite === "chat_10"
-          ? Array.from({ length: 10 }, (_, index) => [`chat-${index + 1}`, "chat"] as const)
-          : suite === "deep_2"
-            ? Array.from(
-                { length: 2 },
-                (_, index) => [`deep-${index + 1}`, "deep_research"] as const,
-              )
-            : [
-                ...Array.from({ length: 4 }, (_, index) => [`chat-${index + 1}`, "chat"] as const),
-                ...Array.from(
-                  { length: 4 },
-                  (_, index) => [`search-${index + 1}`, "search"] as const,
-                ),
-                ...Array.from(
+      : suite === "single_probe"
+        ? [["chat-1", "chat"] as const]
+        : suite === "chat_3"
+          ? Array.from({ length: 3 }, (_, index) => [`chat-${index + 1}`, "chat"] as const)
+          : suite === "chat_10"
+            ? Array.from({ length: 10 }, (_, index) => [`chat-${index + 1}`, "chat"] as const)
+            : suite === "deep_2"
+              ? Array.from(
                   { length: 2 },
                   (_, index) => [`deep-${index + 1}`, "deep_research"] as const,
-                ),
-              ];
+                )
+              : [
+                  ...Array.from(
+                    { length: 4 },
+                    (_, index) => [`chat-${index + 1}`, "chat"] as const,
+                  ),
+                  ...Array.from(
+                    { length: 4 },
+                    (_, index) => [`search-${index + 1}`, "search"] as const,
+                  ),
+                  ...Array.from(
+                    { length: 2 },
+                    (_, index) => [`deep-${index + 1}`, "deep_research"] as const,
+                  ),
+                ];
   return definitions.map(([name, mode], index): ChatGptWebQualificationItem => ({
     index: index + 1,
     name,
@@ -84,6 +89,7 @@ function qualificationItems(suite: z.infer<typeof ChatGptWebQualificationSuiteSc
     submittedCount: 0,
     recoveryCount: 0,
     ownershipMatched: null,
+    temporaryChatVerified: false,
   }));
 }
 

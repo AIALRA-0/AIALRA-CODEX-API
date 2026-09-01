@@ -24,6 +24,7 @@ type DiagnosticResult = {
   sources: string[];
   submittedCount: number;
   recoveryCount: number;
+  temporaryChatVerified: boolean;
 };
 
 class DiagnosticInvocationError extends Error {
@@ -31,6 +32,7 @@ class DiagnosticInvocationError extends Error {
     message: string,
     readonly submittedCount: number,
     readonly recoveryCount: number,
+    readonly temporaryChatVerified = false,
   ) {
     super(message);
   }
@@ -81,6 +83,8 @@ function allDefinitions(runId: string): QualificationDefinition[] {
 
 function definitionsFor(run: ChatGptWebQualificationRun): QualificationDefinition[] {
   const definitions = allDefinitions(run.id);
+  if (run.suite === "single_probe")
+    return definitions.filter((item) => item.mode === "chat").slice(0, 1);
   if (run.suite === "chat_3") return definitions.filter((item) => item.mode === "chat").slice(0, 3);
   if (run.suite === "chat_10") {
     return Array.from({ length: 10 }, (_, index) => {
@@ -210,6 +214,7 @@ export class ChatGptWebDiagnosticClient {
     let sources: string[] = [];
     let submittedCount = 0;
     const recoveryCount = 0;
+    let temporaryChatVerified = false;
     const lines = createInterface({
       input: Readable.fromWeb(response.body as never),
       crlfDelay: Infinity,
@@ -224,6 +229,13 @@ export class ChatGptWebDiagnosticClient {
       ) {
         submittedCount += 1;
       }
+      if (
+        frame.type === "event" &&
+        frame.event?.data?.kind === "chatgpt_web" &&
+        frame.event?.data?.phase === "temporary_chat_verified"
+      ) {
+        temporaryChatVerified = true;
+      }
       if (frame.type === "error") {
         errorCode = frame.error?.code ?? "chatgpt_web_failed";
       }
@@ -232,40 +244,58 @@ export class ChatGptWebDiagnosticClient {
         sources = Array.isArray(frame.result?.sources) ? frame.result.sources.map(String) : [];
       }
     }
-    if (errorCode) throw new DiagnosticInvocationError(errorCode, submittedCount, recoveryCount);
+    if (errorCode)
+      throw new DiagnosticInvocationError(
+        errorCode,
+        submittedCount,
+        recoveryCount,
+        temporaryChatVerified,
+      );
     if (!outputText) {
       throw new DiagnosticInvocationError(
         "chatgpt_output_incomplete",
         submittedCount,
         recoveryCount,
+        temporaryChatVerified,
       );
     }
-    return { outputText, sources, submittedCount, recoveryCount };
+    return { outputText, sources, submittedCount, recoveryCount, temporaryChatVerified };
   }
 }
 
 function runPassed(run: ChatGptWebQualificationRun): boolean {
   if (run.suite === "readiness") return run.status === "succeeded";
-  if (run.suite === "chat_3") return run.succeeded === 3;
-  if (run.suite === "chat_10") {
-    return (
-      run.succeeded >= 9 &&
-      run.items.every((item) => item.submittedCount === 1 && item.ownershipMatched !== false)
+  if (run.suite === "single_probe") {
+    const [item] = run.items;
+    return Boolean(
+      run.total === 1 &&
+      run.completed === 1 &&
+      run.succeeded === 1 &&
+      run.failed === 0 &&
+      item?.status === "succeeded" &&
+      item.submittedCount === 1 &&
+      item.ownershipMatched === true &&
+      item.temporaryChatVerified === true,
     );
   }
-  if (run.suite === "deep_2") return run.succeeded === 2;
+  const safeSubmissions = run.items.every(
+    (item) =>
+      item.submittedCount === 1 &&
+      item.temporaryChatVerified === true &&
+      item.ownershipMatched !== false,
+  );
+  if (run.suite === "chat_3") return run.succeeded === 3 && safeSubmissions;
+  if (run.suite === "chat_10") {
+    return run.succeeded >= 9 && safeSubmissions;
+  }
+  if (run.suite === "deep_2") return run.succeeded === 2 && safeSubmissions;
   const chats = run.items.filter(
     (item) => item.mode === "chat" && item.status === "succeeded",
   ).length;
   const deep = run.items.filter(
     (item) => item.mode === "deep_research" && item.status === "succeeded",
   ).length;
-  return (
-    run.succeeded >= 9 &&
-    chats >= 3 &&
-    deep === 2 &&
-    run.items.every((item) => item.submittedCount === 1 && item.ownershipMatched !== false)
-  );
+  return run.succeeded >= 9 && chats >= 3 && deep === 2 && safeSubmissions;
 }
 
 export async function processChatGptWebQualification(
@@ -315,7 +345,11 @@ export async function processChatGptWebQualification(
         result.outputText.includes(definition.marker) &&
         markers.every((value) => value === definition.marker);
       const sourcePassed = !definition.requireSources || result.sources.length > 0;
-      const passed = ownershipMatched && sourcePassed && result.submittedCount === 1;
+      const passed =
+        ownershipMatched &&
+        sourcePassed &&
+        result.submittedCount === 1 &&
+        result.temporaryChatVerified;
       updatedItem = {
         ...run.items[index]!,
         status: passed ? "succeeded" : "failed",
@@ -327,12 +361,15 @@ export async function processChatGptWebQualification(
           ? null
           : !ownershipMatched
             ? "chatgpt_wrong_task_ownership"
-            : result.submittedCount !== 1
-              ? "chatgpt_duplicate_submission"
-              : "chatgpt_sources_missing",
+            : !result.temporaryChatVerified
+              ? "chatgpt_temporary_chat_unverified"
+              : result.submittedCount !== 1
+                ? "chatgpt_duplicate_submission"
+                : "chatgpt_sources_missing",
         submittedCount: result.submittedCount,
         recoveryCount: result.recoveryCount,
         ownershipMatched,
+        temporaryChatVerified: result.temporaryChatVerified,
       };
     } catch (error) {
       const failedSubmittedCount =
@@ -354,6 +391,8 @@ export async function processChatGptWebQualification(
         submittedCount: failedSubmittedCount,
         recoveryCount: failedRecoveryCount,
         ownershipMatched: null,
+        temporaryChatVerified:
+          error instanceof DiagnosticInvocationError ? error.temporaryChatVerified : false,
       };
     }
     const items = run.items.map((item, itemIndex) => (itemIndex === index ? updatedItem : item));
@@ -374,13 +413,18 @@ export async function processChatGptWebQualification(
     errorCode: passed ? null : "chatgpt_qualification_failed",
     completedAt,
   });
-  if (run.suite === "full_10") {
+  if (run.suite === "full_10" || run.suite === "single_probe") {
     const status = await repository.readChatGptWebStatus();
     await repository.saveChatGptWebStatus({
       ...status,
-      circuitState: passed ? "closed" : "qualification_required",
-      circuitReason: passed ? null : "qualification_failed",
-      effectiveConcurrency: passed && status.configuredEnabled ? 1 : 0,
+      ...(run.suite === "full_10"
+        ? {
+            circuitState: passed ? "closed" : "qualification_required",
+            circuitReason: passed ? null : "qualification_failed",
+            effectiveConcurrency: passed && status.configuredEnabled ? 1 : 0,
+          }
+        : {}),
+      temporaryChatVerified: passed,
       lastQualifiedAt: completedAt,
       lastQualificationPassed: passed,
       lastQualificationSucceeded: run.succeeded,

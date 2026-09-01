@@ -410,7 +410,7 @@ paths:
               properties:
                 suite:
                   type: string
-                  enum: [readiness, chat_3, chat_10, deep_2, full_10]
+                  enum: [readiness, single_probe, chat_3, chat_10, deep_2, full_10]
       responses:
         "201":
           description: Qualification run accepted or replayed
@@ -1485,7 +1485,9 @@ components:
           sourceCount,
           errorCode,
           submittedCount,
+          recoveryCount,
           ownershipMatched,
+          temporaryChatVerified,
         ]
       properties:
         index: { type: integer, minimum: 1, maximum: 10 }
@@ -1498,7 +1500,9 @@ components:
         sourceCount: { type: [integer, "null"], minimum: 0 }
         errorCode: { type: [string, "null"] }
         submittedCount: { type: integer, minimum: 0 }
+        recoveryCount: { type: integer, minimum: 0, default: 0 }
         ownershipMatched: { type: [boolean, "null"] }
+        temporaryChatVerified: { type: boolean, default: false }
     ChatGptWebQualificationRun:
       type: object
       required:
@@ -1520,7 +1524,7 @@ components:
         ]
       properties:
         id: { type: string, format: uuid }
-        suite: { type: string, enum: [readiness, chat_3, chat_10, deep_2, full_10] }
+        suite: { type: string, enum: [readiness, single_probe, chat_3, chat_10, deep_2, full_10] }
         status: { type: string, enum: [accepted, running, succeeded, failed, cancelled] }
         total: { type: integer, minimum: 0, maximum: 10 }
         completed: { type: integer, minimum: 0, maximum: 10 }

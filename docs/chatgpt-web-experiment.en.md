@@ -130,16 +130,17 @@ A passing probe proves only that the current sign-in is valid, page controls are
 
 ### 4.3 Console qualification entry
 
-The protected “ChatGPT web channel” page can run four suites:
+The protected “ChatGPT web channel” page can run five suites:
 
 - `readiness`: read-only, with no message sent;
+- `single_probe`: one ordinary chat, and the minimum gate for enabling the web channel;
 - `chat_3`: three consecutive chat jobs;
 - `deep_2`: two consecutive deep-research jobs;
 - `full_10`: four chats, four searches, and two deep-research jobs.
 
 Create a run with `POST /api/v1/chatgpt-web/qualification-runs` and an `Idempotency-Key`. Read it from `GET /api/v1/chatgpt-web/qualification-runs/{id}`.
 
-Qualification records exclude prompts, answers, accounts, and conversation URLs. They contain only item state, duration, output length, output SHA-256, source count, submission count, ownership result, and error code.
+Qualification records exclude prompts, answers, accounts, and conversation URLs. They contain only item state, duration, output length, output SHA-256, source count, submission count, ownership result, Temporary Chat verification, and error code.
 
 ## 5 Calling the channel
 
@@ -189,7 +190,7 @@ Streaming requests emit state and one complete final body; they do not fabricate
 
 JSON cannot legally contain comments. See [`openapi/openapi.yaml`](../openapi/openapi.yaml) for field constraints.
 
-Every web job uses a new non-personalized Temporary Chat. The old blank-result observation remains in section 4.1 only as a historical baseline. Production web admission stays disabled until this build passes the real-page gate.
+Every web job uses a new non-personalized Temporary Chat. The old blank-result observation remains in section 4.1 only as a historical baseline. A successful `single_probe` is sufficient to enable production web admission at concurrency one; `full_10` remains optional strengthening evidence. Timeouts, rate limits, sign-in failures, verification prompts, UI changes, and uncertain delivery are never retried automatically.
 
 ### 5.3 CLI and MCP
 
@@ -224,7 +225,7 @@ The page supplies no reliable token, Codex Credit, quota-delta, or API-equivalen
 
 ## 7 Concurrency and automatic shutdown
 
-Concurrency remains fixed at one after the ten-job gate, and deployment runs exactly one Worker. A dedicated in-process dispatch queue serializes state read, minimum-interval wait, and submission reservation; web submissions are at least 90 seconds apart.
+After a successful `single_probe`, web admission runs at concurrency one and deployment uses exactly one Worker; `full_10` remains optional strengthening evidence. A dedicated in-process dispatch queue serializes state read, minimum-interval wait, and submission reservation; web submissions are at least 90 seconds apart.
 
 Web rate limits use progressive 30-, 60-, and 120-minute cooldowns. Expiry admits only one recovery probe. A successful probe enters observation, and three consecutive successes are required to clear that state; another rate limit returns to the next cooldown. Sign-out, verification, UI drift, duplicate sends, or result misattribution closes the channel and requires requalification. The official Codex SDK channel remains independent.
 

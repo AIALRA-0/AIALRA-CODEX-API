@@ -57,12 +57,24 @@ case "$ACTION" in
     ;;
   enable)
     [[ "$QUALIFICATION_RUN_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || {
-      echo "QUALIFICATION_RUN_ID must name the completed full 10-item qualification" >&2
+      echo "QUALIFICATION_RUN_ID must name a completed single probe or full qualification" >&2
       exit 1
     }
     qualification_status="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
       -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
 SELECT CASE
+  WHEN run->>'suite'='single_probe'
+    AND run->>'status'='succeeded'
+    AND COALESCE((run->>'total')::integer,0) = 1
+    AND COALESCE((run->>'completed')::integer,0) = 1
+    AND COALESCE((run->>'succeeded')::integer,0) = 1
+    AND COALESCE((run->>'failed')::integer,0) = 0
+    AND jsonb_array_length(COALESCE(run->'items','[]'::jsonb)) = 1
+    AND (run->'items'->0->>'status')='succeeded'
+    AND COALESCE((run->'items'->0->>'submittedCount')::integer,0) = 1
+    AND (run->'items'->0->>'ownershipMatched')='true'
+    AND (run->'items'->0->>'temporaryChatVerified')='true'
+  THEN 'pass'
   WHEN run->>'suite'='full_10'
     AND run->>'status'='succeeded'
     AND COALESCE((run->>'succeeded')::integer,0) >= 9

@@ -441,6 +441,7 @@ export type ChatGptWebStatus = z.infer<typeof ChatGptWebStatusSchema>;
 
 export const ChatGptWebQualificationSuiteSchema = z.enum([
   "readiness",
+  "single_probe",
   "chat_3",
   "chat_10",
   "deep_2",
@@ -464,6 +465,7 @@ export const ChatGptWebQualificationItemSchema = z.object({
   submittedCount: z.number().int().nonnegative(),
   recoveryCount: z.number().int().nonnegative().default(0),
   ownershipMatched: z.boolean().nullable(),
+  temporaryChatVerified: z.boolean().default(false),
 });
 export type ChatGptWebQualificationItem = z.infer<typeof ChatGptWebQualificationItemSchema>;
 

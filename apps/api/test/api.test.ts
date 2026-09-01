@@ -197,18 +197,20 @@ describe("AIALRA Model Router API", () => {
     const first = await request(app.getHttpServer())
       .post("/api/v1/chatgpt-web/qualification-runs")
       .set("Authorization", `Bearer ${bootstrapKey}`)
-      .set("Idempotency-Key", "synthetic-chat-three")
-      .send({ suite: "chat_3" })
+      .set("Idempotency-Key", "synthetic-single-probe")
+      .send({ suite: "single_probe" })
       .expect(201);
     const replay = await request(app.getHttpServer())
       .post("/api/v1/chatgpt-web/qualification-runs")
       .set("Authorization", `Bearer ${bootstrapKey}`)
-      .set("Idempotency-Key", "synthetic-chat-three")
-      .send({ suite: "chat_3" })
+      .set("Idempotency-Key", "synthetic-single-probe")
+      .send({ suite: "single_probe" })
       .expect(201);
 
     expect(replay.body.id).toBe(first.body.id);
     expect(replay.body.replayed).toBe(true);
+    expect(first.body.total).toBe(1);
+    expect(first.body.items[0].temporaryChatVerified).toBe(false);
     expect(JSON.stringify(first.body)).not.toMatch(/objective|outputText|conversationUrl|cookie/i);
 
     const concurrent = await request(app.getHttpServer())
@@ -227,7 +229,7 @@ describe("AIALRA Model Router API", () => {
     await request(app.getHttpServer())
       .post("/api/v1/chatgpt-web/qualification-runs")
       .set("Authorization", `Bearer ${bootstrapKey}`)
-      .set("Idempotency-Key", "synthetic-chat-three")
+      .set("Idempotency-Key", "synthetic-single-probe")
       .send({ suite: "deep_2" })
       .expect(409);
   });
