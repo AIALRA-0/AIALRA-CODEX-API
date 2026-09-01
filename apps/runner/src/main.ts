@@ -20,6 +20,7 @@ import { runnerPublicMessage } from "./public-error.js";
 const InvocationSchema = z
   .object({
     jobId: z.string().uuid(),
+    attempt: z.number().int().min(1).max(2).default(1),
     task: TaskContractSchema,
     route: RouteDecisionSchema,
   })
@@ -104,6 +105,7 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
     });
     const result = await provider.invoke({
       jobId: input.jobId,
+      attempt: input.attempt,
       task: input.task,
       route: input.route,
       workingDirectory: workspace,
