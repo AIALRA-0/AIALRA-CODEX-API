@@ -93,7 +93,12 @@ SQL
       "fetch('http://127.0.0.1:13216/healthz').then(async r=>{const b=await r.json();process.exit(b.sandboxVerified&&b.extensionConnected&&b.pageReady&&b.authenticated?0:1)}).catch(()=>process.exit(1))"
     qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     succeeded="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
-      -v run_id="$QUALIFICATION_RUN_ID" -c "SELECT run->>'succeeded' FROM chatgpt_web_qualification_runs WHERE id=:'run_id'")"
+      -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
+SELECT run->>'succeeded'
+FROM chatgpt_web_qualification_runs
+WHERE id=:'run_id';
+SQL
+)"
     "${compose[@]}" exec -T postgres psql -U router -d router -v ON_ERROR_STOP=1 \
       -v qualified_at="$qualified_at" -v succeeded="$succeeded" \
       -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
