@@ -53,6 +53,7 @@ const SELECTORS = {
     "button[aria-label*='Regenerate' i]",
     "button[aria-label*='重新生成']",
     "button[aria-label*='Try again' i]",
+    "button[aria-label*='Retry' i]",
     "button[aria-label*='重试']",
     "button[aria-label*='Share' i]",
     "button[aria-label*='分享']",
@@ -622,18 +623,20 @@ function assistantTurnContainer(element) {
 
 function terminalActionsFor(element) {
   const root = assistantTurnContainer(element);
-  return root
-    ? all(SELECTORS.terminalAction, root).filter((control) => {
-        const rectangle = control.getBoundingClientRect();
-        const style = getComputedStyle(control);
-        return (
-          rectangle.width > 0 &&
-          rectangle.height > 0 &&
-          style.display !== "none" &&
-          style.visibility !== "hidden"
-        );
-      })
-    : [];
+  const controls = root ? all(SELECTORS.terminalAction, root) : [];
+  for (const control of all(SELECTORS.terminalAction)) {
+    if (visibleErrorKind(control) === "retry") controls.push(control);
+  }
+  return [...new Set(controls)].filter((control) => {
+    const rectangle = control.getBoundingClientRect();
+    const style = getComputedStyle(control);
+    return (
+      rectangle.width > 0 &&
+      rectangle.height > 0 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden"
+    );
+  });
 }
 
 function visibleErrorKind(element) {
