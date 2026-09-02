@@ -578,11 +578,16 @@ function taskPageIsSupported() {
 }
 
 function boundTemporaryDocument(documentToken) {
+  const personalized = temporaryChatPersonalized();
   return (
     documentToken === DOCUMENT_TOKEN &&
     taskPageIsSupported() &&
     temporaryChatEnabled() &&
-    temporaryChatPersonalized() === false
+    // The personalization choice is verified as false before the one allowed
+    // submission. ChatGPT temporarily hides that control while generating, so
+    // null means "not currently observable" rather than "personalized". An
+    // explicit true still invalidates ownership immediately.
+    personalized !== true
   );
 }
 

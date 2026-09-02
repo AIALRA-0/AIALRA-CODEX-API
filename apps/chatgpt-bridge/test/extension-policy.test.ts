@@ -53,6 +53,7 @@ describe("single-page browser agent policy", () => {
     expect(contentScript).toContain("chatgpt_page_generation_blank");
     expect(contentScript).toContain("chatgpt_output_incomplete_blank");
     expect(contentScript).toContain('kind === "home" || kind === "conversation"');
+    expect(contentScript).toContain("personalized !== true");
     expect(contentScript).toContain("users.length !== beforeUserCount + 1");
     expect(contentScript).toContain('"user_echo_verified"');
     expect(contentScript).not.toContain('pageKind() !== "conversation"');
