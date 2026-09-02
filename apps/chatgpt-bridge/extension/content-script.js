@@ -69,7 +69,7 @@ const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快�
 let activeJobId = null;
 let cancelled = false;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
-const BLANK_ASSISTANT_GRACE_MS = 45_000;
+const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000;
 
 async function sendRuntimeMessage(message, timeoutMs = 5_000) {
   let timer;
@@ -895,6 +895,7 @@ async function waitForStableResult(
   let stableReads = 0;
   let stableSince = 0;
   let blankSince = 0;
+  let assistantObserved = false;
   let lastDiagnosticAt = 0;
   while (Date.now() < deadline) {
     if (cancelled) throw new Error("cancelled");
@@ -913,6 +914,7 @@ async function waitForStableResult(
     const allMessages = assistantTurnElements();
     const newest = allMessages.at(-1);
     if (allMessages.length > beforeCount && newest) {
+      assistantObserved = true;
       if (!(latestUser.compareDocumentPosition(newest) & Node.DOCUMENT_POSITION_FOLLOWING)) {
         throw new Error("chatgpt_delivery_uncertain");
       }
@@ -959,7 +961,7 @@ async function waitForStableResult(
         }
       } else {
         blankSince ||= Date.now();
-        if (Date.now() - blankSince >= BLANK_ASSISTANT_GRACE_MS) {
+        if (Date.now() - blankSince >= SELECTOR_DIAGNOSTIC_GRACE_MS) {
           const diagnostic = assistantElementDiagnostics(newest);
           if (
             diagnostic &&
@@ -974,7 +976,6 @@ async function waitForStableResult(
                 : "chatgpt_page_rendering_failed",
             );
           }
-          throw new Error("chatgpt_page_generation_blank");
         }
       }
     }
@@ -984,7 +985,13 @@ async function waitForStableResult(
     }
     await waitForMutation(750);
   }
-  throw new Error(lastText ? "chatgpt_output_incomplete" : "chatgpt_output_incomplete_blank");
+  throw new Error(
+    lastText
+      ? "chatgpt_output_incomplete"
+      : assistantObserved
+        ? "chatgpt_page_generation_blank"
+        : "chatgpt_output_incomplete_blank",
+  );
 }
 
 async function invoke(invocation) {
