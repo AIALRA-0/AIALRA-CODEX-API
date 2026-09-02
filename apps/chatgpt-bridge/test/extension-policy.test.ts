@@ -52,6 +52,10 @@ describe("single-page browser agent policy", () => {
     expect(contentScript).toContain("withoutCompletionMarker(rawOutputText, completionMarker)");
     expect(contentScript).toContain("chatgpt_page_generation_blank");
     expect(contentScript).toContain("chatgpt_output_incomplete_blank");
+    expect(contentScript).toContain('kind === "home" || kind === "conversation"');
+    expect(contentScript).toContain("users.length !== beforeUserCount + 1");
+    expect(contentScript).toContain('"user_echo_verified"');
+    expect(contentScript).not.toContain('pageKind() !== "conversation"');
     expect(contentScript).not.toContain("stop_stalled_blank");
     expect(contentScript).not.toContain("regenerate_blank");
     expect(contentScript).not.toContain("recovering_blank_copy");
@@ -80,6 +84,16 @@ describe("single-page browser agent policy", () => {
     expect(serviceWorker).not.toContain("reloadForHydration");
     expect(serviceWorker).not.toContain("setTimeout(resolve, 45_000)");
     expect(serviceWorker).not.toContain("pendingNativeCopies");
+    const settleInvocation = serviceWorker.slice(
+      serviceWorker.indexOf("async function settleInvocation"),
+      serviceWorker.indexOf("async function cancel"),
+    );
+    expect(settleInvocation.indexOf('type: "completed"')).toBeLessThan(
+      settleInvocation.indexOf("await resetSlotUntilReady(slot)"),
+    );
+    expect(settleInvocation.indexOf('type: "failed"')).toBeLessThan(
+      settleInvocation.lastIndexOf("await resetSlotUntilReady(slot)"),
+    );
 
     expect(bridgeServer).toContain('message.type === "native_reset_request"');
     expect(bridgeServer).toContain('"ctrl+v"');

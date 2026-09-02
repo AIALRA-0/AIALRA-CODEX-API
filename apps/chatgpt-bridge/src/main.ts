@@ -32,7 +32,56 @@ type PendingInvocation = {
   settled: boolean;
   nativeActions: Set<string>;
   lastProgressPhase: string | null;
+  lastDiagnostics: BrowserControlDiagnostics | null;
 };
+
+type PublicDiagnosticSummary = {
+  pageKind: BrowserControlDiagnostics["pageKind"];
+  userTurnCount: number;
+  assistantTurnCount: number;
+  latestUserMatchesObjective: boolean | null;
+  generationActive: boolean;
+  latestAssistantHasText: boolean;
+  visibleErrorKinds: BrowserControlDiagnostics["visibleErrorKinds"];
+  temporaryChatVerified: boolean;
+};
+
+function diagnosticSummary(
+  diagnostics: BrowserControlDiagnostics | null,
+): PublicDiagnosticSummary | null {
+  if (!diagnostics) return null;
+  return {
+    pageKind: diagnostics.pageKind,
+    userTurnCount: diagnostics.userTurnCount,
+    assistantTurnCount: diagnostics.assistantTurnCount,
+    latestUserMatchesObjective: diagnostics.latestUserMatchesObjective,
+    generationActive: diagnostics.generationActive,
+    latestAssistantHasText: diagnostics.latestAssistantHasText,
+    visibleErrorKinds: diagnostics.visibleErrorKinds,
+    temporaryChatVerified:
+      diagnostics.temporaryChatEnabled && diagnostics.temporaryChatPersonalized === false,
+  };
+}
+
+function timeoutCode(entry: PendingInvocation): string {
+  const diagnostics = entry.lastDiagnostics;
+  if (
+    entry.lastProgressPhase === "generating" ||
+    entry.lastProgressPhase === "stabilizing" ||
+    entry.lastProgressPhase === "user_echo_verified"
+  ) {
+    if (diagnostics?.latestAssistantHasText) return "chatgpt_output_incomplete";
+    if (diagnostics?.visibleErrorKinds.includes("generation_error")) {
+      return "chatgpt_page_rendering_failed";
+    }
+    return "chatgpt_page_generation_blank";
+  }
+  if (entry.lastProgressPhase === "submitted" || entry.lastProgressPhase === "input_ready") {
+    return "chatgpt_delivery_uncertain";
+  }
+  if (entry.lastProgressPhase) return "chatgpt_page_not_ready";
+  return "chatgpt_timeout";
+}
 
 const RunnerRequestSchema = z.object({
   jobId: z.string().uuid(),
@@ -322,13 +371,27 @@ async function main(): Promise<void> {
   let lastSubmissionAt: string | null = null;
   let temporaryChatVerified = false;
 
-  const failPending = (jobId: string, code: string, message = fixedBridgeError(code)) => {
+  const failPending = (
+    jobId: string,
+    code: string,
+    message = fixedBridgeError(code),
+    diagnostics: BrowserControlDiagnostics | null = null,
+  ) => {
     const entry = pending.get(jobId);
     if (!entry || entry.settled) return;
+    const failureDiagnostics = diagnostics ?? entry.lastDiagnostics;
     entry.settled = true;
     clearTimeout(entry.timer);
     clearInterval(entry.heartbeat);
-    writeFrame(entry.response, { type: "error", error: { code, message } });
+    writeFrame(entry.response, {
+      type: "error",
+      error: {
+        code,
+        message,
+        failurePhase: entry.lastProgressPhase,
+        diagnosticSummary: diagnosticSummary(failureDiagnostics),
+      },
+    });
     entry.response.end();
     pending.delete(jobId);
     if (activeJobId === jobId) {
@@ -336,6 +399,7 @@ async function main(): Promise<void> {
       activeJobId = null;
       activeAttempt = null;
       lastFailureCode = code;
+      lastFailureDiagnostics = failureDiagnostics;
       lastHeartbeatAt = new Date().toISOString();
     }
   };
@@ -535,6 +599,7 @@ async function main(): Promise<void> {
           personalized: value.task.chatgptWeb.personalized,
           requireSources: value.task.chatgptWeb.requireSources,
           deadlineMs: value.task.deadlineMs,
+          deadlineAt: Date.now() + value.task.deadlineMs,
           modelLabel: null,
           diagnostic: diagnosticRequest,
           attempt: value.attempt,
@@ -543,12 +608,19 @@ async function main(): Promise<void> {
           "content-type": "application/x-ndjson; charset=utf-8",
           "cache-control": "no-store",
         });
-        const timer = setTimeout(() => {
-          extension?.send(
-            JSON.stringify({ type: "cancel", jobId: invocation.jobId } satisfies ControllerMessage),
-          );
-          failPending(invocation.jobId, "chatgpt_timeout");
-        }, invocation.deadlineMs);
+        const timer = setTimeout(
+          () => {
+            const entry = pending.get(invocation.jobId);
+            extension?.send(
+              JSON.stringify({
+                type: "cancel",
+                jobId: invocation.jobId,
+              } satisfies ControllerMessage),
+            );
+            failPending(invocation.jobId, entry ? timeoutCode(entry) : "chatgpt_timeout");
+          },
+          Math.max(1, invocation.deadlineAt - Date.now()),
+        );
         timer.unref();
         const heartbeat = setInterval(() => {
           if (response.writableEnded || response.destroyed) return;
@@ -573,6 +645,7 @@ async function main(): Promise<void> {
           settled: false,
           nativeActions: new Set(),
           lastProgressPhase: null,
+          lastDiagnostics: null,
         });
         phase = "preparing";
         temporaryChatVerified = false;
@@ -735,14 +808,32 @@ async function main(): Promise<void> {
       const entry = pending.get(message.jobId);
       if (!entry || entry.settled) return;
       if (message.type === "progress") {
-        if (entry.lastProgressPhase === message.phase) return;
+        if (message.diagnostics) entry.lastDiagnostics = message.diagnostics;
+        if (entry.lastProgressPhase === message.phase) {
+          if (message.diagnostics) {
+            writeFrame(entry.response, {
+              type: "event",
+              event: {
+                type: "tool",
+                data: {
+                  kind: "chatgpt_web_diagnostic",
+                  failurePhase: message.phase,
+                  diagnosticSummary: diagnosticSummary(message.diagnostics),
+                },
+              },
+            });
+          }
+          return;
+        }
         entry.lastProgressPhase = message.phase;
         phase =
           message.phase === "input_ready"
             ? "input_verified"
             : message.phase === "submitted"
               ? "submitted"
-              : message.phase === "generating" || message.phase === "stabilizing"
+              : message.phase === "user_echo_verified" ||
+                  message.phase === "generating" ||
+                  message.phase === "stabilizing"
                 ? "generating"
                 : message.phase === "resetting"
                   ? "resetting"
@@ -752,22 +843,34 @@ async function main(): Promise<void> {
         if (message.phase === "submitted") lastSubmissionAt = lastHeartbeatAt;
         writeFrame(entry.response, {
           type: "event",
-          event: { type: "tool", data: { kind: "chatgpt_web", phase: message.phase } },
+          event: {
+            type: "tool",
+            data: {
+              kind: "chatgpt_web",
+              phase: message.phase,
+              diagnosticSummary: diagnosticSummary(message.diagnostics ?? null),
+            },
+          },
         });
       } else if (message.type === "failed") {
         const code = message.code;
         lastFailureDiagnostics = message.diagnostics ?? null;
         const entry = pending.get(message.jobId);
         if (entry && !entry.settled && message.diagnostics) {
+          entry.lastDiagnostics = message.diagnostics;
           writeFrame(entry.response, {
             type: "event",
             event: {
               type: "tool",
-              data: { kind: "chatgpt_web_diagnostic", ...message.diagnostics },
+              data: {
+                kind: "chatgpt_web_diagnostic",
+                failurePhase: entry.lastProgressPhase,
+                diagnosticSummary: diagnosticSummary(message.diagnostics),
+              },
             },
           });
         }
-        failPending(message.jobId, code, fixedBridgeError(code));
+        failPending(message.jobId, code, fixedBridgeError(code), message.diagnostics ?? null);
       } else if (message.type === "completed") {
         entry.settled = true;
         clearTimeout(entry.timer);

@@ -77,11 +77,17 @@ async function sendToTab(tabId, message, attempts = 20) {
   throw lastError ?? new Error("chatgpt_ui_changed");
 }
 
-async function waitForReadyPage(tabId, attempts = 80, previousDocumentToken = null) {
+async function waitForReadyPage(
+  tabId,
+  attempts = 80,
+  previousDocumentToken = null,
+  deadlineAt = Number.POSITIVE_INFINITY,
+) {
   let stableDocumentToken = null;
   let stableSince = 0;
   let stableReads = 0;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (Date.now() >= deadlineAt) throw new Error("chatgpt_page_not_ready");
     const page = await sendToTab(tabId, { type: "aialra.probe", discoverModels: false }, 2).catch(
       () => null,
     );
@@ -317,6 +323,8 @@ async function probe(discoverModels = false) {
 }
 
 async function prepareSlot(slot, invocation) {
+  const preparationDeadline = invocation.deadlineAt - 5_000;
+  if (Date.now() >= preparationDeadline) throw new Error("chatgpt_page_not_ready");
   await patchSlot(slot, {
     state: "preparing",
     submitted: false,
@@ -325,7 +333,7 @@ async function prepareSlot(slot, invocation) {
     quarantinedUntil: null,
   });
   const previousDocumentToken = await navigateToFreshChat(slot, true, true);
-  const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken);
+  const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken, preparationDeadline);
   const diagnostics = page.diagnostics ?? {};
   if (
     !diagnostics.freshConversation ||
@@ -391,6 +399,8 @@ async function invoke(invocation) {
       "chatgpt_ui_changed",
       "chatgpt_delivery_uncertain",
       "chatgpt_output_incomplete",
+      "chatgpt_output_incomplete_blank",
+      "chatgpt_page_not_ready",
       "chatgpt_page_generation_blank",
       "chatgpt_page_rendering_failed",
       "chatgpt_output_selector_changed",
@@ -401,14 +411,14 @@ async function invoke(invocation) {
         : code.includes("browser")
           ? "chatgpt_browser_unavailable"
           : "chatgpt_ui_changed";
-    activeJobs.delete(invocation.jobId);
-    await resetSlotUntilReady(slot);
     send({
       type: "failed",
       jobId: invocation.jobId,
       code: knownCode,
       message: "browser_execution_failed",
     });
+    activeJobs.delete(invocation.jobId);
+    await resetSlotUntilReady(slot);
     await probe().catch(() => undefined);
   }
 }
@@ -421,7 +431,6 @@ async function settleInvocation(jobId, result, sender) {
   const completed = Boolean(result?.ok && result.documentToken === slot.documentToken);
   if (completed) {
     await patchSlot(slot, { state: "completed" });
-    await resetSlotUntilReady(slot);
     send({
       type: "completed",
       jobId,
@@ -429,8 +438,8 @@ async function settleInvocation(jobId, result, sender) {
       sources: result.sources ?? [],
       conversationUrl: result.conversationUrl ?? null,
     });
-  } else {
     await resetSlotUntilReady(slot);
+  } else {
     send({
       type: "failed",
       jobId,
@@ -438,6 +447,7 @@ async function settleInvocation(jobId, result, sender) {
       message: result?.message ?? "invoke_failed",
       diagnostics: result?.diagnostics ?? null,
     });
+    await resetSlotUntilReady(slot);
   }
   await probe().catch(() => undefined);
   return true;
@@ -471,7 +481,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       void patchSlot(slot, { state: "submitted", submitted: true });
     if (message.phase === "generating")
       void patchSlot(slot, { state: "generating", submitted: true });
-    send({ type: "progress", jobId: message.jobId, phase: message.phase });
+    send({
+      type: "progress",
+      jobId: message.jobId,
+      phase: message.phase,
+      diagnostics: message.diagnostics ?? null,
+    });
     sendResponse({ ok: true });
     return false;
   }

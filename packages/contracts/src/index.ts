@@ -449,6 +449,34 @@ export const ChatGptWebQualificationSuiteSchema = z.enum([
 ]);
 export type ChatGptWebQualificationSuite = z.infer<typeof ChatGptWebQualificationSuiteSchema>;
 
+export const ChatGptWebFailurePhaseSchema = z.enum([
+  "opening",
+  "configuring",
+  "temporary_chat_verified",
+  "mode_selected",
+  "input_ready",
+  "submitted",
+  "user_echo_verified",
+  "generating",
+  "stabilizing",
+  "resetting",
+]);
+export type ChatGptWebFailurePhase = z.infer<typeof ChatGptWebFailurePhaseSchema>;
+
+export const ChatGptWebDiagnosticSummarySchema = z.object({
+  pageKind: z.enum(["home", "conversation", "other"]),
+  userTurnCount: z.number().int().nonnegative(),
+  assistantTurnCount: z.number().int().nonnegative(),
+  latestUserMatchesObjective: z.boolean().nullable(),
+  generationActive: z.boolean(),
+  latestAssistantHasText: z.boolean(),
+  visibleErrorKinds: z
+    .array(z.enum(["continue_generating", "retry", "generation_error", "other"]))
+    .max(16),
+  temporaryChatVerified: z.boolean(),
+});
+export type ChatGptWebDiagnosticSummary = z.infer<typeof ChatGptWebDiagnosticSummarySchema>;
+
 export const ChatGptWebQualificationItemSchema = z.object({
   index: z.number().int().min(1).max(10),
   name: z.string().min(1).max(64),
@@ -466,6 +494,8 @@ export const ChatGptWebQualificationItemSchema = z.object({
   recoveryCount: z.number().int().nonnegative().default(0),
   ownershipMatched: z.boolean().nullable(),
   temporaryChatVerified: z.boolean().default(false),
+  failurePhase: ChatGptWebFailurePhaseSchema.nullable().optional(),
+  diagnosticSummary: ChatGptWebDiagnosticSummarySchema.nullable().optional(),
 });
 export type ChatGptWebQualificationItem = z.infer<typeof ChatGptWebQualificationItemSchema>;
 

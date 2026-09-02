@@ -1503,6 +1503,47 @@ components:
         recoveryCount: { type: integer, minimum: 0, default: 0 }
         ownershipMatched: { type: [boolean, "null"] }
         temporaryChatVerified: { type: boolean, default: false }
+        failurePhase:
+          type: [string, "null"]
+          enum:
+            [
+              opening,
+              configuring,
+              temporary_chat_verified,
+              mode_selected,
+              input_ready,
+              submitted,
+              user_echo_verified,
+              generating,
+              stabilizing,
+              resetting,
+              null,
+            ]
+        diagnosticSummary:
+          type: [object, "null"]
+          required:
+            [
+              pageKind,
+              userTurnCount,
+              assistantTurnCount,
+              latestUserMatchesObjective,
+              generationActive,
+              latestAssistantHasText,
+              visibleErrorKinds,
+              temporaryChatVerified,
+            ]
+          properties:
+            pageKind: { type: string, enum: [home, conversation, other] }
+            userTurnCount: { type: integer, minimum: 0 }
+            assistantTurnCount: { type: integer, minimum: 0 }
+            latestUserMatchesObjective: { type: [boolean, "null"] }
+            generationActive: { type: boolean }
+            latestAssistantHasText: { type: boolean }
+            visibleErrorKinds:
+              type: array
+              maxItems: 16
+              items: { type: string, enum: [continue_generating, retry, generation_error, other] }
+            temporaryChatVerified: { type: boolean }
     ChatGptWebQualificationRun:
       type: object
       required:

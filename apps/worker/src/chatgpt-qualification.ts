@@ -3,7 +3,11 @@ import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 
 import {
+  ChatGptWebDiagnosticSummarySchema,
+  ChatGptWebFailurePhaseSchema,
   TaskContractSchema,
+  type ChatGptWebDiagnosticSummary,
+  type ChatGptWebFailurePhase,
   type ChatGptWebMode,
   type ChatGptWebQualificationItem,
   type ChatGptWebQualificationRun,
@@ -27,12 +31,14 @@ type DiagnosticResult = {
   temporaryChatVerified: boolean;
 };
 
-class DiagnosticInvocationError extends Error {
+export class DiagnosticInvocationError extends Error {
   constructor(
     message: string,
     readonly submittedCount: number,
     readonly recoveryCount: number,
     readonly temporaryChatVerified = false,
+    readonly failurePhase: ChatGptWebFailurePhase | null = null,
+    readonly diagnosticSummary: ChatGptWebDiagnosticSummary | null = null,
   ) {
     super(message);
   }
@@ -215,6 +221,8 @@ export class ChatGptWebDiagnosticClient {
     let submittedCount = 0;
     const recoveryCount = 0;
     let temporaryChatVerified = false;
+    let failurePhase: ChatGptWebFailurePhase | null = null;
+    let diagnosticSummary: ChatGptWebDiagnosticSummary | null = null;
     const lines = createInterface({
       input: Readable.fromWeb(response.body as never),
       crlfDelay: Infinity,
@@ -222,6 +230,17 @@ export class ChatGptWebDiagnosticClient {
     for await (const line of lines) {
       if (!line.trim()) continue;
       const frame = JSON.parse(line) as Record<string, any>;
+      const phaseCandidate =
+        frame.type === "event" && frame.event?.data?.kind === "chatgpt_web"
+          ? ChatGptWebFailurePhaseSchema.safeParse(frame.event?.data?.phase)
+          : null;
+      if (phaseCandidate?.success) failurePhase = phaseCandidate.data;
+      const summaryCandidate = ChatGptWebDiagnosticSummarySchema.safeParse(
+        frame.type === "error"
+          ? frame.error?.diagnosticSummary
+          : frame.event?.data?.diagnosticSummary,
+      );
+      if (summaryCandidate.success) diagnosticSummary = summaryCandidate.data;
       if (
         frame.type === "event" &&
         frame.event?.data?.kind === "chatgpt_web" &&
@@ -238,6 +257,8 @@ export class ChatGptWebDiagnosticClient {
       }
       if (frame.type === "error") {
         errorCode = frame.error?.code ?? "chatgpt_web_failed";
+        const errorPhase = ChatGptWebFailurePhaseSchema.safeParse(frame.error?.failurePhase);
+        if (errorPhase.success) failurePhase = errorPhase.data;
       }
       if (frame.type === "result") {
         outputText = String(frame.result?.outputText ?? "");
@@ -250,6 +271,8 @@ export class ChatGptWebDiagnosticClient {
         submittedCount,
         recoveryCount,
         temporaryChatVerified,
+        failurePhase,
+        diagnosticSummary,
       );
     if (!outputText) {
       throw new DiagnosticInvocationError(
@@ -257,6 +280,8 @@ export class ChatGptWebDiagnosticClient {
         submittedCount,
         recoveryCount,
         temporaryChatVerified,
+        failurePhase,
+        diagnosticSummary,
       );
     }
     return { outputText, sources, submittedCount, recoveryCount, temporaryChatVerified };
@@ -370,6 +395,8 @@ export async function processChatGptWebQualification(
         recoveryCount: result.recoveryCount,
         ownershipMatched,
         temporaryChatVerified: result.temporaryChatVerified,
+        failurePhase: null,
+        diagnosticSummary: null,
       };
     } catch (error) {
       const failedSubmittedCount =
@@ -393,6 +420,9 @@ export async function processChatGptWebQualification(
         ownershipMatched: null,
         temporaryChatVerified:
           error instanceof DiagnosticInvocationError ? error.temporaryChatVerified : false,
+        failurePhase: error instanceof DiagnosticInvocationError ? error.failurePhase : null,
+        diagnosticSummary:
+          error instanceof DiagnosticInvocationError ? error.diagnosticSummary : null,
       };
     }
     const items = run.items.map((item, itemIndex) => (itemIndex === index ? updatedItem : item));

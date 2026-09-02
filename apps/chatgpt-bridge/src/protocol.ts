@@ -12,6 +12,7 @@ export const BridgeInvocationSchema = z.object({
   personalized: z.literal(false),
   requireSources: z.boolean(),
   deadlineMs: z.number().int().min(1_000).max(3_600_000),
+  deadlineAt: z.number().int().positive(),
   modelLabel: z.string().min(1).max(256).nullable().optional(),
   documentToken: z.string().uuid().nullable().optional(),
   diagnostic: z.boolean().default(false),
@@ -139,10 +140,12 @@ export const ExtensionProgressSchema = z.object({
     "mode_selected",
     "input_ready",
     "submitted",
+    "user_echo_verified",
     "generating",
     "stabilizing",
     "resetting",
   ]),
+  diagnostics: BrowserControlDiagnosticsSchema.nullable().optional(),
 });
 
 export const ExtensionCompletedSchema = z.object({

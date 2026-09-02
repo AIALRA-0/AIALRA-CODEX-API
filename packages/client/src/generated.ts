@@ -920,6 +920,30 @@ export interface components {
       ownershipMatched: boolean | null;
       /** @default false */
       temporaryChatVerified: boolean;
+      /** @enum {string|null} */
+      failurePhase?:
+        | "opening"
+        | "configuring"
+        | "temporary_chat_verified"
+        | "mode_selected"
+        | "input_ready"
+        | "submitted"
+        | "user_echo_verified"
+        | "generating"
+        | "stabilizing"
+        | "resetting"
+        | null;
+      diagnosticSummary?: {
+        /** @enum {string} */
+        pageKind: "home" | "conversation" | "other";
+        userTurnCount: number;
+        assistantTurnCount: number;
+        latestUserMatchesObjective: boolean | null;
+        generationActive: boolean;
+        latestAssistantHasText: boolean;
+        visibleErrorKinds: ("continue_generating" | "retry" | "generation_error" | "other")[];
+        temporaryChatVerified: boolean;
+      } | null;
     };
     ChatGptWebQualificationRun: {
       /** Format: uuid */

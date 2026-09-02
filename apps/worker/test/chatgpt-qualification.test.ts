@@ -10,6 +10,7 @@ import { InMemoryJobRepository } from "@aialra/persistence";
 
 import {
   ChatGptWebDiagnosticClient,
+  DiagnosticInvocationError,
   processChatGptWebQualification,
 } from "../src/chatgpt-qualification.js";
 
@@ -193,5 +194,62 @@ describe("ChatGPT web qualification", () => {
 
     await processChatGptWebQualification(repository, client, run.id);
     expect((await repository.findChatGptWebQualificationRun(run.id))?.status).toBe("failed");
+  });
+
+  it("persists only the safe failure phase and diagnostic summary", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = new Date().toISOString();
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id: randomUUID(),
+      suite: "single_probe",
+      status: "accepted",
+      total: 1,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: items(1),
+      errorCode: null,
+      createdBy: "admin",
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+    await repository.createChatGptWebQualificationRun(run);
+    const client = new ChatGptWebDiagnosticClient(
+      "http://127.0.0.1:1",
+      "synthetic-api",
+      "synthetic-diagnostic",
+    );
+    vi.spyOn(client, "invoke").mockRejectedValue(
+      new DiagnosticInvocationError("chatgpt_page_generation_blank", 1, 0, true, "generating", {
+        pageKind: "home",
+        userTurnCount: 1,
+        assistantTurnCount: 0,
+        latestUserMatchesObjective: true,
+        generationActive: false,
+        latestAssistantHasText: false,
+        visibleErrorKinds: [],
+        temporaryChatVerified: true,
+      }),
+    );
+
+    await processChatGptWebQualification(repository, client, run.id);
+    const saved = await repository.findChatGptWebQualificationRun(run.id);
+
+    expect(saved?.items[0]).toMatchObject({
+      errorCode: "chatgpt_page_generation_blank",
+      submittedCount: 1,
+      failurePhase: "generating",
+      diagnosticSummary: {
+        pageKind: "home",
+        userTurnCount: 1,
+        assistantTurnCount: 0,
+        latestUserMatchesObjective: true,
+        temporaryChatVerified: true,
+      },
+    });
+    expect(JSON.stringify(saved)).not.toContain("prompt");
+    expect(JSON.stringify(saved)).not.toContain("conversationUrl");
   });
 });

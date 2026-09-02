@@ -68,6 +68,7 @@ const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快�
 
 let activeJobId = null;
 let cancelled = false;
+const TERMINAL_REPORT_GRACE_MS = 5_000;
 
 async function sendRuntimeMessage(message, timeoutMs = 5_000) {
   let timer;
@@ -241,8 +242,13 @@ async function nativeSetComposerText(composer, text, jobId, deadline) {
   throw new Error("chatgpt_delivery_uncertain");
 }
 
-async function reportProgress(jobId, phase) {
-  const result = await sendRuntimeMessage({ type: "aialra.progress", jobId, phase });
+async function reportProgress(jobId, phase, diagnostics = null) {
+  const result = await sendRuntimeMessage({
+    type: "aialra.progress",
+    jobId,
+    phase,
+    diagnostics,
+  });
   if (!result?.ok) throw new Error("chatgpt_delivery_uncertain");
 }
 
@@ -566,6 +572,20 @@ function pageKind() {
   return "other";
 }
 
+function taskPageIsSupported() {
+  const kind = pageKind();
+  return kind === "home" || kind === "conversation";
+}
+
+function boundTemporaryDocument(documentToken) {
+  return (
+    documentToken === DOCUMENT_TOKEN &&
+    taskPageIsSupported() &&
+    temporaryChatEnabled() &&
+    temporaryChatPersonalized() === false
+  );
+}
+
 function currentSurface() {
   const controls = [...document.querySelectorAll("button, [role='tab']")].filter((element) => {
     const rectangle = element.getBoundingClientRect();
@@ -809,23 +829,32 @@ function extractResult(element, completionMarker = null) {
   return { outputText, sources };
 }
 
-async function waitForUserEcho(beforeCount, objective, deadline) {
-  let matched = false;
-  let stableHref = "";
-  let stableHrefReads = 0;
-  let stableHrefSince = 0;
+async function waitForUserEcho(beforeCount, objective, documentToken, deadline, jobId) {
+  let matchedStableReads = 0;
+  let matchedStableSince = 0;
   let lastMismatch = "";
   let mismatchStableReads = 0;
   let mismatchStableSince = 0;
+  let lastDiagnosticAt = 0;
   while (Date.now() < deadline) {
     const failure = failureState();
     if (failure) throw new Error(failure);
+    if (!boundTemporaryDocument(documentToken)) {
+      throw new Error("chatgpt_delivery_uncertain");
+    }
     const messages = userMessages();
-    if (messages.length > beforeCount) {
+    if (messages.length > beforeCount + 1) {
+      throw new Error("chatgpt_delivery_uncertain");
+    }
+    if (messages.length === beforeCount + 1) {
       const actual = normalizedText(visibleText(messages.at(-1)));
       if (actual === normalizedText(objective)) {
-        matched = true;
+        matchedStableReads += 1;
+        matchedStableSince ||= Date.now();
+        if (matchedStableReads >= 2 && Date.now() - matchedStableSince >= 750) return;
       } else if (actual) {
+        matchedStableReads = 0;
+        matchedStableSince = 0;
         if (actual === lastMismatch) {
           mismatchStableReads += 1;
         } else {
@@ -838,43 +867,49 @@ async function waitForUserEcho(beforeCount, objective, deadline) {
         }
       }
     }
-    if (matched) {
-      if (location.href === stableHref) {
-        stableHrefReads += 1;
-      } else {
-        stableHref = location.href;
-        stableHrefReads = 1;
-        stableHrefSince = Date.now();
-      }
-      if (
-        pageKind() === "conversation" &&
-        stableHrefReads >= 2 &&
-        Date.now() - stableHrefSince >= 1_000
-      ) {
-        return stableHref;
-      }
+    if (Date.now() - lastDiagnosticAt >= 5_000) {
+      lastDiagnosticAt = Date.now();
+      await reportProgress(jobId, "submitted", controlDiagnostics(objective));
     }
     await waitForMutation(500);
   }
   throw new Error("chatgpt_delivery_uncertain");
 }
 
-async function waitForStableResult(beforeCount, objective, completionMarker, deadline) {
+async function waitForStableResult(
+  beforeCount,
+  beforeUserCount,
+  objective,
+  completionMarker,
+  documentToken,
+  deadline,
+  jobId,
+) {
   let lastText = "";
   let stableReads = 0;
   let stableSince = 0;
   let blankSince = 0;
+  let lastDiagnosticAt = 0;
   while (Date.now() < deadline) {
     if (cancelled) throw new Error("cancelled");
     const failure = failureState();
     if (failure) throw new Error(failure);
-    const latestUserText = normalizedText(visibleText(userMessages().at(-1)));
-    if (pageKind() !== "conversation" || latestUserText !== normalizedText(objective)) {
+    const users = userMessages();
+    const latestUser = users.at(-1);
+    const latestUserText = normalizedText(visibleText(latestUser));
+    if (
+      !boundTemporaryDocument(documentToken) ||
+      users.length !== beforeUserCount + 1 ||
+      latestUserText !== normalizedText(objective)
+    ) {
       throw new Error("chatgpt_delivery_uncertain");
     }
     const allMessages = assistantTurnElements();
     const newest = allMessages.at(-1);
     if (allMessages.length > beforeCount && newest) {
+      if (!(latestUser.compareDocumentPosition(newest) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+        throw new Error("chatgpt_delivery_uncertain");
+      }
       const channels = assistantTextChannels(newest);
       const sample = channels.extracted;
       const generating = Boolean(first(SELECTORS.stop));
@@ -937,6 +972,10 @@ async function waitForStableResult(beforeCount, objective, completionMarker, dea
         }
       }
     }
+    if (Date.now() - lastDiagnosticAt >= 5_000) {
+      lastDiagnosticAt = Date.now();
+      await reportProgress(jobId, "generating", controlDiagnostics(objective));
+    }
     await waitForMutation(750);
   }
   throw new Error(lastText ? "chatgpt_output_incomplete" : "chatgpt_output_incomplete_blank");
@@ -949,8 +988,9 @@ async function invoke(invocation) {
   }
   activeJobId = invocation.jobId;
   cancelled = false;
-  const deadline = Date.now() + invocation.deadlineMs;
+  const deadline = invocation.deadlineAt - TERMINAL_REPORT_GRACE_MS;
   try {
+    if (deadline <= Date.now()) throw new Error("chatgpt_page_not_ready");
     const failure = failureState();
     if (failure) throw new Error(failure);
     const completionMarker = completionMarkerFor(invocation.jobId);
@@ -997,14 +1037,24 @@ async function invoke(invocation) {
     if (send.disabled) throw new Error("chatgpt_delivery_uncertain");
     await reportProgress(invocation.jobId, "input_ready");
     await submitComposer(send, invocation.jobId);
-    await reportProgress(invocation.jobId, "submitted");
-    await waitForUserEcho(beforeUserCount, pageObjective, deadline);
-    await reportProgress(invocation.jobId, "generating");
+    await reportProgress(invocation.jobId, "submitted", controlDiagnostics(pageObjective));
+    await waitForUserEcho(
+      beforeUserCount,
+      pageObjective,
+      invocation.documentToken,
+      deadline,
+      invocation.jobId,
+    );
+    await reportProgress(invocation.jobId, "user_echo_verified", controlDiagnostics(pageObjective));
+    await reportProgress(invocation.jobId, "generating", controlDiagnostics(pageObjective));
     const result = await waitForStableResult(
       beforeAssistantCount,
+      beforeUserCount,
       pageObjective,
       completionMarker,
+      invocation.documentToken,
       deadline,
+      invocation.jobId,
     );
     await reportProgress(invocation.jobId, "stabilizing");
     if (invocation.requireSources && result.sources.length === 0) {

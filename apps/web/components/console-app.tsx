@@ -192,6 +192,28 @@ interface ChatGptWebQualificationRun {
     recoveryCount: number;
     ownershipMatched: boolean | null;
     temporaryChatVerified: boolean;
+    failurePhase?:
+      | "opening"
+      | "configuring"
+      | "temporary_chat_verified"
+      | "mode_selected"
+      | "input_ready"
+      | "submitted"
+      | "user_echo_verified"
+      | "generating"
+      | "stabilizing"
+      | "resetting"
+      | null;
+    diagnosticSummary?: {
+      pageKind: "home" | "conversation" | "other";
+      userTurnCount: number;
+      assistantTurnCount: number;
+      latestUserMatchesObjective: boolean | null;
+      generationActive: boolean;
+      latestAssistantHasText: boolean;
+      visibleErrorKinds: Array<"continue_generating" | "retry" | "generation_error" | "other">;
+      temporaryChatVerified: boolean;
+    } | null;
   }>;
 }
 
@@ -1605,6 +1627,31 @@ const PAGE_PHASE_LABELS: Record<ChatGptWebStatus["phase"], string> = {
   resetting: "正在回到新对话",
 };
 
+const FAILURE_PHASE_LABELS: Record<
+  NonNullable<ChatGptWebQualificationRun["items"][number]["failurePhase"]>,
+  string
+> = {
+  opening: "打开页面",
+  configuring: "配置临时对话",
+  temporary_chat_verified: "临时对话已验证",
+  mode_selected: "模式已选择",
+  input_ready: "输入已核对",
+  submitted: "消息已发送，等待用户回显",
+  user_echo_verified: "用户回显已验证",
+  generating: "等待生成结果",
+  stabilizing: "等待结果稳定",
+  resetting: "重置页面",
+};
+
+function qualificationFailureDetail(run: ChatGptWebQualificationRun): string {
+  const item = run.items.find((candidate) => candidate.status === "failed");
+  if (!item) return "—";
+  const phase = item.failurePhase ? FAILURE_PHASE_LABELS[item.failurePhase] : "阶段未知";
+  const diagnostic = item.diagnosticSummary;
+  if (!diagnostic) return `${phase} · ${item.errorCode ?? "未知错误"}`;
+  return `${phase} · 用户 ${diagnostic.userTurnCount} / 助手 ${diagnostic.assistantTurnCount} · ${item.errorCode ?? "未知错误"}`;
+}
+
 function ChatGptWebChannel() {
   const [status, setStatus] = useState<ChatGptWebStatus | null>(null);
   const [runs, setRuns] = useState<ChatGptWebQualificationRun[]>([]);
@@ -1787,6 +1834,7 @@ function ChatGptWebChannel() {
                 <th>结果</th>
                 <th>进度</th>
                 <th>成功</th>
+                <th>失败断点</th>
                 <th>结束时间</th>
               </tr>
             </thead>
@@ -1806,12 +1854,13 @@ function ChatGptWebChannel() {
                       {run.completed}/{run.total}
                     </td>
                     <td>{run.succeeded}</td>
+                    <td>{qualificationFailureDetail(run)}</td>
                     <td>{formatDate(run.completedAt)}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="muted">
+                  <td colSpan={6} className="muted">
                     还没有验收记录
                   </td>
                 </tr>
@@ -1827,13 +1876,15 @@ function ChatGptWebChannel() {
           <p>
             {confirmSuite === "readiness"
               ? "本次只检查页面和标签状态，不发送消息"
-              : confirmSuite === "chat_3"
-                ? "将连续发送 3 条普通聊天，最长约 30 分钟"
-                : confirmSuite === "chat_10"
-                  ? "将连续发送 10 条普通聊天，验证最短页面链路，最长约 2 小时"
-                  : confirmSuite === "deep_2"
-                    ? "将发送 2 项深度研究，最长约 2 小时"
-                    : "将发送 4 项聊天、4 项搜索和 2 项深度研究，最长约 4 小时"}
+              : confirmSuite === "single_probe"
+                ? "将发送 1 条普通聊天；每项任务只提交一次，最长约 10 分钟"
+                : confirmSuite === "chat_3"
+                  ? "将连续发送 3 条普通聊天，最长约 30 分钟"
+                  : confirmSuite === "chat_10"
+                    ? "将连续发送 10 条普通聊天，验证最短页面链路，最长约 2 小时"
+                    : confirmSuite === "deep_2"
+                      ? "将发送 2 项深度研究，最长约 2 小时"
+                      : "将发送 4 项聊天、4 项搜索和 2 项深度研究，最长约 4 小时"}
           </p>
           <div className="dialog-actions">
             <button className="button" onClick={() => setConfirmSuite(null)} autoFocus>
