@@ -57,6 +57,8 @@ describe("single-page browser agent policy", () => {
     expect(contentScript).toContain("const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000");
     expect(contentScript).not.toContain("BLANK_ASSISTANT_GRACE_MS");
     expect(contentScript).toContain("assistantObserved");
+    expect(contentScript).toContain("closest(\"[data-testid^='conversation-turn']\")");
+    expect(contentScript).toContain('visibleErrorKind(control) === "retry"');
     expect(contentScript).toContain("users.length !== beforeUserCount + 1");
     expect(contentScript).toContain('"user_echo_verified"');
     expect(contentScript).not.toContain('pageKind() !== "conversation"');

@@ -616,9 +616,7 @@ function assistantTurnElements() {
 
 function assistantTurnContainer(element) {
   return (
-    element?.closest("article[data-testid^='conversation-turn']") ??
-    element?.closest("article") ??
-    element
+    element?.closest("[data-testid^='conversation-turn']") ?? element?.closest("article") ?? element
   );
 }
 
@@ -959,8 +957,14 @@ async function waitForStableResult(
           }
           return extractResult(newest, completionMarker);
         }
+        if (terminalActionsFor(newest).some((control) => visibleErrorKind(control) === "retry")) {
+          throw new Error("chatgpt_output_incomplete");
+        }
       } else {
         blankSince ||= Date.now();
+        if (terminalActionsFor(newest).some((control) => visibleErrorKind(control) === "retry")) {
+          throw new Error("chatgpt_page_generation_blank");
+        }
         if (Date.now() - blankSince >= SELECTOR_DIAGNOSTIC_GRACE_MS) {
           const diagnostic = assistantElementDiagnostics(newest);
           if (
