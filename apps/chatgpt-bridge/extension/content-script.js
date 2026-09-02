@@ -71,6 +71,7 @@ let activeJobId = null;
 let cancelled = false;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
 const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000;
+const TERMINAL_BLANK_CONFIRM_MS = 15_000;
 
 async function sendRuntimeMessage(message, timeoutMs = 5_000) {
   let timer;
@@ -649,6 +650,13 @@ function visibleErrorKind(element) {
   return "other";
 }
 
+function hasTerminalCopyAction(element) {
+  return terminalActionsFor(element).some((control) => {
+    const value = `${control.getAttribute("data-testid") ?? ""} ${control.getAttribute("aria-label") ?? ""}`;
+    return /copy-turn-action-button|copy response|复制/i.test(value);
+  });
+}
+
 function visibleErrorKinds() {
   return visiblePageErrors().map(visibleErrorKind).slice(0, 16);
 }
@@ -966,6 +974,9 @@ async function waitForStableResult(
       } else {
         blankSince ||= Date.now();
         if (terminalActionsFor(newest).some((control) => visibleErrorKind(control) === "retry")) {
+          throw new Error("chatgpt_page_generation_blank");
+        }
+        if (Date.now() - blankSince >= TERMINAL_BLANK_CONFIRM_MS && hasTerminalCopyAction(newest)) {
           throw new Error("chatgpt_page_generation_blank");
         }
         if (Date.now() - blankSince >= SELECTOR_DIAGNOSTIC_GRACE_MS) {
