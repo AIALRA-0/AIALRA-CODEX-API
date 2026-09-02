@@ -76,6 +76,9 @@ RUN apt-get update \
       xdotool \
       xvfb \
     && rm -rf /var/lib/apt/lists/* \
+    && grep -Fq "        url += '/' + path;" /usr/share/novnc/app/ui.js \
+    && sed -i "s#        url += '/' + path;#        if (path === 'websockify') { const prefix = window.location.pathname.match(new RegExp('^/(chatgpt-browser(?:-[b-d])?)/')); if (prefix) path = prefix[1] + '/websockify'; } url += '/' + path;#" /usr/share/novnc/app/ui.js \
+    && grep -Fq "if (path === 'websockify')" /usr/share/novnc/app/ui.js \
     && useradd --create-home --home-dir /opt/aialra-browser-home --uid 1100 --shell /usr/sbin/nologin browser
 WORKDIR /app
 COPY --chown=browser:browser --from=build /workspace/node_modules ./node_modules
