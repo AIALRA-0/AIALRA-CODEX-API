@@ -65,6 +65,45 @@ server {
         proxy_send_timeout 3600s;
     }
 
+    location ^~ /chatgpt-browser-b/ {
+        include __AUTH_PROTECT_SNIPPET__;
+        proxy_pass http://__CHATGPT_BROWSER_CONTROL_IP_B__:6080/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location ^~ /chatgpt-browser-c/ {
+        include __AUTH_PROTECT_SNIPPET__;
+        proxy_pass http://__CHATGPT_BROWSER_CONTROL_IP_C__:6080/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location ^~ /chatgpt-browser-d/ {
+        include __AUTH_PROTECT_SNIPPET__;
+        proxy_pass http://__CHATGPT_BROWSER_CONTROL_IP_D__:6080/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
     location ^~ /api/router {
         include __AUTH_PROTECT_SNIPPET__;
         include __EDGE_PROOF_SNIPPET__;

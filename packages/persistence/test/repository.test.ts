@@ -9,7 +9,11 @@ import {
   type SessionThread,
 } from "@aialra/contracts";
 
-import { InMemoryJobRepository, reconstructHistoricalJobEventData } from "../src/index.js";
+import {
+  configuredChatGptWebAccountConfigs,
+  InMemoryJobRepository,
+  reconstructHistoricalJobEventData,
+} from "../src/index.js";
 
 function jobFixture(): Job {
   const now = new Date();
@@ -58,6 +62,87 @@ function sessionThreadFixture(overrides: Partial<SessionThread> = {}): SessionTh
 }
 
 describe("InMemoryJobRepository", () => {
+  it("keeps account plans manual and leases each account at most once", async () => {
+    const repository = new InMemoryJobRepository();
+    const configs = configuredChatGptWebAccountConfigs("a,b");
+    await repository.syncChatGptWebAccounts(configs);
+    for (const accountId of ["account-a", "account-b"]) {
+      await repository.updateChatGptWebAccount(accountId, {
+        enabled: true,
+        qualified: true,
+        state: "ready",
+        authenticated: true,
+        extensionConnected: true,
+        pageReady: true,
+        sandboxVerified: true,
+      });
+    }
+
+    const now = new Date("2026-09-01T12:00:00.000Z");
+    const leases = await Promise.all([
+      repository.acquireChatGptWebAccountLease(
+        "00000000-0000-4000-8000-000000000001",
+        ["account-a", "account-b"],
+        now,
+        900_000,
+      ),
+      repository.acquireChatGptWebAccountLease(
+        "00000000-0000-4000-8000-000000000002",
+        ["account-a", "account-b"],
+        now,
+        900_000,
+      ),
+    ]);
+
+    expect(leases.map((lease) => lease?.accountId).sort()).toEqual(["account-a", "account-b"]);
+    expect(
+      await repository.acquireChatGptWebAccountLease(
+        "00000000-0000-4000-8000-000000000003",
+        ["account-a", "account-b"],
+        now,
+        900_000,
+      ),
+    ).toBeNull();
+    expect(
+      (await repository.listChatGptWebAccounts()).every((account) => account.plan === "unknown"),
+    ).toBe(true);
+  });
+
+  it("quarantines an expired lease instead of reusing it", async () => {
+    const repository = new InMemoryJobRepository();
+    const [config] = configuredChatGptWebAccountConfigs("a");
+    await repository.syncChatGptWebAccounts([config!]);
+    await repository.updateChatGptWebAccount("account-a", {
+      enabled: true,
+      qualified: true,
+      state: "ready",
+      authenticated: true,
+      extensionConnected: true,
+      pageReady: true,
+      sandboxVerified: true,
+    });
+    const lease = await repository.acquireChatGptWebAccountLease(
+      "00000000-0000-4000-8000-000000000004",
+      ["account-a"],
+      new Date("2026-09-01T12:00:00.000Z"),
+      900_000,
+    );
+    expect(lease?.accountId).toBe("account-a");
+
+    const expired = await repository.acquireChatGptWebAccountLease(
+      "00000000-0000-4000-8000-000000000005",
+      ["account-a"],
+      new Date("2026-09-01T12:16:00.000Z"),
+      900_000,
+    );
+    expect(expired).toBeNull();
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      state: "quarantined",
+      qualified: false,
+      lastFailureCode: "chatgpt_lease_expired",
+    });
+  });
+
   it("preserves idempotency lookup", async () => {
     const repository = new InMemoryJobRepository();
     await repository.create(jobFixture());

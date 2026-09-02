@@ -149,11 +149,11 @@ sudo ACTION=start \
   bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
-从 Tailnet 访问 `https://router.example.com/chatgpt-browser/`；该路径继续经过 Authentik，管理员在可见 noVNC 页面手动登录、重新认证或处理验证码
+从 Tailnet 访问 `https://router.example.com/chatgpt-browser/` 和 `https://router.example.com/chatgpt-browser-b/`；两个路径继续经过 Authentik，管理员在对应的可见 noVNC 页面分别手动登录、重新认证或处理验证码
 
 浏览器配置卷保存登录状态，按凭据处理并排除普通备份；浏览器容器不挂载数据库、正文主密钥、Codex 身份目录、宿主目录或容器套接字
 
-至少完成一次成功的 `single_probe` 真实任务后，才按并发 1 开放网页接单；`full_10` 仍可用于强化观察，任何超时、限流、验证码、登录失效或不确定结果都不自动重试
+每个账号至少完成一次成功的 `single_probe` 真实任务后，才允许该账号加入网页池；每账号并发固定为 1，`full_10` 仍可用于强化观察，任何超时、限流、验证码、登录失效或不确定结果都不自动重试
 
 ```bash
 # 真实网页探针通过后才把 CHATGPT_WEB_ADAPTER_ENABLED 切换为 true
@@ -163,7 +163,7 @@ sudo ACTION=enable \
   bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
-实验浏览器默认使用三个独立的 `/28` 容器子网，避免共享宿主已有的 Docker 地址池；Nginx 通过控制网中的固定地址 `CHATGPT_BROWSER_CONTROL_IP` 访问 noVNC，浏览器没有宿主端口；如果部署主机已经使用这些网段，请同时覆盖固定地址和三个子网，并先确认它们不与宿主路由、Tailnet 路由或其他容器网络重叠
+实验浏览器默认使用独立的 `/28` 控制、代理和出口子网，避免共享宿主已有的 Docker 地址池；Nginx 通过控制网中的固定地址 `CHATGPT_BROWSER_CONTROL_IP`、`_B`、`_C`、`_D` 访问各账号 noVNC，浏览器没有宿主端口；如果部署主机已经使用这些网段，请同时覆盖固定地址和三个子网，并先确认它们不与宿主路由、Tailnet 路由或其他容器网络重叠
 
 默认保留 Chromium 自身沙箱；如果宿主明确阻止非特权用户命名空间，日志会出现 `No usable sandbox`，可以只在实验通道保持关闭时临时设置 `CHATGPT_CHROMIUM_NO_SANDBOX=true` 完成可见登录探针；该降级会削弱浏览器内部隔离，不应作为公开模板的默认值，也不能替代只读根文件系统、非 root 用户、零额外权限和受控出口
 

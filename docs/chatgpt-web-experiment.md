@@ -2,7 +2,7 @@
 
 ## 1 通道状态
 
-该通道把 Router 任务交给一台可见的 ChatGPT 网页浏览器，再由最小权限 Chrome 扩展输入任务并读取最终回答
+该通道把 Router 任务交给固定账号池中的可见 ChatGPT 网页浏览器，再由每个容器内的最小权限 Chrome 扩展输入任务并读取最终回答
 
 它不是官方 API，也不保证长期可用；ChatGPT 的页面结构、登录流程、模型菜单、验证页面和生成状态变化都可能使调用中断
 
@@ -36,7 +36,7 @@ flowchart TD
 
 图 2.1 ChatGPT Pro 网页实验任务从接单到结果保存的流程
 
-浏览器启动后预热 1 个工作标签；每项任务都先进入新的非个性化 Temporary Chat，并确认用户消息、助手消息、编辑器内容和生成状态全部为空
+浏览器池中的每个账号容器只预热 1 个工作标签；每项任务都先进入新的非个性化 Temporary Chat，并确认用户消息、助手消息、编辑器内容和生成状态全部为空
 
 扩展只负责定位编辑器、按钮、回合和生成状态；实际输入由隔离容器中的 X11 原生键鼠代理完成：激活标签、点击编辑器、清空、粘贴、逐字核对后立即清空临时剪贴板，扩展不申请网页剪贴板权限
 
@@ -79,7 +79,7 @@ RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
-第三步，从 Tailnet 内访问 `https://router.example.com/chatgpt-browser/`，通过 Authentik 后在 noVNC 页面手动登录 ChatGPT
+第三步，从 Tailnet 内访问 `https://router.example.com/chatgpt-browser/` 和 `https://router.example.com/chatgpt-browser-b/`，通过 Authentik 后分别在 noVNC 页面手动登录两个账号
 
 第四步，检查桥接健康和只读页面探针；探针必须识别登录状态、模型菜单、Temporary Chat、编辑器、发送按钮和结果区域
 
@@ -160,7 +160,7 @@ node deploy/scripts/probe-chatgpt-web-readiness.mjs
 
 ### 4.3 控制台验收入口
 
-管理员在“ChatGPT 网页通道”页面可以运行五种套件：
+管理员在“ChatGPT 网页通道”页面可以按账号槽位运行以下套件：
 
 - `readiness`：只读检查，不发送消息
 - `single_probe`：一次普通聊天，是启用网页通道的最低门槛
@@ -168,9 +168,9 @@ node deploy/scripts/probe-chatgpt-web-readiness.mjs
 - `deep_2`：连续 2 次深度研究
 - `full_10`：4 次聊天、4 次搜索和 2 次深度研究
 
-创建接口为 `POST /api/v1/chatgpt-web/qualification-runs`，必须提供 `Idempotency-Key`；查询接口为 `GET /api/v1/chatgpt-web/qualification-runs/{id}`
+创建接口为 `POST /api/v1/chatgpt-web/qualification-runs`，必须提供 `Idempotency-Key`，可带 `accountId`（如 `account-a`）；查询接口为 `GET /api/v1/chatgpt-web/qualification-runs/{id}`。账号池状态和人工套餐标签由 `GET /api/v1/chatgpt-web/accounts` 查看和管理员 PATCH 修改。
 
-验收记录不保存提示词、回答、账号或对话地址，只保存每项状态、耗时、输出长度、输出 SHA-256、来源数、提交次数、任务归属结果、Temporary Chat 验证结果和错误码
+验收记录不保存提示词、回答、账号身份或对话地址，只保存脱敏槽位 ID、每项状态、耗时、输出长度、输出 SHA-256、来源数、提交次数、任务归属结果、Temporary Chat 验证结果和错误码；账号池状态也只保留匿名槽位、人工套餐标签和脱敏诊断
 
 ## 5 调用方法
 
@@ -259,7 +259,7 @@ ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 
 
 ## 7 并发和自动关闭
 
-通过单次真实探针后网页通道按并发 1 运行，部署时只运行一个 Worker；`full_10` 可作为强化观察。Worker 内的专用派发队列串行执行“读取状态、等待最短间隔、预留提交”，相邻网页提交至少间隔 90 秒
+通过单次真实探针的账号才进入网页池；每账号并发固定为 1，池按最少负载和最早可用时间调度，部署时仍只运行一个 Worker。每个账号独立执行 90 秒发送间隔和限流冷却；提交后断连、超时或归属不确定时不换号、不重发。`full_10` 可作为强化观察。
 
 网页限流统一进入 30、60、120 分钟的渐进冷却；冷却到期只允许一个恢复探针。恢复探针成功后进入观察态，累计连续 3 次成功才清除限流观察；再次限流会回到下一档冷却。登录失效、验证页面、页面结构变化、重复发送或错误归属会关闭通道并要求重新验收；Codex SDK 通道继续独立运行
 

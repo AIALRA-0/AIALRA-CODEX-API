@@ -103,6 +103,7 @@ export class JobsService {
         });
       }
       const webStatus = await this.repository.readChatGptWebStatus();
+      const webAccounts = await this.repository.listChatGptWebAccounts();
       const cooldownRetryAfter = webStatus.cooldownUntil
         ? Math.max(0, Math.ceil((new Date(webStatus.cooldownUntil).getTime() - Date.now()) / 1_000))
         : Math.max(1, webStatus.retryAfter ?? 1);
@@ -116,7 +117,23 @@ export class JobsService {
         webStatus.rateLimitState === "cooldown" &&
         (!webStatus.cooldownUntil || cooldownRetryAfter > 0);
       const recoveryProbeActive = webStatus.rateLimitState === "recovery_probe";
-      if (cooldownActive || recoveryProbeActive) {
+      const qualifiedAccounts = webAccounts.filter(
+        (account) =>
+          account.enabled &&
+          account.qualified &&
+          !["disabled", "quarantined", "login_required"].includes(account.state),
+      );
+      const allAccountsCoolingDown =
+        webAccounts.length > 0 &&
+        qualifiedAccounts.length > 0 &&
+        qualifiedAccounts.every(
+          (account) =>
+            account.rateLimitState === "cooldown" &&
+            account.lastRateLimitAt &&
+            account.retryAfter != null &&
+            new Date(account.lastRateLimitAt).getTime() + account.retryAfter * 1_000 > Date.now(),
+        );
+      if (cooldownActive || recoveryProbeActive || allAccountsCoolingDown) {
         const retryAfter = recoveryProbeActive ? recoveryRetryAfter : cooldownRetryAfter;
         throw new HttpException(
           {
@@ -128,6 +145,14 @@ export class JobsService {
           },
           HttpStatus.TOO_MANY_REQUESTS,
         );
+      }
+      if (webAccounts.length > 0 && !qualifiedAccounts.length) {
+        throw new ConflictException({
+          error: {
+            code: "chatgpt_web_circuit_open",
+            message: "没有已通过单探针且可用的网页账号。",
+          },
+        });
       }
     }
     const preset = parsedTask.permissions.preset ?? executionPolicy.defaultPreset;

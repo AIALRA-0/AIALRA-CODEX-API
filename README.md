@@ -39,27 +39,27 @@ AIALRA Model Router 把已经登录的 Codex 执行器接到一个私有控制�
 - CLI、MCP 和 TypeScript 客户端
 - 默认关闭的 ChatGPT Pro 可见网页实验通道、预热标签池和受控域名出口
 - DOM 定位与观察、容器内原生键鼠输入、十分钟失败隔离和防重复提交日志
-- 网页通道专用 Chromium 沙箱、脱敏验收记录、熔断状态、固定并发 `1` 和 90 秒最短提交间隔
+- 网页通道专用 Chromium 沙箱、脱敏验收记录、账号池熔断状态、每账号并发 `1` 和独立 90 秒最短提交间隔
 - Authentik 浏览器登录与作用域 API 密钥
 - PostgreSQL 队列、加密正文、审计和删除回执
 
-这不是 OpenAI 官方项目，也不是 OpenAI API 服务、订阅转售服务或多账号共享服务，OpenAI、ChatGPT、Codex 及相关标识归其权利人所有
+这不是 OpenAI 官方项目，也不是 OpenAI API 服务、订阅转售服务或共享账号服务；网页账号由运营者在受保护页面自行登录，OpenAI、ChatGPT、Codex 及相关标识归其权利人所有
 
 ## 2 用户入口
 
-| 入口       | 地址或命令                   | 用途                             | 身份验证            |
-| ---------- | ---------------------------- | -------------------------------- | ------------------- |
-| 登录入口   | `/`                          | 直接进入私有控制台登录           | Authentik           |
-| 内部文档   | `/docs`                      | 快速开始、契约和错误码           | Authentik           |
-| 管理控制台 | `/console`                   | 在线调用、任务、额度、密钥和审计 | Authentik           |
-| Responses  | `POST /v1/responses`         | 迁移模型式文本调用               | API 密钥            |
-| Chat       | `POST /v1/chat/completions`  | OpenAI 兼容聊天调用              | API 密钥            |
-| Threads    | `GET /api/v1/threads`        | 可续聊的会话线程清单             | API 密钥            |
-| Jobs       | `POST /api/v1/jobs`          | 长任务、批次和事件               | API 密钥            |
-| OpenAPI    | `/openapi`、`/openapi.json`  | HTTP 契约                        | Tailnet             |
-| CLI        | `node apps/cli/dist/main.js` | PowerShell 与流水线              | API 密钥            |
-| MCP        | `node apps/mcp/dist/main.js` | Agent 委派                       | API 密钥            |
-| 可见浏览器 | `/chatgpt-browser/`          | ChatGPT 手动登录、验证与诊断     | Tailnet + Authentik |
+| 入口       | 地址或命令                                 | 用途                                        | 身份验证            |
+| ---------- | ------------------------------------------ | ------------------------------------------- | ------------------- |
+| 登录入口   | `/`                                        | 直接进入私有控制台登录                      | Authentik           |
+| 内部文档   | `/docs`                                    | 快速开始、契约和错误码                      | Authentik           |
+| 管理控制台 | `/console`                                 | 在线调用、任务、额度、密钥和审计            | Authentik           |
+| Responses  | `POST /v1/responses`                       | 迁移模型式文本调用                          | API 密钥            |
+| Chat       | `POST /v1/chat/completions`                | OpenAI 兼容聊天调用                         | API 密钥            |
+| Threads    | `GET /api/v1/threads`                      | 可续聊的会话线程清单                        | API 密钥            |
+| Jobs       | `POST /api/v1/jobs`                        | 长任务、批次和事件                          | API 密钥            |
+| OpenAPI    | `/openapi`、`/openapi.json`                | HTTP 契约                                   | Tailnet             |
+| CLI        | `node apps/cli/dist/main.js`               | PowerShell 与流水线                         | API 密钥            |
+| MCP        | `node apps/mcp/dist/main.js`               | Agent 委派                                  | API 密钥            |
+| 可见浏览器 | `/chatgpt-browser/`、`/chatgpt-browser-b/` | 两个独立 ChatGPT 账号的手动登录、验证与诊断 | Tailnet + Authentik |
 
 生产环境中，Nginx 先让 Authentik 验证浏览器，再把受保护身份交给 Next.js；Next.js 使用另一份内部证明调用 NestJS；外部 Agent 不经过浏览器登录，只使用有范围、有限速、可到期和可吊销的 API 密钥
 
@@ -204,9 +204,9 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 网页不提供可靠 Token、Credits、额度变化或 API 等效价格，响应使用 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”，不会把 `0` 当作实测值
 
-管理员可在控制台“ChatGPT 网页通道”页面查看沙箱、登录、标签池、隔离标签和最近验收状态，也可以运行只读检查、普通聊天 3 次、深度研究 2 次和完整 10 项门禁
+管理员可在控制台“ChatGPT 网页通道”页面查看沙箱、登录、账号标签池、隔离标签和最近验收状态，也可以按账号运行只读检查、单探针、普通聊天 3 次、深度研究 2 次和完整 10 项门禁
 
-对应接口为 `GET /api/v1/chatgpt-web/status`、`POST /api/v1/chatgpt-web/qualification-runs` 和 `GET /api/v1/chatgpt-web/qualification-runs/{id}`；接口只返回阶段、耗时、长度、摘要、来源数和错误分类，不返回提示词、回答、账号或对话地址
+对应接口为 `GET /api/v1/chatgpt-web/status`、`GET /api/v1/chatgpt-web/accounts`、`PATCH /api/v1/chatgpt-web/accounts/{accountId}`、`POST /api/v1/chatgpt-web/qualification-runs` 和 `GET /api/v1/chatgpt-web/qualification-runs/{id}`；接口只返回匿名槽位、阶段、耗时、长度、摘要、来源数和错误分类，不返回提示词、回答、账号身份或对话地址
 
 搜索默认期限为 10 分钟，深度研究默认期限为 60 分钟，长任务建议使用 Jobs API
 

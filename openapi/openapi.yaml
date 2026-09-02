@@ -373,6 +373,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatGptWebStatus"
+  /api/v1/chatgpt-web/accounts:
+    get:
+      operationId: listChatGptWebAccounts
+      responses:
+        "200":
+          description: Secret-free state for the fixed ChatGPT web account slots
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChatGptWebAccount" }
+  /api/v1/chatgpt-web/accounts/{accountId}:
+    patch:
+      operationId: updateChatGptWebAccount
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string, pattern: "^account-[a-d]$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                label: { type: string, minLength: 1, maxLength: 64 }
+                plan: { type: string, enum: [plus, pro, unknown] }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Updated secret-free account state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatGptWebAccount" }
   /api/v1/chatgpt-web/qualification-runs:
     get:
       operationId: listChatGptWebQualificationRuns
@@ -411,6 +451,9 @@ paths:
                 suite:
                   type: string
                   enum: [readiness, single_probe, chat_3, chat_10, deep_2, full_10]
+                accountId:
+                  type: string
+                  pattern: "^account-[a-d]$"
       responses:
         "201":
           description: Qualification run accepted or replayed
@@ -1413,6 +1456,7 @@ components:
           quarantinedTabs,
           slots,
           lastQualificationRunId,
+          accounts,
           updatedAt,
         ]
       properties:
@@ -1470,6 +1514,76 @@ components:
               quarantinedUntil: { type: [string, "null"], format: date-time }
               updatedAt: { type: string, format: date-time }
         lastQualificationRunId: { type: [string, "null"], format: uuid }
+        accounts:
+          type: array
+          maxItems: 4
+          items: { $ref: "#/components/schemas/ChatGptWebAccount" }
+        updatedAt: { type: string, format: date-time }
+    ChatGptWebAccount:
+      type: object
+      required:
+        [
+          accountId,
+          slot,
+          label,
+          plan,
+          enabled,
+          qualified,
+          state,
+          maxConcurrency,
+          extensionConnected,
+          pageReady,
+          authenticated,
+          sandboxVerified,
+          activeJobId,
+          leaseExpiresAt,
+          rateLimitState,
+          retryAfter,
+          consecutiveRateLimits,
+          lastRateLimitAt,
+          lastSubmissionAt,
+          lastHeartbeatAt,
+          lastProbeAt,
+          lastProbePassed,
+          lastSuccessAt,
+          lastFailureAt,
+          lastFailureCode,
+          failurePhase,
+          diagnosticSummary,
+          vncPath,
+          updatedAt,
+        ]
+      properties:
+        accountId: { type: string, pattern: "^account-[a-d]$" }
+        slot: { type: string, enum: [a, b, c, d] }
+        label: { type: string, minLength: 1, maxLength: 64 }
+        plan: { type: string, enum: [plus, pro, unknown] }
+        enabled: { type: boolean }
+        qualified: { type: boolean }
+        state:
+          type: string
+          enum: [configured, login_required, ready, busy, cooldown, quarantined, disabled, stale]
+        maxConcurrency: { type: integer, const: 1 }
+        extensionConnected: { type: boolean }
+        pageReady: { type: boolean }
+        authenticated: { type: boolean }
+        sandboxVerified: { type: boolean }
+        activeJobId: { type: [string, "null"], format: uuid }
+        leaseExpiresAt: { type: [string, "null"], format: date-time }
+        rateLimitState: { type: string, enum: [clear, cooldown, recovery_probe, observation] }
+        retryAfter: { type: [integer, "null"], minimum: 0 }
+        consecutiveRateLimits: { type: integer, minimum: 0 }
+        lastRateLimitAt: { type: [string, "null"], format: date-time }
+        lastSubmissionAt: { type: [string, "null"], format: date-time }
+        lastHeartbeatAt: { type: [string, "null"], format: date-time }
+        lastProbeAt: { type: [string, "null"], format: date-time }
+        lastProbePassed: { type: [boolean, "null"] }
+        lastSuccessAt: { type: [string, "null"], format: date-time }
+        lastFailureAt: { type: [string, "null"], format: date-time }
+        lastFailureCode: { type: [string, "null"], maxLength: 128 }
+        failurePhase: { type: [string, "null"] }
+        diagnosticSummary: { type: [object, "null"], additionalProperties: false }
+        vncPath: { type: string, pattern: "^/chatgpt-browser(?:-[b-d])?/$" }
         updatedAt: { type: string, format: date-time }
     ChatGptWebQualificationItem:
       type: object
@@ -1549,6 +1663,7 @@ components:
       required:
         [
           id,
+          accountId,
           suite,
           status,
           total,
@@ -1565,6 +1680,7 @@ components:
         ]
       properties:
         id: { type: string, format: uuid }
+        accountId: { type: [string, "null"], pattern: "^account-[a-d]$" }
         suite: { type: string, enum: [readiness, single_probe, chat_3, chat_10, deep_2, full_10] }
         status: { type: string, enum: [accepted, running, succeeded, failed, cancelled] }
         total: { type: integer, minimum: 0, maximum: 10 }

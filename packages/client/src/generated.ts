@@ -260,6 +260,38 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/chatgpt-web/accounts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listChatGptWebAccounts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/chatgpt-web/accounts/{accountId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: operations["updateChatGptWebAccount"];
+    trace?: never;
+  };
   "/api/v1/chatgpt-web/qualification-runs": {
     parameters: {
       query?: never;
@@ -899,6 +931,60 @@ export interface components {
       }[];
       /** Format: uuid */
       lastQualificationRunId: string | null;
+      accounts: components["schemas"]["ChatGptWebAccount"][];
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    ChatGptWebAccount: {
+      accountId: string;
+      /** @enum {string} */
+      slot: "a" | "b" | "c" | "d";
+      label: string;
+      /** @enum {string} */
+      plan: "plus" | "pro" | "unknown";
+      enabled: boolean;
+      qualified: boolean;
+      /** @enum {string} */
+      state:
+        | "configured"
+        | "login_required"
+        | "ready"
+        | "busy"
+        | "cooldown"
+        | "quarantined"
+        | "disabled"
+        | "stale";
+      /** @constant */
+      maxConcurrency: 1;
+      extensionConnected: boolean;
+      pageReady: boolean;
+      authenticated: boolean;
+      sandboxVerified: boolean;
+      /** Format: uuid */
+      activeJobId: string | null;
+      /** Format: date-time */
+      leaseExpiresAt: string | null;
+      /** @enum {string} */
+      rateLimitState: "clear" | "cooldown" | "recovery_probe" | "observation";
+      retryAfter: number | null;
+      consecutiveRateLimits: number;
+      /** Format: date-time */
+      lastRateLimitAt: string | null;
+      /** Format: date-time */
+      lastSubmissionAt: string | null;
+      /** Format: date-time */
+      lastHeartbeatAt: string | null;
+      /** Format: date-time */
+      lastProbeAt: string | null;
+      lastProbePassed: boolean | null;
+      /** Format: date-time */
+      lastSuccessAt: string | null;
+      /** Format: date-time */
+      lastFailureAt: string | null;
+      lastFailureCode: string | null;
+      failurePhase: string | null;
+      diagnosticSummary: Record<string, never> | null;
+      vncPath: string;
       /** Format: date-time */
       updatedAt: string;
     };
@@ -948,6 +1034,7 @@ export interface components {
     ChatGptWebQualificationRun: {
       /** Format: uuid */
       id: string;
+      accountId: string | null;
       /** @enum {string} */
       suite: "readiness" | "single_probe" | "chat_3" | "chat_10" | "deep_2" | "full_10";
       /** @enum {string} */
@@ -1610,6 +1697,59 @@ export interface operations {
       };
     };
   };
+  listChatGptWebAccounts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Secret-free state for the fixed ChatGPT web account slots */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            data: components["schemas"]["ChatGptWebAccount"][];
+          };
+        };
+      };
+    };
+  };
+  updateChatGptWebAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          label?: string;
+          /** @enum {string} */
+          plan?: "plus" | "pro" | "unknown";
+          enabled?: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Updated secret-free account state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGptWebAccount"];
+        };
+      };
+    };
+  };
   listChatGptWebQualificationRuns: {
     parameters: {
       query?: {
@@ -1648,6 +1788,7 @@ export interface operations {
         "application/json": {
           /** @enum {string} */
           suite: "readiness" | "single_probe" | "chat_3" | "chat_10" | "deep_2" | "full_10";
+          accountId?: string;
         };
       };
     };

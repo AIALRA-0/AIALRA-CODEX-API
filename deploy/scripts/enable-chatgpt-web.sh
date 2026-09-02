@@ -32,11 +32,11 @@ set_environment_value() {
 }
 
 wait_for_bridge() {
-  local expected="$1"
+  local service="$1"
   local attempt
   for attempt in $(seq 1 30); do
-    if "${compose[@]}" exec -T chatgpt-browser node -e \
-      "fetch('http://127.0.0.1:13216/healthz').then(r=>process.exit(${expected})).catch(()=>process.exit(1))"; then
+    if "${compose[@]}" exec -T "$service" node -e \
+      "fetch('http://127.0.0.1:13216/healthz').then(r=>process.exit([200,503].includes(r.status)?0:1)).catch(()=>process.exit(1))"; then
       return 0
     fi
     sleep 1
@@ -50,17 +50,18 @@ case "$ACTION" in
     set_flag false
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED true
     "${compose[@]}" build chatgpt-browser chatgpt-egress-proxy
-    "${compose[@]}" up --detach chatgpt-egress-proxy chatgpt-browser
-    wait_for_bridge "[200,503].includes(r.status)?0:1"
-    echo "Visible browser started with the experiment disabled"
-    echo "Open /chatgpt-browser/vnc.html?autoconnect=true&resize=remote&path=chatgpt-browser/websockify through the protected Router origin"
+    "${compose[@]}" up --detach chatgpt-egress-proxy chatgpt-browser chatgpt-browser-b
+    wait_for_bridge chatgpt-browser
+    wait_for_bridge chatgpt-browser-b
+    echo "Visible browser pool started with the experiment disabled"
+    echo "Open the protected /chatgpt-browser/ and /chatgpt-browser-b/ VNC paths through the Router origin"
     ;;
   enable)
     [[ "$QUALIFICATION_RUN_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || {
       echo "QUALIFICATION_RUN_ID must name a completed single probe or full qualification" >&2
       exit 1
     }
-    qualification_status="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
+    qualification_record="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
       -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
 SELECT CASE
   WHEN run->>'suite'='single_probe'
@@ -80,16 +81,26 @@ SELECT CASE
     AND COALESCE((run->>'succeeded')::integer,0) >= 9
   THEN 'pass'
   ELSE 'fail'
-END
+END || '|' || COALESCE(run->>'accountId', 'account-a')
 FROM chatgpt_web_qualification_runs
 WHERE id=:'run_id';
 SQL
 )"
+    qualification_status="${qualification_record%%|*}"
+    account_id="${qualification_record##*|}"
     [[ "$qualification_status" == "pass" ]] || {
-      echo "The qualification record did not pass every release gate" >&2
+      echo "The qualification record did not pass the account qualification gate" >&2
       exit 1
     }
-    "${compose[@]}" exec -T chatgpt-browser node -e \
+    bridge_service=""
+    case "$account_id" in
+      account-a) bridge_service="chatgpt-browser" ;;
+      account-b) bridge_service="chatgpt-browser-b" ;;
+      account-c) bridge_service="chatgpt-browser-c" ;;
+      account-d) bridge_service="chatgpt-browser-d" ;;
+      *) echo "Qualification record has an invalid account slot" >&2; exit 1 ;;
+    esac
+    "${compose[@]}" exec -T "$bridge_service" node -e \
       "fetch('http://127.0.0.1:13216/healthz').then(async r=>{const b=await r.json();process.exit(b.sandboxVerified&&b.extensionConnected&&b.pageReady&&b.authenticated?0:1)}).catch(()=>process.exit(1))"
     qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     succeeded="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
@@ -101,14 +112,28 @@ SQL
 )"
     "${compose[@]}" exec -T postgres psql -U router -d router -v ON_ERROR_STOP=1 \
       -v qualified_at="$qualified_at" -v succeeded="$succeeded" \
-      -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
+      -v run_id="$QUALIFICATION_RUN_ID" -v account_id="$account_id" <<'SQL'
+UPDATE chatgpt_web_accounts
+SET enabled=TRUE,
+    qualified=TRUE,
+    status=status || jsonb_build_object(
+      'enabled', TRUE,
+      'qualified', TRUE,
+      'state', 'ready',
+      'lastProbePassed', TRUE,
+      'lastProbeAt', :'qualified_at',
+      'updatedAt', :'qualified_at'
+    ),
+    updated_at=:'qualified_at'
+WHERE account_id=:'account_id';
+
 INSERT INTO chatgpt_web_status (singleton,status,updated_at)
 VALUES (
   TRUE,
   jsonb_build_object(
     'configuredEnabled', TRUE,
     'effectiveConcurrency', 1,
-    'maximumConcurrency', 1,
+    'maximumConcurrency', 2,
     'activeTabs', 0,
     'queuedJobs', 0,
     'sandboxVerified', TRUE,
@@ -134,6 +159,7 @@ VALUES (
     'lastQualificationPassed', TRUE,
     'lastQualificationSucceeded', :'succeeded'::integer,
     'lastQualificationRunId', :'run_id',
+    'accounts', jsonb_build_array((SELECT status FROM chatgpt_web_accounts WHERE account_id=:'account_id')),
     'updatedAt', :'qualified_at'
   ),
   :'qualified_at'
@@ -142,7 +168,7 @@ ON CONFLICT (singleton) DO UPDATE SET
   status=chatgpt_web_status.status || jsonb_build_object(
     'configuredEnabled', TRUE,
     'effectiveConcurrency', 1,
-    'maximumConcurrency', 1,
+    'maximumConcurrency', 2,
     'circuitState', 'closed',
     'circuitReason', NULL,
     'cooldownUntil', NULL,
@@ -158,14 +184,16 @@ ON CONFLICT (singleton) DO UPDATE SET
     'lastQualificationPassed', TRUE,
     'lastQualificationSucceeded', :'succeeded'::integer,
     'lastQualificationRunId', :'run_id',
+    'accounts', jsonb_build_array((SELECT status FROM chatgpt_web_accounts WHERE account_id=:'account_id')),
     'updatedAt', :'qualified_at'
   ),
   updated_at=EXCLUDED.updated_at;
 SQL
     set_flag true
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
-    "${compose[@]}" up --detach --force-recreate api worker chatgpt-browser
-    echo "ChatGPT web experiment enabled at concurrency 1"
+    set_environment_value CHATGPT_WEB_MAX_CONCURRENCY 2
+    "${compose[@]}" up --detach --force-recreate api worker chatgpt-browser chatgpt-browser-b
+    echo "ChatGPT web account pool enabled at concurrency 2 (one per account)"
     ;;
   disable)
     set_flag false
@@ -177,7 +205,7 @@ SQL
     set_flag false
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
     "${compose[@]}" up --detach --force-recreate api worker
-    "${compose[@]}" stop chatgpt-browser
+    "${compose[@]}" stop chatgpt-browser chatgpt-browser-b
     echo "ChatGPT web experiment and visible browser stopped"
     ;;
   *)

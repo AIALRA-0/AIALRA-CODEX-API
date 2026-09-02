@@ -160,7 +160,68 @@ interface ChatGptWebStatus {
     quarantinedUntil: string | null;
     updatedAt: string;
   }>;
+  accounts: ChatGptWebAccount[];
   lastQualificationRunId: string | null;
+  updatedAt: string;
+}
+
+interface ChatGptWebAccount {
+  accountId: string;
+  slot: "a" | "b" | "c" | "d";
+  label: string;
+  plan: "plus" | "pro" | "unknown";
+  enabled: boolean;
+  qualified: boolean;
+  state:
+    | "configured"
+    | "login_required"
+    | "ready"
+    | "busy"
+    | "cooldown"
+    | "quarantined"
+    | "disabled"
+    | "stale";
+  maxConcurrency: 1;
+  extensionConnected: boolean;
+  pageReady: boolean;
+  authenticated: boolean;
+  sandboxVerified: boolean;
+  activeJobId: string | null;
+  leaseExpiresAt: string | null;
+  rateLimitState: "clear" | "cooldown" | "recovery_probe" | "observation";
+  retryAfter: number | null;
+  consecutiveRateLimits: number;
+  lastRateLimitAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastSubmissionAt: string | null;
+  lastProbeAt: string | null;
+  lastProbePassed: boolean | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureCode: string | null;
+  failurePhase:
+    | "opening"
+    | "configuring"
+    | "temporary_chat_verified"
+    | "mode_selected"
+    | "input_ready"
+    | "submitted"
+    | "user_echo_verified"
+    | "generating"
+    | "stabilizing"
+    | "resetting"
+    | null;
+  diagnosticSummary: {
+    pageKind: "home" | "conversation" | "other";
+    userTurnCount: number;
+    assistantTurnCount: number;
+    latestUserMatchesObjective: boolean | null;
+    generationActive: boolean;
+    latestAssistantHasText: boolean;
+    visibleErrorKinds: Array<"continue_generating" | "retry" | "generation_error" | "other">;
+    temporaryChatVerified: boolean;
+  } | null;
+  vncPath: string;
   updatedAt: string;
 }
 
@@ -169,6 +230,7 @@ type ChatGptWebQualificationSuite =
 
 interface ChatGptWebQualificationRun {
   id: string;
+  accountId: string | null;
   suite: ChatGptWebQualificationSuite;
   status: "accepted" | "running" | "succeeded" | "failed" | "cancelled";
   total: number;
@@ -1605,6 +1667,23 @@ const QUALIFICATION_LABELS: Record<ChatGptWebQualificationSuite, string> = {
   full_10: "完整 10 项",
 };
 
+const ACCOUNT_STATE_LABELS: Record<ChatGptWebAccount["state"], string> = {
+  configured: "待验证",
+  login_required: "需要登录",
+  ready: "可用",
+  busy: "执行中",
+  cooldown: "冷却中",
+  quarantined: "已隔离",
+  disabled: "已停用",
+  stale: "心跳过期",
+};
+
+const ACCOUNT_PLAN_LABELS: Record<ChatGptWebAccount["plan"], string> = {
+  plus: "Plus",
+  pro: "Pro",
+  unknown: "未标注",
+};
+
 const SLOT_LABELS: Record<ChatGptWebStatus["slots"][number]["state"], string> = {
   starting: "正在启动",
   idle: "空闲",
@@ -1656,6 +1735,7 @@ function ChatGptWebChannel() {
   const [status, setStatus] = useState<ChatGptWebStatus | null>(null);
   const [runs, setRuns] = useState<ChatGptWebQualificationRun[]>([]);
   const [confirmSuite, setConfirmSuite] = useState<ChatGptWebQualificationSuite | null>(null);
+  const [confirmAccountId, setConfirmAccountId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -1685,12 +1765,34 @@ function ChatGptWebChannel() {
       await routerFetch<ChatGptWebQualificationRun>("/api/v1/chatgpt-web/qualification-runs", {
         method: "POST",
         headers: { "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({ suite: confirmSuite }),
+        body: JSON.stringify({
+          suite: confirmSuite,
+          ...(confirmAccountId ? { accountId: confirmAccountId } : {}),
+        }),
       });
       setConfirmSuite(null);
+      setConfirmAccountId(null);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "验收运行创建失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateAccount(
+    account: ChatGptWebAccount,
+    patch: Partial<Pick<ChatGptWebAccount, "plan" | "enabled" | "label">>,
+  ) {
+    setBusy(true);
+    try {
+      await routerFetch<ChatGptWebAccount>(`/api/v1/chatgpt-web/accounts/${account.accountId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "账号设置失败");
     } finally {
       setBusy(false);
     }
@@ -1795,10 +1897,137 @@ function ChatGptWebChannel() {
       </section>
 
       <section className="card console-section">
+        <div className="row">
+          <div>
+            <span className="card-index">固定账号槽位</span>
+            <h3>网页账号池</h3>
+          </div>
+          <span className="muted">每个槽位最多一个并发；套餐为人工标签</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>槽位</th>
+                <th>套餐</th>
+                <th>状态</th>
+                <th>登录/隔离</th>
+                <th>探针</th>
+                <th>入口</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status?.accounts?.length ? (
+                status.accounts.map((account) => (
+                  <tr key={account.accountId}>
+                    <td>
+                      {account.label}
+                      <br />
+                      <span className="muted">{account.accountId}</span>
+                    </td>
+                    <td>
+                      <select
+                        value={account.plan}
+                        disabled={busy}
+                        onChange={(event) =>
+                          void updateAccount(account, {
+                            plan: event.target.value as ChatGptWebAccount["plan"],
+                          })
+                        }
+                        aria-label={`${account.accountId} 套餐标签`}
+                      >
+                        {(Object.keys(ACCOUNT_PLAN_LABELS) as ChatGptWebAccount["plan"][]).map(
+                          (plan) => (
+                            <option key={plan} value={plan}>
+                              {ACCOUNT_PLAN_LABELS[plan]}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </td>
+                    <td>
+                      {ACCOUNT_STATE_LABELS[account.state]}
+                      <br />
+                      <span className="muted">{account.enabled ? "已加入池" : "未加入池"}</span>
+                    </td>
+                    <td>
+                      {account.authenticated ? "已登录" : "未登录"} ·{" "}
+                      {account.sandboxVerified ? "沙箱正常" : "待验证"}
+                    </td>
+                    <td>
+                      {account.lastProbePassed === true
+                        ? "通过"
+                        : account.lastProbePassed === false
+                          ? "未通过"
+                          : "未运行"}
+                    </td>
+                    <td>
+                      <a
+                        href={`${account.vncPath}vnc.html?autoconnect=true&resize=remote&path=${account.vncPath.slice(1, -1)}/websockify`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        VNC
+                      </a>
+                    </td>
+                    <td>
+                      <div className="action-row">
+                        <button
+                          className="button"
+                          disabled={Boolean(activeRun) || busy}
+                          onClick={() => {
+                            setConfirmAccountId(account.accountId);
+                            setConfirmSuite("readiness");
+                          }}
+                        >
+                          检查
+                        </button>
+                        <button
+                          className="button primary"
+                          disabled={Boolean(activeRun) || busy}
+                          onClick={() => {
+                            setConfirmAccountId(account.accountId);
+                            setConfirmSuite("single_probe");
+                          }}
+                        >
+                          单探针
+                        </button>
+                        <button
+                          className="button"
+                          disabled={busy || (!account.enabled && !account.qualified)}
+                          onClick={() => void updateAccount(account, { enabled: !account.enabled })}
+                        >
+                          {account.enabled ? "停用" : "启用"}
+                        </button>
+                      </div>
+                      {account.lastFailureCode ? (
+                        <span className="muted">{account.lastFailureCode}</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    账号池尚未同步
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted">
+          系统不会从页面、Cookie、额度或响应速度推断
+          Plus/Pro；只记录匿名槽位标签，登录请在对应受保护 VNC 页面手动完成。
+        </p>
+      </section>
+
+      <section className="card console-section">
         <span className="card-index">管理员验收</span>
         <h3>运行真实网页门禁</h3>
         <p className="muted">
-          运行前会再次确认；系统只保存脱敏结果，不保存提示词、回答、账号或对话地址
+          运行前会再次确认；系统只保存脱敏结果和匿名槽位，不保存提示词、回答、账号身份或对话地址
         </p>
         <div className="row action-row">
           {(Object.keys(QUALIFICATION_LABELS) as ChatGptWebQualificationSuite[]).map((suite) => (
@@ -1870,7 +2099,13 @@ function ChatGptWebChannel() {
         </div>
       </section>
 
-      <NativeDialog open={Boolean(confirmSuite)} onClose={() => setConfirmSuite(null)}>
+      <NativeDialog
+        open={Boolean(confirmSuite)}
+        onClose={() => {
+          setConfirmSuite(null);
+          setConfirmAccountId(null);
+        }}
+      >
         <div className="dialog-content">
           <h3>确认运行{confirmSuite ? QUALIFICATION_LABELS[confirmSuite] : "验收"}</h3>
           <p>
@@ -1887,7 +2122,14 @@ function ChatGptWebChannel() {
                       : "将发送 4 项聊天、4 项搜索和 2 项深度研究，最长约 4 小时"}
           </p>
           <div className="dialog-actions">
-            <button className="button" onClick={() => setConfirmSuite(null)} autoFocus>
+            <button
+              className="button"
+              onClick={() => {
+                setConfirmSuite(null);
+                setConfirmAccountId(null);
+              }}
+              autoFocus
+            >
               取消
             </button>
             <button

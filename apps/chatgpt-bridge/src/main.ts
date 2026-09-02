@@ -333,6 +333,7 @@ async function main(): Promise<void> {
   const diagnosticToken = diagnosticEnabled
     ? requiredEnvironment("CHATGPT_WEB_DIAGNOSTIC_TOKEN")
     : null;
+  const accountId = process.env.CHATGPT_WEB_ACCOUNT_ID ?? "account-a";
   const sandboxVerified = process.env.CHATGPT_CHROMIUM_SANDBOX_VERIFIED === "true";
   const maxConcurrency = 1;
   const minimumDispatchIntervalMs = Math.max(
@@ -431,6 +432,7 @@ async function main(): Promise<void> {
       json(response, enabled && extension && pageReady && authenticated ? 200 : 503, {
         status: enabled && extension && pageReady && authenticated ? "ready" : "unavailable",
         service: "aialra-chatgpt-web-bridge",
+        accountId,
         enabled,
         diagnosticEnabled,
         sandboxVerified,

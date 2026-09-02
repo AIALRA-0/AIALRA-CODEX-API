@@ -19,10 +19,12 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
+  ChatGptWebAccountPlanSchema,
   ChatGptWebQualificationRunSchema,
   ChatGptWebQualificationSuiteSchema,
   TaskContractSchema,
   type ChatGptWebQualificationItem,
+  type ChatGptWebAccount,
   type RuntimeModel,
 } from "@aialra/contracts";
 import type { JobRepository } from "@aialra/persistence";
@@ -91,6 +93,12 @@ function qualificationItems(suite: z.infer<typeof ChatGptWebQualificationSuiteSc
     ownershipMatched: null,
     temporaryChatVerified: false,
   }));
+}
+
+function publicAccount(account: ChatGptWebAccount & { bridgeUrl?: string }): ChatGptWebAccount {
+  const safe = { ...account } as Record<string, unknown>;
+  delete safe.bridgeUrl;
+  return safe as ChatGptWebAccount;
 }
 
 @Controller("api/v1")
@@ -271,6 +279,7 @@ export class GovernanceController {
   @RequireScopes("admin")
   async chatGptWebStatus() {
     const status = await this.repository.readChatGptWebStatus();
+    const accounts = (await this.repository.listChatGptWebAccounts()).map(publicAccount);
     const cooldownRetryAfter = status.cooldownUntil
       ? Math.max(0, Math.ceil((new Date(status.cooldownUntil).getTime() - Date.now()) / 1_000))
       : status.retryAfter;
@@ -282,6 +291,7 @@ export class GovernanceController {
       : 90;
     return {
       ...status,
+      accounts,
       retryAfter:
         status.rateLimitState === "cooldown"
           ? cooldownRetryAfter
@@ -289,6 +299,80 @@ export class GovernanceController {
             ? recoveryRetryAfter
             : null,
     };
+  }
+
+  @Get("chatgpt-web/accounts")
+  @RequireScopes("admin")
+  async chatGptWebAccounts() {
+    return { data: (await this.repository.listChatGptWebAccounts()).map(publicAccount) };
+  }
+
+  @Patch("chatgpt-web/accounts/:accountId")
+  @RequireScopes("admin")
+  async updateChatGptWebAccount(
+    @Param("accountId") accountId: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    if (!/^account-[a-d]$/.test(accountId)) {
+      throw new BadRequestException({
+        error: { code: "invalid_account_id", message: "账号槽位标识无效。" },
+      });
+    }
+    const parsed = z
+      .object({
+        label: z.string().trim().min(1).max(64).optional(),
+        plan: ChatGptWebAccountPlanSchema.optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict()
+      .safeParse(body);
+    if (!parsed.success) throw zodHttpError(parsed.error);
+    const current = await this.repository.findChatGptWebAccount(accountId);
+    if (!current) {
+      throw new NotFoundException({
+        error: { code: "chatgpt_web_account_not_found", message: "找不到该网页账号槽位。" },
+      });
+    }
+    if (parsed.data.enabled === true && !current.qualified) {
+      throw new ConflictException({
+        error: {
+          code: "chatgpt_account_not_qualified",
+          message: "账号必须先通过单探针，才能加入网页任务池。",
+        },
+      });
+    }
+    const enabled = parsed.data.enabled ?? current.enabled;
+    const reactivatedState =
+      current.qualified &&
+      current.authenticated &&
+      current.extensionConnected &&
+      current.pageReady &&
+      current.sandboxVerified
+        ? ("ready" as const)
+        : ("configured" as const);
+    const updated = await this.repository.updateChatGptWebAccount(accountId, {
+      ...parsed.data,
+      ...(parsed.data.enabled === false
+        ? { state: "disabled" as const }
+        : parsed.data.enabled === true && current.state === "disabled"
+          ? { state: reactivatedState }
+          : {}),
+      enabled,
+    });
+    await this.repository.appendAudit({
+      id: randomUUID(),
+      actorId: request.callerId ?? "unknown",
+      action:
+        parsed.data.enabled === false
+          ? "chatgpt_web.account_disabled"
+          : "chatgpt_web.account_updated",
+      resourceType: "chatgpt_web_account",
+      resourceId: accountId,
+      metadata: parsed.data,
+      createdAt: new Date().toISOString(),
+    });
+    return publicAccount(updated);
   }
 
   @Post("chatgpt-web/qualification-runs")
@@ -303,13 +387,33 @@ export class GovernanceController {
         error: { code: "idempotency_key_required", message: "Idempotency-Key is required." },
       });
     }
-    const parsed = z.object({ suite: ChatGptWebQualificationSuiteSchema }).strict().safeParse(body);
+    const parsed = z
+      .object({
+        suite: ChatGptWebQualificationSuiteSchema,
+        accountId: z
+          .string()
+          .regex(/^account-[a-d]$/)
+          .optional(),
+      })
+      .strict()
+      .safeParse(body);
     if (!parsed.success) throw zodHttpError(parsed.error);
+    const configuredAccounts = await this.repository.listChatGptWebAccounts();
+    const accountId =
+      parsed.data.accountId ??
+      (configuredAccounts.some((account) => account.accountId === "account-a")
+        ? "account-a"
+        : null);
+    if (accountId && !(await this.repository.findChatGptWebAccount(accountId))) {
+      throw new NotFoundException({
+        error: { code: "chatgpt_web_account_not_found", message: "找不到该网页账号槽位。" },
+      });
+    }
     const actorId = request.callerId ?? "unknown";
     const id = qualificationRunId(actorId, idempotencyKey);
     const existing = await this.repository.findChatGptWebQualificationRun(id);
     if (existing) {
-      if (existing.suite !== parsed.data.suite) {
+      if (existing.suite !== parsed.data.suite || existing.accountId !== accountId) {
         throw new ConflictException({
           error: { code: "idempotency_conflict", message: "该幂等键已用于另一种验收套件。" },
         });
@@ -332,6 +436,7 @@ export class GovernanceController {
     const items = qualificationItems(parsed.data.suite);
     const run = ChatGptWebQualificationRunSchema.parse({
       id,
+      accountId,
       suite: parsed.data.suite,
       status: "accepted",
       total: items.length,
@@ -374,7 +479,7 @@ export class GovernanceController {
       action: "chatgpt_web.qualification_started",
       resourceType: "chatgpt_web_qualification",
       resourceId: id,
-      metadata: { suite: parsed.data.suite },
+      metadata: { suite: parsed.data.suite, accountId },
       createdAt: now,
     });
     return { ...run, replayed: false };

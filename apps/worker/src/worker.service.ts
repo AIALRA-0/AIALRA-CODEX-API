@@ -24,6 +24,8 @@ import {
 import { selectRoute } from "@aialra/router";
 import { redact, scanForExternalData } from "@aialra/security";
 
+import type { ChatGptWebPoolProvider } from "./chatgpt-web-pool.js";
+
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired"]);
 const CHATGPT_WEB_MIN_DISPATCH_INTERVAL_MS = 90_000;
 const CHATGPT_WEB_COOLDOWN_MINUTES = [30, 60, 120] as const;
@@ -32,6 +34,7 @@ export interface WorkerDependencies {
   repository: JobRepository;
   provider: ModelProvider;
   chatgptProvider?: ModelProvider;
+  chatgptPool?: ChatGptWebPoolProvider;
   quotaClient?: Pick<CodexQuotaClient, "read">;
   createWorkspace?: () => Promise<string>;
   removeWorkspace?: (path: string) => Promise<void>;
@@ -279,6 +282,7 @@ export class WorkerService {
   private readonly quotaClient: Pick<CodexQuotaClient, "read">;
   private readonly createWorkspace: () => Promise<string>;
   private readonly removeWorkspace: (path: string) => Promise<void>;
+  private readonly chatgptWebPool?: ChatGptWebPoolProvider;
   private chatGptWebStatusTail: Promise<void> = Promise.resolve();
   private chatGptWebDispatchTail: Promise<void> = Promise.resolve();
 
@@ -288,6 +292,7 @@ export class WorkerService {
     if (dependencies.chatgptProvider) {
       this.providers.set(dependencies.chatgptProvider.name, dependencies.chatgptProvider);
     }
+    this.chatgptWebPool = dependencies.chatgptPool;
     this.quotaClient = dependencies.quotaClient ?? new CodexQuotaClient();
     this.createWorkspace = dependencies.createWorkspace ?? defaultCreateWorkspace;
     this.removeWorkspace = dependencies.removeWorkspace ?? defaultRemoveWorkspace;
@@ -468,23 +473,39 @@ export class WorkerService {
     }
 
     if (job.task.executionChannel === "chatgpt_web") {
-      const status = await this.repository.readChatGptWebStatus();
-      const cooldownActive =
-        status.rateLimitState === "cooldown" &&
-        (!status.cooldownUntil || new Date(status.cooldownUntil).getTime() > Date.now());
-      if (
-        !status.configuredEnabled ||
-        cooldownActive ||
-        ["open", "qualification_required"].includes(status.circuitState)
-      ) {
+      let admissionError: unknown = null;
+      if (this.chatgptWebPool) {
+        try {
+          await this.chatgptWebPool.admission();
+        } catch (error) {
+          admissionError = error;
+        }
+      } else {
+        const status = await this.repository.readChatGptWebStatus();
+        const cooldownActive =
+          status.rateLimitState === "cooldown" &&
+          (!status.cooldownUntil || new Date(status.cooldownUntil).getTime() > Date.now());
+        if (
+          !status.configuredEnabled ||
+          cooldownActive ||
+          ["open", "qualification_required"].includes(status.circuitState)
+        ) {
+          admissionError = new Error(
+            cooldownActive ? "chatgpt_rate_limited" : "chatgpt_web_circuit_open",
+          );
+        }
+      }
+      if (admissionError) {
+        const errorCode = providerErrorCode(admissionError);
         await this.transition(
           jobId,
           {
             status: "failed",
-            errorCode: cooldownActive ? "chatgpt_rate_limited" : "chatgpt_web_circuit_open",
-            errorMessage: cooldownActive
-              ? "ChatGPT web usage is cooling down after a rate limit."
-              : "The ChatGPT web experiment is disabled or has not passed its gate.",
+            errorCode,
+            errorMessage:
+              errorCode === "chatgpt_rate_limited"
+                ? "ChatGPT web usage is cooling down after a rate limit."
+                : "The ChatGPT web experiment is disabled or has not passed its gate.",
           },
           "worker.chatgpt_web_circuit_open",
         );
@@ -492,7 +513,7 @@ export class WorkerService {
       }
     }
 
-    if (job.task.executionChannel === "chatgpt_web") {
+    if (job.task.executionChannel === "chatgpt_web" && !this.chatgptWebPool) {
       try {
         await this.reserveChatGptWebDispatch(queueSignal);
       } catch (error) {
@@ -678,7 +699,7 @@ export class WorkerService {
             },
             `worker.${terminalStatus}`,
           );
-          if (route.provider === "chatgpt_web") {
+          if (route.provider === "chatgpt_web" && !this.chatgptWebPool) {
             await this.recordChatGptWebOutcome(
               validation.passed,
               validation.passed ? null : "validation_failed",
@@ -723,7 +744,7 @@ export class WorkerService {
         code: finalErrorCode,
         message: message.slice(0, 1_000),
       });
-      if (route.provider === "chatgpt_web") {
+      if (route.provider === "chatgpt_web" && !this.chatgptWebPool) {
         const providerCode = message.split(":", 1)[0] || "provider_error";
         await this.recordChatGptWebOutcome(
           false,

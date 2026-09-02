@@ -121,6 +121,7 @@ export class ChatGptWebDiagnosticClient {
     private readonly baseUrl: string,
     private readonly apiToken: string,
     private readonly diagnosticToken: string,
+    readonly accountId = "account-a",
   ) {}
 
   async health(): Promise<Record<string, unknown>> {
@@ -350,6 +351,20 @@ export async function processChatGptWebQualification(
       errorCode: passed ? null : "chatgpt_readiness_failed",
       completedAt: new Date().toISOString(),
     });
+    if (run.accountId) {
+      const account = await repository.findChatGptWebAccount(run.accountId);
+      if (account) {
+        await repository.updateChatGptWebAccount(run.accountId, {
+          extensionConnected: health.extensionConnected === true,
+          pageReady: health.pageReady === true,
+          authenticated: health.authenticated === true,
+          sandboxVerified: health.sandboxVerified === true,
+          state: account.enabled ? (passed ? "configured" : "quarantined") : "disabled",
+          lastFailureAt: passed ? account.lastFailureAt : new Date().toISOString(),
+          lastFailureCode: passed ? account.lastFailureCode : "chatgpt_readiness_failed",
+        });
+      }
+    }
     return;
   }
 
@@ -443,6 +458,41 @@ export async function processChatGptWebQualification(
     errorCode: passed ? null : "chatgpt_qualification_failed",
     completedAt,
   });
+  if (run.accountId) {
+    const account = await repository.findChatGptWebAccount(run.accountId);
+    if (account) {
+      const finalItem = run.items.find((item) => item.status === "failed") ?? run.items.at(-1);
+      const qualifies = ["single_probe", "full_10"].includes(run.suite);
+      await repository.updateChatGptWebAccount(run.accountId, {
+        qualified: qualifies ? passed : account.qualified,
+        state: !account.enabled
+          ? "disabled"
+          : qualifies && passed
+            ? "ready"
+            : qualifies
+              ? "quarantined"
+              : account.state,
+        lastProbeAt: completedAt,
+        lastProbePassed: qualifies ? passed : account.lastProbePassed,
+        lastSuccessAt: passed ? completedAt : account.lastSuccessAt,
+        lastFailureAt: passed ? null : completedAt,
+        lastFailureCode: passed ? null : (finalItem?.errorCode ?? "chatgpt_qualification_failed"),
+        failurePhase: passed ? null : (finalItem?.failurePhase ?? null),
+        diagnosticSummary: passed ? null : (finalItem?.diagnosticSummary ?? null),
+      });
+    }
+    const status = await repository.readChatGptWebStatus();
+    await repository.saveChatGptWebStatus({
+      ...status,
+      temporaryChatVerified: passed || status.temporaryChatVerified,
+      lastQualifiedAt: completedAt,
+      lastQualificationPassed: passed,
+      lastQualificationSucceeded: run.succeeded,
+      lastQualificationRunId: run.id,
+      updatedAt: completedAt,
+    });
+    return;
+  }
   if (run.suite === "full_10" || run.suite === "single_probe") {
     const status = await repository.readChatGptWebStatus();
     await repository.saveChatGptWebStatus({

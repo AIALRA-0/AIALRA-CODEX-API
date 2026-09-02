@@ -152,6 +152,7 @@ services:
       CODEX_MAX_CONCURRENCY: ${CODEX_MAX_CONCURRENCY:-1}
       CHATGPT_WEB_ADAPTER_ENABLED: ${CHATGPT_WEB_ADAPTER_ENABLED:-false}
       CHATGPT_BRIDGE_URL: http://chatgpt-browser:13216
+      CHATGPT_WEB_POOL_SLOTS: ${CHATGPT_WEB_POOL_SLOTS:-a,b}
       CHATGPT_BRIDGE_API_TOKEN_FILE: /run/secrets/chatgpt_bridge_api_token
       CHATGPT_WEB_DIAGNOSTIC_TOKEN_FILE: /run/secrets/chatgpt_web_diagnostic_token
       SESSION_THREAD_TTL_MS: ${SESSION_THREAD_TTL_MS:-86400000}
@@ -245,7 +246,7 @@ services:
     cap_drop:
       - ALL
 
-  chatgpt-browser:
+  chatgpt-browser: &chatgpt-browser-base
     profiles: ["chatgpt-web"]
     image: ${CHATGPT_BROWSER_IMAGE:-ghcr.io/aialra-0/aialra-model-router-chatgpt-browser:0.1.0}
     build:
@@ -255,7 +256,7 @@ services:
     restart: unless-stopped
     group_add:
       - "${ROUTER_GID:-1000}"
-    environment:
+    environment: &chatgpt-browser-environment
       CHATGPT_WEB_ADAPTER_ENABLED: ${CHATGPT_WEB_ADAPTER_ENABLED:-false}
       CHATGPT_WEB_DIAGNOSTIC_ENABLED: ${CHATGPT_WEB_DIAGNOSTIC_ENABLED:-false}
       CHATGPT_WEB_MAX_CONCURRENCY: ${CHATGPT_WEB_MAX_CONCURRENCY:-1}
@@ -263,6 +264,7 @@ services:
       CHATGPT_WEB_DEFAULT_MODEL_LABEL: ${CHATGPT_WEB_DEFAULT_MODEL_LABEL:-}
       CHATGPT_CHROMIUM_NO_SANDBOX: ${CHATGPT_CHROMIUM_NO_SANDBOX:-false}
       CHATGPT_BROWSER_EXTENSION_ENABLED: ${CHATGPT_BROWSER_EXTENSION_ENABLED:-true}
+      CHATGPT_WEB_ACCOUNT_ID: account-a
       CHATGPT_BRIDGE_PORT: 13216
       CHATGPT_BRIDGE_API_TOKEN_FILE: /run/secrets/chatgpt_bridge_api_token
       CHATGPT_WEB_DIAGNOSTIC_TOKEN_FILE: /run/secrets/chatgpt_web_diagnostic_token
@@ -309,6 +311,45 @@ services:
       - apparmor=aialra-chatgpt-browser
     cap_drop:
       - ALL
+
+  chatgpt-browser-b:
+    <<: *chatgpt-browser-base
+    profiles: ["chatgpt-web"]
+    environment:
+      <<: *chatgpt-browser-environment
+      CHATGPT_WEB_ACCOUNT_ID: account-b
+    volumes:
+      - chatgpt_browser_profile_b:/opt/aialra-browser-home/.config/chromium
+    networks:
+      chatgpt_control:
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_B:-10.253.240.3}
+      chatgpt_proxy: {}
+
+  chatgpt-browser-c:
+    <<: *chatgpt-browser-base
+    profiles: ["chatgpt-web-extra"]
+    environment:
+      <<: *chatgpt-browser-environment
+      CHATGPT_WEB_ACCOUNT_ID: account-c
+    volumes:
+      - chatgpt_browser_profile_c:/opt/aialra-browser-home/.config/chromium
+    networks:
+      chatgpt_control:
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_C:-10.253.240.4}
+      chatgpt_proxy: {}
+
+  chatgpt-browser-d:
+    <<: *chatgpt-browser-base
+    profiles: ["chatgpt-web-extra"]
+    environment:
+      <<: *chatgpt-browser-environment
+      CHATGPT_WEB_ACCOUNT_ID: account-d
+    volumes:
+      - chatgpt_browser_profile_d:/opt/aialra-browser-home/.config/chromium
+    networks:
+      chatgpt_control:
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_D:-10.253.240.5}
+      chatgpt_proxy: {}
 
   chatgpt-egress-proxy:
     profiles: ["chatgpt-web"]
@@ -376,6 +417,12 @@ volumes:
     name: aialra_router_postgres
   chatgpt_browser_profile:
     name: aialra_router_chatgpt_browser_profile
+  chatgpt_browser_profile_b:
+    name: aialra_router_chatgpt_browser_profile_b
+  chatgpt_browser_profile_c:
+    name: aialra_router_chatgpt_browser_profile_c
+  chatgpt_browser_profile_d:
+    name: aialra_router_chatgpt_browser_profile_d
 
 secrets:
   postgres_password:

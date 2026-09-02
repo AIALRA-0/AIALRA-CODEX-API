@@ -2,7 +2,7 @@
 
 ## 1 Status and boundary
 
-This channel sends an explicit Router job to a visible ChatGPT page, where a minimum-permission Chrome extension enters the prompt and reads the final answer.
+This channel sends an explicit Router job to a fixed pool of visible ChatGPT pages, where each container's minimum-permission Chrome extension enters the prompt and reads the final answer.
 
 It is not an official API and is not guaranteed to remain available. UI structure, sign-in, the model menu, verification screens, and generation states can change without notice.
 
@@ -33,7 +33,7 @@ The browser prewarms one work tab. Every job first enters a new non-personalized
 
 The extension only locates the editor, controls, turns, and generation state. A native X11 input agent inside the isolated container activates the tab, clicks the editor, clears it, pastes the prompt, and clears the temporary clipboard after a character-for-character DOM check. The extension requests no page clipboard permission.
 
-The extension returns an answer only after the exact user echo appears, the assistant turn follows it, tab and document binding remain unchanged, terminal turn actions appear, generation ends, and two reads of the body remain stable.
+Each account container has one page slot. The extension returns an answer only after the exact user echo appears, the assistant turn follows it, tab and document binding remain unchanged, terminal turn actions appear, generation ends, and two reads of the body remain stable.
 
 There is no automatic retry after send. An uncertain send returns `chatgpt_delivery_uncertain` instead of risking a duplicate conversation or duplicate Pro usage.
 
@@ -59,7 +59,7 @@ RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
-From the Tailnet, open `https://router.example.com/chatgpt-browser/`, pass Authentik, and sign in manually through noVNC. Handle verification and account warnings only in that visible page.
+From the Tailnet, open `https://router.example.com/chatgpt-browser/` and `https://router.example.com/chatgpt-browser-b/`, pass Authentik, and sign in each account manually through its noVNC page. Handle verification and account warnings only in those visible pages.
 
 Verify the outer and Chromium sandbox, then inspect `chrome://sandbox` in the protected visible browser:
 
@@ -130,7 +130,7 @@ A passing probe proves only that the current sign-in is valid, page controls are
 
 ### 4.3 Console qualification entry
 
-The protected “ChatGPT web channel” page can run five suites:
+The protected “ChatGPT web channel” page can run the suites below for a selected account slot:
 
 - `readiness`: read-only, with no message sent;
 - `single_probe`: one ordinary chat, and the minimum gate for enabling the web channel;
@@ -138,9 +138,9 @@ The protected “ChatGPT web channel” page can run five suites:
 - `deep_2`: two consecutive deep-research jobs;
 - `full_10`: four chats, four searches, and two deep-research jobs.
 
-Create a run with `POST /api/v1/chatgpt-web/qualification-runs` and an `Idempotency-Key`. Read it from `GET /api/v1/chatgpt-web/qualification-runs/{id}`.
+Create a run with `POST /api/v1/chatgpt-web/qualification-runs`, an `Idempotency-Key`, and optionally `accountId` such as `account-a`. Read it from `GET /api/v1/chatgpt-web/qualification-runs/{id}`. Administrators can view and edit the fixed pool's redacted state and manual plan labels through `GET /api/v1/chatgpt-web/accounts` and `PATCH /api/v1/chatgpt-web/accounts/{accountId}`.
 
-Qualification records exclude prompts, answers, accounts, and conversation URLs. They contain only item state, duration, output length, output SHA-256, source count, submission count, ownership result, Temporary Chat verification, and error code.
+Qualification records exclude prompts, answers, account identity, and conversation URLs. They contain only a redacted slot id plus item state, duration, output length, output SHA-256, source count, submission count, ownership result, Temporary Chat verification, and error code. Pool state likewise contains only opaque slots, manual plan labels, and redacted diagnostics.
 
 ## 5 Calling the channel
 
@@ -225,7 +225,7 @@ The page supplies no reliable token, Codex Credit, quota-delta, or API-equivalen
 
 ## 7 Concurrency and automatic shutdown
 
-After a successful `single_probe`, web admission runs at concurrency one and deployment uses exactly one Worker; `full_10` remains optional strengthening evidence. A dedicated in-process dispatch queue serializes state read, minimum-interval wait, and submission reservation; web submissions are at least 90 seconds apart.
+Only accounts with a successful `single_probe` enter web admission. Each account has concurrency one; one Worker schedules the pool by least load and earliest availability. Each account has its own 90-second pacing and cooldown. A disconnect, timeout, or uncertain ownership after submission never fails over or resends; `full_10` remains optional strengthening evidence.
 
 Web rate limits use progressive 30-, 60-, and 120-minute cooldowns. Expiry admits only one recovery probe. A successful probe enters observation, and three consecutive successes are required to clear that state; another rate limit returns to the next cooldown. Sign-out, verification, UI drift, duplicate sends, or result misattribution closes the channel and requires requalification. The official Codex SDK channel remains independent.
 

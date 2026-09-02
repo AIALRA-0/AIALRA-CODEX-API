@@ -3,13 +3,13 @@ import { createServer } from "node:http";
 
 import { PgBoss, type Job as QueueJob } from "pg-boss";
 
-import type { ChatGptWebStatus } from "@aialra/contracts";
-import { PostgresJobRepository } from "@aialra/persistence";
+import { configuredChatGptWebAccountConfigs, PostgresJobRepository } from "@aialra/persistence";
 import {
   ChatGptWebDiagnosticClient,
   processChatGptWebQualification,
 } from "./chatgpt-qualification.js";
 import { RunnerClientProvider, RunnerQuotaClient } from "./runner-client.js";
+import { ChatGptWebPoolProvider } from "./chatgpt-web-pool.js";
 import { WorkerService } from "./worker.service.js";
 
 function requiredEnvironment(name: string): string {
@@ -61,33 +61,42 @@ async function main(): Promise<void> {
   const runnerApiToken = requiredEnvironment("RUNNER_API_TOKEN");
   const provider = new RunnerClientProvider(runnerUrl, runnerApiToken);
   const chatgptWebEnabled = process.env.CHATGPT_WEB_ADAPTER_ENABLED === "true";
-  const chatgptBridgeUrl = process.env.CHATGPT_BRIDGE_URL ?? "http://chatgpt-bridge:13216";
   const chatgptBridgeToken = requiredEnvironment("CHATGPT_BRIDGE_API_TOKEN");
   const chatgptDiagnosticToken = requiredEnvironment("CHATGPT_WEB_DIAGNOSTIC_TOKEN");
-  const chatgptProvider = chatgptWebEnabled
-    ? new RunnerClientProvider(chatgptBridgeUrl, chatgptBridgeToken, "chatgpt_web")
-    : undefined;
+  const chatgptAccountConfigs = configuredChatGptWebAccountConfigs();
+  const chatgptWebPool = new ChatGptWebPoolProvider(
+    repository,
+    chatgptAccountConfigs,
+    chatgptBridgeToken,
+    chatgptWebEnabled,
+  );
+  await chatgptWebPool.syncAccounts();
+  const chatgptProvider = chatgptWebEnabled ? chatgptWebPool : undefined;
   const codexConcurrency = Math.max(1, Number(process.env.CODEX_MAX_CONCURRENCY ?? 1));
-  const chatgptConcurrency = chatgptWebEnabled ? 1 : 0;
+  const chatgptConcurrency = chatgptWebEnabled ? chatgptAccountConfigs.length : 0;
   const codexPool = new PermitPool(codexConcurrency);
-  const chatgptPool = chatgptConcurrency
-    ? new PermitPool(async () =>
-        Math.min(1, (await repository.readChatGptWebStatus()).effectiveConcurrency),
-      )
+  const chatgptPermitPool = chatgptConcurrency
+    ? new PermitPool(async () => Math.max(1, await chatgptWebPool.capacity()))
     : null;
 
   const runtimeClient = new RunnerQuotaClient(runnerUrl, runnerApiToken);
-  const chatgptRuntimeClient = new RunnerQuotaClient(chatgptBridgeUrl, chatgptBridgeToken);
   const service = new WorkerService({
     repository,
     provider,
     chatgptProvider,
+    chatgptPool: chatgptWebPool,
     quotaClient: runtimeClient,
   });
-  const chatgptQualificationClient = new ChatGptWebDiagnosticClient(
-    chatgptBridgeUrl,
-    chatgptBridgeToken,
-    chatgptDiagnosticToken,
+  const chatgptQualificationClients = new Map(
+    chatgptAccountConfigs.map((config) => [
+      config.accountId,
+      new ChatGptWebDiagnosticClient(
+        config.bridgeUrl,
+        chatgptBridgeToken,
+        chatgptDiagnosticToken,
+        config.accountId,
+      ),
+    ]),
   );
   const boss = new PgBoss({ connectionString: databaseUrl, schema: "pgboss" });
   await boss.start();
@@ -99,7 +108,8 @@ async function main(): Promise<void> {
     async (jobs: QueueJob<{ jobId: string }>[]) => {
       for (const queueJob of jobs) {
         const queued = await repository.findById(queueJob.data.jobId);
-        const pool = queued?.task.executionChannel === "chatgpt_web" ? chatgptPool : codexPool;
+        const pool =
+          queued?.task.executionChannel === "chatgpt_web" ? chatgptPermitPool : codexPool;
         if (!pool) {
           await service.processJob(queueJob.data.jobId, queueJob.signal);
         } else {
@@ -114,9 +124,18 @@ async function main(): Promise<void> {
     async (runs: QueueJob<{ runId: string }>[]) => {
       for (const queuedRun of runs) {
         try {
+          const qualificationRun = await repository.findChatGptWebQualificationRun(
+            queuedRun.data.runId,
+          );
+          const qualificationClient =
+            (qualificationRun?.accountId
+              ? chatgptQualificationClients.get(qualificationRun.accountId)
+              : chatgptQualificationClients.get("account-a")) ??
+            [...chatgptQualificationClients.values()][0];
+          if (!qualificationClient) throw new Error("chatgpt_browser_unavailable");
           await processChatGptWebQualification(
             repository,
-            chatgptQualificationClient,
+            qualificationClient,
             queuedRun.data.runId,
           );
         } catch (error) {
@@ -147,11 +166,11 @@ async function main(): Promise<void> {
     if (runtimeRefreshActive) return;
     runtimeRefreshActive = true;
     try {
-      const [quota, codexModels, chatgptModels, chatgptHealth] = await Promise.allSettled([
+      await chatgptWebPool.refreshHealth();
+      const [quota, codexModels, chatgptModels] = await Promise.allSettled([
         runtimeClient.read(),
         runtimeClient.listModels(),
-        chatgptRuntimeClient.listModels(),
-        chatgptRuntimeClient.readHealth(),
+        chatgptWebPool.listModels(),
       ]);
       if (quota.status === "fulfilled") await repository.saveQuotaSnapshot(quota.value);
       const catalogs = [
@@ -171,79 +190,12 @@ async function main(): Promise<void> {
           job.task.executionChannel === "chatgpt_web" &&
           ["accepted", "queued"].includes(job.status),
       ).length;
-      const health = chatgptHealth.status === "fulfilled" ? chatgptHealth.value : {};
-      const slotStates = new Set<ChatGptWebStatus["slots"][number]["state"]>([
-        "starting",
-        "idle",
-        "preparing",
-        "ready",
-        "submitted",
-        "generating",
-        "completed",
-        "quarantined",
-      ]);
-      const slots: ChatGptWebStatus["slots"] = Array.isArray(health.slots)
-        ? health.slots
-            .filter((slot): slot is Record<string, unknown> => {
-              if (!slot || typeof slot !== "object") return false;
-              return /^[a-f0-9-]{36}$/i.test(
-                String((slot as Record<string, unknown>).slotId ?? ""),
-              );
-            })
-            .map((slot) => {
-              const stateValue = String(
-                slot.state ?? "starting",
-              ) as ChatGptWebStatus["slots"][number]["state"];
-              return {
-                slotId: String(slot.slotId),
-                state: slotStates.has(stateValue) ? stateValue : "starting",
-                submitted: slot.submitted === true,
-                quarantinedUntil:
-                  typeof slot.quarantinedUntil === "string" ? slot.quarantinedUntil : null,
-                updatedAt:
-                  typeof slot.updatedAt === "string" ? slot.updatedAt : new Date().toISOString(),
-              };
-            })
-        : [];
+      const poolStatus = await chatgptWebPool.refreshAggregateStatus();
       await service.mutateChatGptWebStatus((currentWebStatus) => {
         return {
           ...currentWebStatus,
-          configuredEnabled: chatgptWebEnabled,
-          effectiveConcurrency:
-            chatgptWebEnabled &&
-            !["open", "qualification_required"].includes(currentWebStatus.circuitState) &&
-            currentWebStatus.rateLimitState !== "cooldown"
-              ? 1
-              : 0,
-          maximumConcurrency: 1,
-          activeTabs: Number(health.activeTabs ?? 0),
-          adapterVersion:
-            typeof health.adapterVersion === "string"
-              ? health.adapterVersion.slice(0, 64)
-              : currentWebStatus.adapterVersion,
-          quarantinedTabs: 0,
-          slots,
-          phase:
-            typeof health.phase === "string"
-              ? (health.phase as ChatGptWebStatus["phase"])
-              : currentWebStatus.phase,
-          activeJobId: typeof health.activeJobId === "string" ? health.activeJobId : null,
-          activeAttempt: typeof health.activeAttempt === "number" ? health.activeAttempt : null,
-          lastHeartbeatAt:
-            typeof health.lastHeartbeatAt === "string" ? health.lastHeartbeatAt : null,
-          lastFailureCode:
-            typeof health.lastFailureCode === "string" ? health.lastFailureCode : null,
-          lastResetAt: typeof health.lastResetAt === "string" ? health.lastResetAt : null,
-          lastSubmissionAt:
-            typeof health.lastSubmissionAt === "string"
-              ? health.lastSubmissionAt
-              : currentWebStatus.lastSubmissionAt,
-          temporaryChatVerified: health.temporaryChatVerified === true,
+          ...poolStatus,
           queuedJobs,
-          sandboxVerified: health.sandboxVerified === true,
-          extensionConnected: health.extensionConnected === true,
-          pageReady: health.pageReady === true,
-          authenticated: health.authenticated === true,
           updatedAt: new Date().toISOString(),
         };
       });

@@ -2,7 +2,11 @@ import "reflect-metadata";
 
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { defaultChatGptWebStatus, type JobRepository } from "@aialra/persistence";
+import {
+  configuredChatGptWebAccountConfigs,
+  defaultChatGptWebStatus,
+  type JobRepository,
+} from "@aialra/persistence";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -191,6 +195,39 @@ describe("AIALRA Model Router API", () => {
     expect(response.body.effectiveConcurrency).toBe(0);
     expect(response.body.circuitState).toBe("qualification_required");
     expect(JSON.stringify(response.body)).not.toMatch(/cookie|token|conversationUrl|profilePath/i);
+  });
+
+  it("lists pool slots without bridge addresses and reactivates a qualified account", async () => {
+    const repository = app.get<JobRepository>(JOB_REPOSITORY);
+    await repository.syncChatGptWebAccounts(configuredChatGptWebAccountConfigs("a,b"));
+    await repository.updateChatGptWebAccount("account-a", {
+      qualified: true,
+      state: "disabled",
+      authenticated: true,
+      extensionConnected: true,
+      pageReady: true,
+      sandboxVerified: true,
+    });
+
+    const accounts = await request(app.getHttpServer())
+      .get("/api/v1/chatgpt-web/accounts")
+      .set("Authorization", `Bearer ${bootstrapKey}`)
+      .expect(200);
+    expect(accounts.body.data).toHaveLength(2);
+    expect(accounts.body.data[0]).not.toHaveProperty("bridgeUrl");
+    expect(accounts.body.data[0].plan).toBe("unknown");
+
+    const updated = await request(app.getHttpServer())
+      .patch("/api/v1/chatgpt-web/accounts/account-a")
+      .set("Authorization", `Bearer ${bootstrapKey}`)
+      .send({ plan: "pro", enabled: true })
+      .expect(200);
+    expect(updated.body).toMatchObject({
+      accountId: "account-a",
+      plan: "pro",
+      enabled: true,
+      state: "ready",
+    });
   });
 
   it("creates a secret-free ChatGPT web qualification run idempotently", async () => {

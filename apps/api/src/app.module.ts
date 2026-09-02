@@ -1,7 +1,11 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 
-import { InMemoryJobRepository, PostgresJobRepository } from "@aialra/persistence";
+import {
+  configuredChatGptWebAccountConfigs,
+  InMemoryJobRepository,
+  PostgresJobRepository,
+} from "@aialra/persistence";
 
 import { ApiKeyGuard } from "./common/api-key.guard.js";
 import { RetryAfterFilter } from "./common/retry-after.filter.js";
@@ -46,6 +50,7 @@ import { JOB_QUEUE, JOB_REPOSITORY, QUOTA_PROVIDER } from "./tokens.js";
         }
         const repository = new PostgresJobRepository(databaseUrl, masterKey);
         await repository.migrate();
+        await repository.syncChatGptWebAccounts(configuredChatGptWebAccountConfigs());
         return repository;
       },
     },

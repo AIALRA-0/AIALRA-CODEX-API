@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  ChatGptWebAccountSchema,
   type ExecutionPolicy,
+  type ChatGptWebAccount,
+  type ChatGptWebAccountPlan,
+  type ChatGptWebAccountState,
   ChatGptWebQualificationRunSchema,
   type ChatGptWebQualificationRun,
   ChatGptWebStatusSchema,
@@ -61,9 +65,98 @@ export function defaultChatGptWebStatus(now = new Date()): ChatGptWebStatus {
     lastResetAt: null,
     quarantinedTabs: 0,
     slots: [],
+    accounts: [],
     lastQualificationRunId: null,
     updatedAt: now.toISOString(),
   };
+}
+
+export type ChatGptWebAccountConfig = {
+  accountId: ChatGptWebAccount["accountId"];
+  slot: ChatGptWebAccount["slot"];
+  bridgeUrl: string;
+  vncPath: ChatGptWebAccount["vncPath"];
+};
+
+export type ChatGptWebAccountRecord = ChatGptWebAccount & { bridgeUrl: string };
+
+export type ChatGptWebAccountPatch = Partial<ChatGptWebAccount>;
+
+const CHATGPT_WEB_ACCOUNT_SLOTS = ["a", "b", "c", "d"] as const;
+
+export function configuredChatGptWebAccountConfigs(
+  raw = process.env.CHATGPT_WEB_POOL_SLOTS,
+): ChatGptWebAccountConfig[] {
+  const requested = (raw ?? "a,b")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const slots = [...new Set(requested)];
+  if (
+    !slots.length ||
+    slots.some(
+      (slot): slot is (typeof CHATGPT_WEB_ACCOUNT_SLOTS)[number] =>
+        !CHATGPT_WEB_ACCOUNT_SLOTS.includes(slot as (typeof CHATGPT_WEB_ACCOUNT_SLOTS)[number]),
+    )
+  ) {
+    throw new Error("chatgpt_web_pool_slots_invalid");
+  }
+  return slots.map((slot) => {
+    const suffix = slot === "a" ? "" : `-${slot}`;
+    return {
+      accountId: `account-${slot}` as ChatGptWebAccount["accountId"],
+      slot: slot as ChatGptWebAccount["slot"],
+      bridgeUrl: `http://chatgpt-browser${suffix}:13216`,
+      vncPath: `/chatgpt-browser${suffix}/` as ChatGptWebAccount["vncPath"],
+    };
+  });
+}
+
+function defaultChatGptWebAccount(
+  config: ChatGptWebAccountConfig,
+  now = new Date(),
+): ChatGptWebAccountRecord {
+  const updatedAt = now.toISOString();
+  const account = ChatGptWebAccountSchema.parse({
+    accountId: config.accountId,
+    slot: config.slot,
+    label: `账号 ${config.slot.toUpperCase()}`,
+    plan: "unknown" satisfies ChatGptWebAccountPlan,
+    enabled: false,
+    qualified: false,
+    state: "login_required" satisfies ChatGptWebAccountState,
+    maxConcurrency: 1,
+    extensionConnected: false,
+    pageReady: false,
+    authenticated: false,
+    sandboxVerified: false,
+    activeJobId: null,
+    leaseExpiresAt: null,
+    rateLimitState: "clear",
+    retryAfter: null,
+    consecutiveRateLimits: 0,
+    lastRateLimitAt: null,
+    lastSubmissionAt: null,
+    lastHeartbeatAt: null,
+    lastProbeAt: null,
+    lastProbePassed: null,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    lastFailureCode: null,
+    failurePhase: null,
+    diagnosticSummary: null,
+    vncPath: config.vncPath,
+    updatedAt,
+  });
+  return { ...account, bridgeUrl: config.bridgeUrl };
+}
+
+function accountStatusWithoutBridge(
+  account: ChatGptWebAccount | ChatGptWebAccountRecord,
+): ChatGptWebAccount {
+  const status = { ...account } as Record<string, unknown>;
+  delete status.bridgeUrl;
+  return ChatGptWebAccountSchema.parse(status);
 }
 
 export function parseChatGptWebStatus(value: unknown, now = new Date()): ChatGptWebStatus {
@@ -376,6 +469,24 @@ export interface JobRepository {
   latestModelCatalog(): Promise<ModelCatalogSnapshot | null>;
   readChatGptWebStatus(): Promise<ChatGptWebStatus>;
   saveChatGptWebStatus(status: ChatGptWebStatus): Promise<void>;
+  listChatGptWebAccounts(): Promise<ChatGptWebAccountRecord[]>;
+  findChatGptWebAccount(accountId: string): Promise<ChatGptWebAccountRecord | null>;
+  syncChatGptWebAccounts(configs: ChatGptWebAccountConfig[]): Promise<void>;
+  updateChatGptWebAccount(
+    accountId: string,
+    patch: ChatGptWebAccountPatch,
+  ): Promise<ChatGptWebAccountRecord>;
+  acquireChatGptWebAccountLease(
+    jobId: string,
+    accountIds: string[],
+    now: Date,
+    leaseMs: number,
+  ): Promise<ChatGptWebAccountRecord | null>;
+  releaseChatGptWebAccountLease(
+    accountId: string,
+    jobId: string,
+    patch?: ChatGptWebAccountPatch,
+  ): Promise<ChatGptWebAccountRecord | null>;
   createChatGptWebQualificationRun(
     run: ChatGptWebQualificationRun,
   ): Promise<ChatGptWebQualificationRun>;
@@ -443,6 +554,8 @@ export class InMemoryJobRepository implements JobRepository {
   private quotaSnapshot: QuotaSnapshot | null = null;
   private modelCatalog: ModelCatalogSnapshot | null = null;
   private chatGptWebStatus: ChatGptWebStatus = defaultChatGptWebStatus();
+  private readonly chatGptWebAccounts = new Map<string, ChatGptWebAccountRecord>();
+  private chatGptWebAccountLeaseTail: Promise<void> = Promise.resolve();
   private readonly chatGptWebQualificationRuns = new Map<string, ChatGptWebQualificationRun>();
   private readonly modelSettings = new Map<string, ModelSetting>(
     ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"].map((modelId) => [
@@ -559,6 +672,154 @@ export class InMemoryJobRepository implements JobRepository {
 
   async saveChatGptWebStatus(status: ChatGptWebStatus): Promise<void> {
     this.chatGptWebStatus = parseChatGptWebStatus(structuredClone(status));
+  }
+
+  async listChatGptWebAccounts(): Promise<ChatGptWebAccountRecord[]> {
+    return [...this.chatGptWebAccounts.values()]
+      .sort((left, right) => left.slot.localeCompare(right.slot))
+      .map((account) => structuredClone(account));
+  }
+
+  async findChatGptWebAccount(accountId: string): Promise<ChatGptWebAccountRecord | null> {
+    const account = this.chatGptWebAccounts.get(accountId);
+    return account ? structuredClone(account) : null;
+  }
+
+  async syncChatGptWebAccounts(configs: ChatGptWebAccountConfig[]): Promise<void> {
+    const now = new Date();
+    for (const config of configs) {
+      const current = this.chatGptWebAccounts.get(config.accountId);
+      const next = current
+        ? { ...current, bridgeUrl: config.bridgeUrl, vncPath: config.vncPath }
+        : defaultChatGptWebAccount(config, now);
+      const parsed = ChatGptWebAccountSchema.parse(next);
+      this.chatGptWebAccounts.set(config.accountId, {
+        ...parsed,
+        bridgeUrl: config.bridgeUrl,
+      });
+    }
+  }
+
+  async updateChatGptWebAccount(
+    accountId: string,
+    patch: ChatGptWebAccountPatch,
+  ): Promise<ChatGptWebAccountRecord> {
+    const current = this.chatGptWebAccounts.get(accountId);
+    if (!current) throw new Error("chatgpt_web_account_not_found");
+    const updated = ChatGptWebAccountSchema.parse({
+      ...current,
+      ...structuredClone(patch),
+      accountId: current.accountId,
+      slot: current.slot,
+      vncPath: current.vncPath,
+      updatedAt: new Date().toISOString(),
+    });
+    const record = { ...updated, bridgeUrl: current.bridgeUrl };
+    this.chatGptWebAccounts.set(accountId, record);
+    return structuredClone(record);
+  }
+
+  async acquireChatGptWebAccountLease(
+    jobId: string,
+    accountIds: string[],
+    now: Date,
+    leaseMs: number,
+  ): Promise<ChatGptWebAccountRecord | null> {
+    return this.withChatGptWebAccountLeaseLock(async () => {
+      for (const account of await this.listChatGptWebAccounts()) {
+        if (
+          accountIds.includes(account.accountId) &&
+          account.activeJobId &&
+          account.leaseExpiresAt &&
+          new Date(account.leaseExpiresAt).getTime() <= now.getTime()
+        ) {
+          const isolated = ChatGptWebAccountSchema.parse({
+            ...account,
+            qualified: false,
+            state: "quarantined",
+            activeJobId: null,
+            leaseExpiresAt: null,
+            lastFailureAt: now.toISOString(),
+            lastFailureCode: "chatgpt_lease_expired",
+            updatedAt: now.toISOString(),
+          });
+          this.chatGptWebAccounts.set(account.accountId, {
+            ...isolated,
+            bridgeUrl: account.bridgeUrl,
+          });
+        }
+      }
+      const candidates = (await this.listChatGptWebAccounts())
+        .filter(
+          (account) =>
+            accountIds.includes(account.accountId) &&
+            account.enabled &&
+            account.qualified &&
+            account.state === "ready" &&
+            account.activeJobId === null &&
+            account.rateLimitState !== "cooldown" &&
+            account.rateLimitState !== "recovery_probe" &&
+            (!account.lastSubmissionAt ||
+              new Date(account.lastSubmissionAt).getTime() <= now.getTime() - 90_000),
+        )
+        .sort(
+          (left, right) =>
+            (left.lastSubmissionAt ? new Date(left.lastSubmissionAt).getTime() : 0) -
+              (right.lastSubmissionAt ? new Date(right.lastSubmissionAt).getTime() : 0) ||
+            left.slot.localeCompare(right.slot),
+        );
+      const selected = candidates[0];
+      if (!selected) return null;
+      const leased = ChatGptWebAccountSchema.parse({
+        ...selected,
+        state: "busy",
+        activeJobId: jobId,
+        leaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+        updatedAt: now.toISOString(),
+      });
+      const record = { ...leased, bridgeUrl: selected.bridgeUrl };
+      this.chatGptWebAccounts.set(selected.accountId, record);
+      return structuredClone(record);
+    });
+  }
+
+  async releaseChatGptWebAccountLease(
+    accountId: string,
+    jobId: string,
+    patch: ChatGptWebAccountPatch = {},
+  ): Promise<ChatGptWebAccountRecord | null> {
+    return this.withChatGptWebAccountLeaseLock(async () => {
+      const current = this.chatGptWebAccounts.get(accountId);
+      if (!current || current.activeJobId !== jobId) return null;
+      const updated = ChatGptWebAccountSchema.parse({
+        ...current,
+        ...structuredClone(patch),
+        activeJobId: null,
+        leaseExpiresAt: null,
+        accountId: current.accountId,
+        slot: current.slot,
+        vncPath: current.vncPath,
+        updatedAt: new Date().toISOString(),
+      });
+      const record = { ...updated, bridgeUrl: current.bridgeUrl };
+      this.chatGptWebAccounts.set(accountId, record);
+      return structuredClone(record);
+    });
+  }
+
+  private async withChatGptWebAccountLeaseLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.chatGptWebAccountLeaseTail;
+    let unlock!: () => void;
+    const current = new Promise<void>((resolve) => {
+      unlock = resolve;
+    });
+    this.chatGptWebAccountLeaseTail = previous.then(() => current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      unlock();
+    }
   }
 
   async createChatGptWebQualificationRun(
@@ -984,6 +1245,26 @@ CREATE TABLE IF NOT EXISTS chatgpt_web_status (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS chatgpt_web_accounts (
+  account_id TEXT PRIMARY KEY CHECK (account_id ~ '^account-[a-d]$'),
+  slot TEXT UNIQUE NOT NULL CHECK (slot IN ('a', 'b', 'c', 'd')),
+  label TEXT NOT NULL,
+  plan TEXT NOT NULL CHECK (plan IN ('plus', 'pro', 'unknown')),
+  bridge_url TEXT NOT NULL,
+  vnc_path TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  qualified BOOLEAN NOT NULL DEFAULT FALSE,
+  status JSONB NOT NULL,
+  lease_job_id UUID,
+  lease_expires_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chatgpt_web_accounts_eligible
+  ON chatgpt_web_accounts(enabled, qualified, slot);
+CREATE INDEX IF NOT EXISTS idx_chatgpt_web_accounts_lease
+  ON chatgpt_web_accounts(lease_expires_at);
+
 CREATE TABLE IF NOT EXISTS chatgpt_web_qualification_runs (
   id UUID PRIMARY KEY,
   run JSONB NOT NULL,
@@ -1303,6 +1584,34 @@ export class PostgresJobRepository implements JobRepository {
         console.info(`[persistence] historical job event recovery ${JSON.stringify(report)}`);
         await client.query("INSERT INTO schema_migrations (version) VALUES (4)");
       }
+      const accountMigration = await client.query(
+        "SELECT 1 FROM schema_migrations WHERE version=5",
+      );
+      if (!accountMigration.rowCount) {
+        for (const config of configuredChatGptWebAccountConfigs()) {
+          const account = defaultChatGptWebAccount(config);
+          await client.query(
+            `INSERT INTO chatgpt_web_accounts
+             (account_id,slot,label,plan,bridge_url,vnc_path,enabled,qualified,status,updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+             ON CONFLICT (account_id) DO UPDATE SET
+               slot=EXCLUDED.slot, bridge_url=EXCLUDED.bridge_url, vnc_path=EXCLUDED.vnc_path`,
+            [
+              account.accountId,
+              account.slot,
+              account.label,
+              account.plan,
+              account.bridgeUrl,
+              account.vncPath,
+              account.enabled,
+              account.qualified,
+              accountStatusWithoutBridge(account),
+              account.updatedAt,
+            ],
+          );
+        }
+        await client.query("INSERT INTO schema_migrations (version) VALUES (5)");
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -1579,6 +1888,238 @@ export class PostgresJobRepository implements JobRepository {
        ON CONFLICT (singleton) DO UPDATE SET status=EXCLUDED.status,updated_at=EXCLUDED.updated_at`,
       [parsed, parsed.updatedAt],
     );
+  }
+
+  private rowToChatGptWebAccount(row: Record<string, any>): ChatGptWebAccountRecord {
+    const status = ChatGptWebAccountSchema.parse({
+      ...(row.status ?? {}),
+      accountId: row.account_id,
+      slot: row.slot,
+      label: row.label,
+      plan: row.plan,
+      enabled: row.enabled,
+      qualified: row.qualified,
+      activeJobId: row.lease_job_id ?? null,
+      leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at).toISOString() : null,
+      vncPath: row.vnc_path,
+      updatedAt: new Date(row.updated_at).toISOString(),
+    });
+    return { ...status, bridgeUrl: row.bridge_url };
+  }
+
+  async listChatGptWebAccounts(): Promise<ChatGptWebAccountRecord[]> {
+    const result = await this.pool.query("SELECT * FROM chatgpt_web_accounts ORDER BY slot ASC");
+    return result.rows.map((row) => this.rowToChatGptWebAccount(row));
+  }
+
+  async findChatGptWebAccount(accountId: string): Promise<ChatGptWebAccountRecord | null> {
+    const result = await this.pool.query("SELECT * FROM chatgpt_web_accounts WHERE account_id=$1", [
+      accountId,
+    ]);
+    return result.rowCount ? this.rowToChatGptWebAccount(result.rows[0]) : null;
+  }
+
+  async syncChatGptWebAccounts(configs: ChatGptWebAccountConfig[]): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const config of configs) {
+        const account = defaultChatGptWebAccount(config);
+        await client.query(
+          `INSERT INTO chatgpt_web_accounts
+           (account_id,slot,label,plan,bridge_url,vnc_path,enabled,qualified,status,updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (account_id) DO UPDATE SET
+             slot=EXCLUDED.slot, bridge_url=EXCLUDED.bridge_url, vnc_path=EXCLUDED.vnc_path`,
+          [
+            account.accountId,
+            account.slot,
+            account.label,
+            account.plan,
+            account.bridgeUrl,
+            account.vncPath,
+            account.enabled,
+            account.qualified,
+            accountStatusWithoutBridge(account),
+            account.updatedAt,
+          ],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateChatGptWebAccount(
+    accountId: string,
+    patch: ChatGptWebAccountPatch,
+  ): Promise<ChatGptWebAccountRecord> {
+    const current = await this.findChatGptWebAccount(accountId);
+    if (!current) throw new Error("chatgpt_web_account_not_found");
+    const updated = ChatGptWebAccountSchema.parse({
+      ...current,
+      ...patch,
+      accountId: current.accountId,
+      slot: current.slot,
+      vncPath: current.vncPath,
+      updatedAt: new Date().toISOString(),
+    });
+    const result = await this.pool.query(
+      `UPDATE chatgpt_web_accounts SET
+         label=$2, plan=$3, enabled=$4, qualified=$5, status=$6,
+         lease_job_id=$7, lease_expires_at=$8, updated_at=$9
+       WHERE account_id=$1 RETURNING *`,
+      [
+        accountId,
+        updated.label,
+        updated.plan,
+        updated.enabled,
+        updated.qualified,
+        accountStatusWithoutBridge(updated),
+        updated.activeJobId,
+        updated.leaseExpiresAt,
+        updated.updatedAt,
+      ],
+    );
+    return this.rowToChatGptWebAccount(result.rows[0]);
+  }
+
+  async acquireChatGptWebAccountLease(
+    jobId: string,
+    accountIds: string[],
+    now: Date,
+    leaseMs: number,
+  ): Promise<ChatGptWebAccountRecord | null> {
+    if (!accountIds.length) return null;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const expired = await client.query(
+        `SELECT * FROM chatgpt_web_accounts
+         WHERE account_id=ANY($1::text[]) AND lease_job_id IS NOT NULL
+           AND lease_expires_at <= $2 FOR UPDATE`,
+        [accountIds, now],
+      );
+      for (const row of expired.rows) {
+        const current = this.rowToChatGptWebAccount(row);
+        const isolated = ChatGptWebAccountSchema.parse({
+          ...current,
+          qualified: false,
+          state: "quarantined",
+          activeJobId: null,
+          leaseExpiresAt: null,
+          lastFailureAt: now.toISOString(),
+          lastFailureCode: "chatgpt_lease_expired",
+          updatedAt: now.toISOString(),
+        });
+        await client.query(
+          `UPDATE chatgpt_web_accounts SET qualified=false, status=$2,
+             lease_job_id=NULL, lease_expires_at=NULL, updated_at=$3 WHERE account_id=$1`,
+          [current.accountId, accountStatusWithoutBridge(isolated), now],
+        );
+      }
+      const result = await client.query(
+        `SELECT * FROM chatgpt_web_accounts
+         WHERE account_id=ANY($1::text[])
+           AND enabled=true AND qualified=true AND status->>'state'='ready'
+           AND lease_job_id IS NULL
+           AND COALESCE(status->>'rateLimitState','clear') NOT IN ('cooldown','recovery_probe')
+           AND (status->>'lastSubmissionAt' IS NULL OR
+                (status->>'lastSubmissionAt')::timestamptz <= $2 - INTERVAL '90 seconds')
+         ORDER BY COALESCE((status->>'lastSubmissionAt')::timestamptz, 'epoch'::timestamptz), slot
+         LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        [accountIds, now],
+      );
+      if (!result.rowCount) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const current = this.rowToChatGptWebAccount(result.rows[0]);
+      const leased = ChatGptWebAccountSchema.parse({
+        ...current,
+        state: "busy",
+        activeJobId: jobId,
+        leaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+        updatedAt: now.toISOString(),
+      });
+      const updated = await client.query(
+        `UPDATE chatgpt_web_accounts SET status=$2, lease_job_id=$3,
+           lease_expires_at=$4, updated_at=$5 WHERE account_id=$1 RETURNING *`,
+        [
+          current.accountId,
+          accountStatusWithoutBridge(leased),
+          jobId,
+          leased.leaseExpiresAt,
+          leased.updatedAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return this.rowToChatGptWebAccount(updated.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async releaseChatGptWebAccountLease(
+    accountId: string,
+    jobId: string,
+    patch: ChatGptWebAccountPatch = {},
+  ): Promise<ChatGptWebAccountRecord | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        "SELECT * FROM chatgpt_web_accounts WHERE account_id=$1 FOR UPDATE",
+        [accountId],
+      );
+      if (!result.rowCount) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const current = this.rowToChatGptWebAccount(result.rows[0]);
+      if (current.activeJobId !== jobId) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const updated = ChatGptWebAccountSchema.parse({
+        ...current,
+        ...patch,
+        accountId: current.accountId,
+        slot: current.slot,
+        vncPath: current.vncPath,
+        activeJobId: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date().toISOString(),
+      });
+      const saved = await client.query(
+        `UPDATE chatgpt_web_accounts SET label=$2, plan=$3, enabled=$4,
+           qualified=$5, status=$6, lease_job_id=NULL, lease_expires_at=NULL, updated_at=$7
+         WHERE account_id=$1 RETURNING *`,
+        [
+          accountId,
+          updated.label,
+          updated.plan,
+          updated.enabled,
+          updated.qualified,
+          accountStatusWithoutBridge(updated),
+          updated.updatedAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return this.rowToChatGptWebAccount(saved.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async createChatGptWebQualificationRun(

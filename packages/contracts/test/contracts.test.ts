@@ -10,6 +10,8 @@ import {
   TaskContractSchema,
   ChatGptWebQualificationItemSchema,
   ChatGptWebQualificationSuiteSchema,
+  ChatGptWebAccountPlanSchema,
+  ChatGptWebAccountSchema,
 } from "../src/index.js";
 
 describe("ReasoningEffortSchema", () => {
@@ -27,6 +29,43 @@ describe("ReasoningEffortSchema", () => {
 });
 
 describe("ChatGPT web qualification contract", () => {
+  it("accepts only the manual Plus, Pro, or unknown plan labels", () => {
+    expect(ChatGptWebAccountPlanSchema.options).toEqual(["plus", "pro", "unknown"]);
+    expect(() => ChatGptWebAccountPlanSchema.parse("enterprise")).toThrow();
+    expect(
+      ChatGptWebAccountSchema.parse({
+        accountId: "account-a",
+        slot: "a",
+        label: "账号 A",
+        plan: "unknown",
+        enabled: false,
+        qualified: false,
+        state: "login_required",
+        extensionConnected: false,
+        pageReady: false,
+        authenticated: false,
+        sandboxVerified: false,
+        activeJobId: null,
+        leaseExpiresAt: null,
+        rateLimitState: "clear",
+        retryAfter: null,
+        consecutiveRateLimits: 0,
+        lastRateLimitAt: null,
+        lastSubmissionAt: null,
+        lastHeartbeatAt: null,
+        lastProbeAt: null,
+        lastProbePassed: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureCode: null,
+        failurePhase: null,
+        diagnosticSummary: null,
+        vncPath: "/chatgpt-browser/",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      }).maxConcurrency,
+    ).toBe(1);
+  });
+
   it("accepts the single probe suite and defaults its verification field", () => {
     expect(ChatGptWebQualificationSuiteSchema.parse("single_probe")).toBe("single_probe");
     expect(

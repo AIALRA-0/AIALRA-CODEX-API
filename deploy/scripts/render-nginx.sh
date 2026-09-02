@@ -10,6 +10,9 @@ set -euo pipefail
 : "${AUTH_ENDPOINTS_SNIPPET:?AUTH_ENDPOINTS_SNIPPET is required}"
 : "${AUTH_PROTECT_SNIPPET:?AUTH_PROTECT_SNIPPET is required}"
 : "${CHATGPT_BROWSER_CONTROL_IP:=10.253.240.2}"
+: "${CHATGPT_BROWSER_CONTROL_IP_B:=10.253.240.3}"
+: "${CHATGPT_BROWSER_CONTROL_IP_C:=10.253.240.4}"
+: "${CHATGPT_BROWSER_CONTROL_IP_D:=10.253.240.5}"
 : "${CHATGPT_CONTROL_SUBNET:=10.253.240.0/28}"
 
 [[ "$ROUTER_HOST" =~ ^[a-z0-9.-]+$ ]] || { echo "Invalid router hostname" >&2; exit 1; }
@@ -19,14 +22,16 @@ address = ipaddress.ip_address(sys.argv[1])
 if address not in ipaddress.ip_network("100.64.0.0/10"):
     raise SystemExit("ROUTER_TAILSCALE_IPV4 must be a Tailscale IPv4 address")
 PY
-python3 - "$CHATGPT_BROWSER_CONTROL_IP" "$CHATGPT_CONTROL_SUBNET" <<'PY'
+python3 - "$CHATGPT_BROWSER_CONTROL_IP" "$CHATGPT_BROWSER_CONTROL_IP_B" "$CHATGPT_BROWSER_CONTROL_IP_C" "$CHATGPT_BROWSER_CONTROL_IP_D" "$CHATGPT_CONTROL_SUBNET" <<'PY'
 import ipaddress, sys
-address = ipaddress.ip_address(sys.argv[1])
-network = ipaddress.ip_network(sys.argv[2], strict=True)
-if address.version != 4 or not network.is_private or address not in network:
-    raise SystemExit("CHATGPT_BROWSER_CONTROL_IP must be inside the private control subnet")
-if address in {network.network_address, network.broadcast_address, network.network_address + 1}:
-    raise SystemExit("CHATGPT_BROWSER_CONTROL_IP uses a reserved subnet address")
+network = ipaddress.ip_network(sys.argv[-1], strict=True)
+addresses = [ipaddress.ip_address(value) for value in sys.argv[1:-1]]
+if not network.is_private or any(address.version != 4 or address not in network for address in addresses):
+    raise SystemExit("ChatGPT browser control IPs must be inside the private control subnet")
+if len(set(addresses)) != len(addresses):
+    raise SystemExit("ChatGPT browser control IPs must be unique")
+if any(address in {network.network_address, network.broadcast_address, network.network_address + 1} for address in addresses):
+    raise SystemExit("ChatGPT browser control IP uses a reserved subnet address")
 PY
 for source in "$NGINX_TEMPLATE" "$EDGE_PROXY_SECRET_FILE" "$AUTH_ENDPOINTS_SNIPPET" "$AUTH_PROTECT_SNIPPET"; do
   [[ -f "$source" ]] || { echo "Required file is missing: $source" >&2; exit 1; }
@@ -47,6 +52,9 @@ sed \
   -e "s|__AUTH_PROTECT_SNIPPET__|$AUTH_PROTECT_SNIPPET|g" \
   -e "s|__EDGE_PROOF_SNIPPET__|$EDGE_PROOF_SNIPPET|g" \
   -e "s|__CHATGPT_BROWSER_CONTROL_IP__|$CHATGPT_BROWSER_CONTROL_IP|g" \
+  -e "s|__CHATGPT_BROWSER_CONTROL_IP_B__|$CHATGPT_BROWSER_CONTROL_IP_B|g" \
+  -e "s|__CHATGPT_BROWSER_CONTROL_IP_C__|$CHATGPT_BROWSER_CONTROL_IP_C|g" \
+  -e "s|__CHATGPT_BROWSER_CONTROL_IP_D__|$CHATGPT_BROWSER_CONTROL_IP_D|g" \
   "$NGINX_TEMPLATE" >"$nginx_candidate"
 
 install -o root -g root -m 0600 "$proof_candidate" "$EDGE_PROOF_SNIPPET"

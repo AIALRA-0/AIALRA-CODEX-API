@@ -366,6 +366,82 @@ export const RuntimeModelSchema = z.object({
 });
 export type RuntimeModel = z.infer<typeof RuntimeModelSchema>;
 
+export const ChatGptWebFailurePhaseSchema = z.enum([
+  "opening",
+  "configuring",
+  "temporary_chat_verified",
+  "mode_selected",
+  "input_ready",
+  "submitted",
+  "user_echo_verified",
+  "generating",
+  "stabilizing",
+  "resetting",
+]);
+export type ChatGptWebFailurePhase = z.infer<typeof ChatGptWebFailurePhaseSchema>;
+
+export const ChatGptWebDiagnosticSummarySchema = z.object({
+  pageKind: z.enum(["home", "conversation", "other"]),
+  userTurnCount: z.number().int().nonnegative(),
+  assistantTurnCount: z.number().int().nonnegative(),
+  latestUserMatchesObjective: z.boolean().nullable(),
+  generationActive: z.boolean(),
+  latestAssistantHasText: z.boolean(),
+  visibleErrorKinds: z
+    .array(z.enum(["continue_generating", "retry", "generation_error", "other"]))
+    .max(16),
+  temporaryChatVerified: z.boolean(),
+});
+export type ChatGptWebDiagnosticSummary = z.infer<typeof ChatGptWebDiagnosticSummarySchema>;
+
+export const ChatGptWebAccountPlanSchema = z.enum(["plus", "pro", "unknown"]);
+export type ChatGptWebAccountPlan = z.infer<typeof ChatGptWebAccountPlanSchema>;
+
+export const ChatGptWebAccountStateSchema = z.enum([
+  "configured",
+  "login_required",
+  "ready",
+  "busy",
+  "cooldown",
+  "quarantined",
+  "disabled",
+  "stale",
+]);
+export type ChatGptWebAccountState = z.infer<typeof ChatGptWebAccountStateSchema>;
+
+export const ChatGptWebAccountSchema = z.object({
+  accountId: z.string().regex(/^account-[a-d]$/),
+  slot: z.enum(["a", "b", "c", "d"]),
+  label: z.string().min(1).max(64),
+  plan: ChatGptWebAccountPlanSchema,
+  enabled: z.boolean(),
+  qualified: z.boolean(),
+  state: ChatGptWebAccountStateSchema,
+  maxConcurrency: z.literal(1).default(1),
+  extensionConnected: z.boolean(),
+  pageReady: z.boolean(),
+  authenticated: z.boolean(),
+  sandboxVerified: z.boolean(),
+  activeJobId: z.string().uuid().nullable(),
+  leaseExpiresAt: z.string().datetime().nullable(),
+  rateLimitState: z.enum(["clear", "cooldown", "recovery_probe", "observation"]),
+  retryAfter: z.number().int().nonnegative().nullable(),
+  consecutiveRateLimits: z.number().int().nonnegative(),
+  lastRateLimitAt: z.string().datetime().nullable(),
+  lastSubmissionAt: z.string().datetime().nullable(),
+  lastHeartbeatAt: z.string().datetime().nullable(),
+  lastProbeAt: z.string().datetime().nullable(),
+  lastProbePassed: z.boolean().nullable(),
+  lastSuccessAt: z.string().datetime().nullable(),
+  lastFailureAt: z.string().datetime().nullable(),
+  lastFailureCode: z.string().max(128).nullable(),
+  failurePhase: ChatGptWebFailurePhaseSchema.nullable(),
+  diagnosticSummary: ChatGptWebDiagnosticSummarySchema.nullable(),
+  vncPath: z.string().regex(/^\/chatgpt-browser(?:-[b-d])?\/$/),
+  updatedAt: z.string().datetime(),
+});
+export type ChatGptWebAccount = z.infer<typeof ChatGptWebAccountSchema>;
+
 export const ChatGptWebStatusSchema = z.object({
   configuredEnabled: z.boolean(),
   effectiveConcurrency: z.number().int().min(0).max(4),
@@ -434,6 +510,7 @@ export const ChatGptWebStatusSchema = z.object({
     )
     .max(4)
     .default([]),
+  accounts: z.array(ChatGptWebAccountSchema).default([]),
   lastQualificationRunId: z.string().uuid().nullable().default(null),
   updatedAt: z.string().datetime(),
 });
@@ -448,34 +525,6 @@ export const ChatGptWebQualificationSuiteSchema = z.enum([
   "full_10",
 ]);
 export type ChatGptWebQualificationSuite = z.infer<typeof ChatGptWebQualificationSuiteSchema>;
-
-export const ChatGptWebFailurePhaseSchema = z.enum([
-  "opening",
-  "configuring",
-  "temporary_chat_verified",
-  "mode_selected",
-  "input_ready",
-  "submitted",
-  "user_echo_verified",
-  "generating",
-  "stabilizing",
-  "resetting",
-]);
-export type ChatGptWebFailurePhase = z.infer<typeof ChatGptWebFailurePhaseSchema>;
-
-export const ChatGptWebDiagnosticSummarySchema = z.object({
-  pageKind: z.enum(["home", "conversation", "other"]),
-  userTurnCount: z.number().int().nonnegative(),
-  assistantTurnCount: z.number().int().nonnegative(),
-  latestUserMatchesObjective: z.boolean().nullable(),
-  generationActive: z.boolean(),
-  latestAssistantHasText: z.boolean(),
-  visibleErrorKinds: z
-    .array(z.enum(["continue_generating", "retry", "generation_error", "other"]))
-    .max(16),
-  temporaryChatVerified: z.boolean(),
-});
-export type ChatGptWebDiagnosticSummary = z.infer<typeof ChatGptWebDiagnosticSummarySchema>;
 
 export const ChatGptWebQualificationItemSchema = z.object({
   index: z.number().int().min(1).max(10),
@@ -501,6 +550,11 @@ export type ChatGptWebQualificationItem = z.infer<typeof ChatGptWebQualification
 
 export const ChatGptWebQualificationRunSchema = z.object({
   id: z.string().uuid(),
+  accountId: z
+    .string()
+    .regex(/^account-[a-d]$/)
+    .nullable()
+    .default(null),
   suite: ChatGptWebQualificationSuiteSchema,
   status: z.enum(["accepted", "running", "succeeded", "failed", "cancelled"]),
   total: z.number().int().min(0).max(10),
