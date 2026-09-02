@@ -287,7 +287,7 @@ services:
       - /opt/aialra-browser-home/Downloads:rw,noexec,nosuid,size=64m,uid=1100,gid=1100
     networks:
       chatgpt_control:
-        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP:-10.253.240.2}
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP:-10.253.240.10}
       chatgpt_proxy: {}
     read_only: true
     shm_size: 1g
@@ -322,7 +322,7 @@ services:
       - chatgpt_browser_profile_b:/opt/aialra-browser-home/.config/chromium
     networks:
       chatgpt_control:
-        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_B:-10.253.240.3}
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_B:-10.253.240.11}
       chatgpt_proxy: {}
 
   chatgpt-browser-c:
@@ -335,7 +335,7 @@ services:
       - chatgpt_browser_profile_c:/opt/aialra-browser-home/.config/chromium
     networks:
       chatgpt_control:
-        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_C:-10.253.240.4}
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_C:-10.253.240.12}
       chatgpt_proxy: {}
 
   chatgpt-browser-d:
@@ -348,7 +348,7 @@ services:
       - chatgpt_browser_profile_d:/opt/aialra-browser-home/.config/chromium
     networks:
       chatgpt_control:
-        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_D:-10.253.240.5}
+        ipv4_address: ${CHATGPT_BROWSER_CONTROL_IP_D:-10.253.240.13}
       chatgpt_proxy: {}
 
   chatgpt-egress-proxy:
