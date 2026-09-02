@@ -69,6 +69,7 @@ const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快�
 let activeJobId = null;
 let cancelled = false;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
+const BLANK_ASSISTANT_GRACE_MS = 45_000;
 
 async function sendRuntimeMessage(message, timeoutMs = 5_000) {
   let timer;
@@ -958,7 +959,7 @@ async function waitForStableResult(
         }
       } else {
         blankSince ||= Date.now();
-        if (Date.now() - blankSince >= 15_000) {
+        if (Date.now() - blankSince >= BLANK_ASSISTANT_GRACE_MS) {
           const diagnostic = assistantElementDiagnostics(newest);
           if (
             diagnostic &&
