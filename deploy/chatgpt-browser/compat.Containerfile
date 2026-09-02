@@ -11,8 +11,9 @@ RUN set -eu \
     && grep -Fq "        let autoconnect = WebUtil.getConfigVar('autoconnect', false);" /usr/share/novnc/app/ui.js \
     && grep -Fq "if (path === 'websockify')" /usr/share/novnc/app/ui.js \
     && sed -i "s#        if (path === 'websockify') {.*#        const routedPath = path === 'websockify' ? (() => { const prefix = window.location.pathname.match(new RegExp('^/(chatgpt-browser(?:-[b-d])?)/')); return prefix ? prefix[1] + '/websockify' : path; })() : path; url += '/' + routedPath;#" /usr/share/novnc/app/ui.js \
-    && sed -i "/        let autoconnect = WebUtil.getConfigVar('autoconnect', false);/a\\        const browserPath = window.location.pathname; if (autoconnect === false \&\& ['/chatgpt-browser/vnc.html','/chatgpt-browser-b/vnc.html','/chatgpt-browser-c/vnc.html','/chatgpt-browser-d/vnc.html'].includes(browserPath)) autoconnect = true;" /usr/share/novnc/app/ui.js \
+    && if ! grep -Fq "const browserPath = window.location.pathname;" /usr/share/novnc/app/ui.js; then sed -i "/        let autoconnect = WebUtil.getConfigVar('autoconnect', false);/a\\        const browserPath = window.location.pathname; if (autoconnect === false \&\& ['/chatgpt-browser/vnc.html','/chatgpt-browser-b/vnc.html','/chatgpt-browser-c/vnc.html','/chatgpt-browser-d/vnc.html'].includes(browserPath)) autoconnect = true;" /usr/share/novnc/app/ui.js; fi \
     && grep -Fq "autoconnect === false" /usr/share/novnc/app/ui.js \
     && grep -Fq "const routedPath" /usr/share/novnc/app/ui.js \
-    && ! grep -Fq "if (prefix) path =" /usr/share/novnc/app/ui.js
+    && ! grep -Fq "if (prefix) path =" /usr/share/novnc/app/ui.js \
+    && test "$(grep -Fc "const browserPath = window.location.pathname;" /usr/share/novnc/app/ui.js)" -eq 1
 USER browser
