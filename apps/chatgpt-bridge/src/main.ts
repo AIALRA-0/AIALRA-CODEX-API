@@ -253,13 +253,6 @@ async function runFocusedXdotoolAtPoint(
   await runXdotool(["mousemove", String(translated.x), String(translated.y), ...tail]);
 }
 
-async function runFocusedXdotool(arguments_: string[]): Promise<void> {
-  const windowId = await findChromiumWindow();
-  await runXdotool(["windowactivate", "--sync", windowId]);
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  await runXdotool(arguments_);
-}
-
 function startX11Clipboard(
   value: string,
   options: { singleRequest?: boolean } = {},
@@ -796,22 +789,33 @@ async function main(): Promise<void> {
         return;
       }
       if (message.type === "native_reset_request") {
-        void runFocusedXdotool([
-          "mousemove",
-          String(message.x),
-          String(message.y),
-          "sleep",
-          "0.05",
-          "click",
-          "1",
-          "sleep",
-          "0.15",
-          "key",
-          "--clearmodifiers",
-          "ctrl+a",
-          "key",
-          "BackSpace",
-        ])
+        void findChromiumWindow()
+          .then(async (windowId) => {
+            const translated = await translateBrowserPoint(
+              windowId,
+              { x: message.x, y: message.y },
+              controlDiagnostics,
+            );
+            await runXdotool([
+              "windowactivate",
+              "--sync",
+              windowId,
+              "mousemove",
+              String(translated.x),
+              String(translated.y),
+              "sleep",
+              "0.05",
+              "click",
+              "1",
+              "sleep",
+              "0.15",
+              "key",
+              "--clearmodifiers",
+              "ctrl+a",
+              "key",
+              "BackSpace",
+            ]);
+          })
           .then(() =>
             websocket.send(
               JSON.stringify({
