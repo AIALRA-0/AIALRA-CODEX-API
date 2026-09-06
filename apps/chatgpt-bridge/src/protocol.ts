@@ -36,6 +36,25 @@ const BrowserControlSchema = z.object({
   disabled: z.boolean(),
 });
 
+const BrowserRectangleSchema = z.object({
+  left: z.number().finite(),
+  top: z.number().finite(),
+  width: z.number().finite().nonnegative(),
+  height: z.number().finite().nonnegative(),
+});
+
+const BrowserWindowMetricsSchema = z.object({
+  screenX: z.number().finite(),
+  screenY: z.number().finite(),
+  outerWidth: z.number().finite().nonnegative(),
+  outerHeight: z.number().finite().nonnegative(),
+  innerWidth: z.number().finite().nonnegative(),
+  innerHeight: z.number().finite().nonnegative(),
+  browserChromeWidth: z.number().finite().nonnegative(),
+  browserChromeHeight: z.number().finite().nonnegative(),
+  devicePixelRatio: z.number().finite().positive(),
+});
+
 export const BrowserControlDiagnosticsSchema = z.object({
   composerFound: z.boolean(),
   composerPoint: z
@@ -89,6 +108,8 @@ export const BrowserControlDiagnosticsSchema = z.object({
     })
     .nullable()
     .default(null),
+  composerRect: BrowserRectangleSchema.nullable().default(null),
+  windowMetrics: BrowserWindowMetricsSchema.nullable().default(null),
 });
 export type BrowserControlDiagnostics = z.infer<typeof BrowserControlDiagnosticsSchema>;
 

@@ -195,6 +195,33 @@ function nativePoint(element) {
   };
 }
 
+function rectangleDiagnostics(element) {
+  if (!element) return null;
+  const rectangle = element.getBoundingClientRect();
+  return {
+    left: rectangle.left,
+    top: rectangle.top,
+    width: rectangle.width,
+    height: rectangle.height,
+  };
+}
+
+function windowMetrics() {
+  const browserChromeHeight = Math.max(0, window.outerHeight - window.innerHeight);
+  const browserChromeWidth = Math.max(0, window.outerWidth - window.innerWidth);
+  return {
+    screenX: window.screenX,
+    screenY: window.screenY,
+    outerWidth: window.outerWidth,
+    outerHeight: window.outerHeight,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    browserChromeWidth,
+    browserChromeHeight,
+    devicePixelRatio: window.devicePixelRatio,
+  };
+}
+
 function canonicalEditorText(value) {
   return value
     .replace(/\u00a0/g, " ")
@@ -761,6 +788,8 @@ function controlDiagnostics(expectedObjective = null) {
   return {
     composerFound: Boolean(composer),
     composerPoint: composer ? nativePoint(composer) : null,
+    composerRect: rectangleDiagnostics(composer),
+    windowMetrics: windowMetrics(),
     temporaryChatEnabled: temporaryChatEnabled(),
     temporaryChatPersonalized: temporaryChatPersonalized(),
     modelControlFound: Boolean(modelControl),
