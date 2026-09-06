@@ -760,6 +760,7 @@ function controlDiagnostics(expectedObjective = null) {
     : [];
   return {
     composerFound: Boolean(composer),
+    composerPoint: composer ? nativePoint(composer) : null,
     temporaryChatEnabled: temporaryChatEnabled(),
     temporaryChatPersonalized: temporaryChatPersonalized(),
     modelControlFound: Boolean(modelControl),

@@ -38,6 +38,10 @@ const BrowserControlSchema = z.object({
 
 export const BrowserControlDiagnosticsSchema = z.object({
   composerFound: z.boolean(),
+  composerPoint: z
+    .object({ x: z.number().int().nonnegative(), y: z.number().int().nonnegative() })
+    .nullable()
+    .default(null),
   temporaryChatEnabled: z.boolean(),
   temporaryChatPersonalized: z.boolean().nullable().default(null),
   modelControlFound: z.boolean(),
