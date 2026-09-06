@@ -177,6 +177,82 @@ function findChromiumWindow(): Promise<string> {
   });
 }
 
+type BrowserPoint = { x: number; y: number };
+
+type X11WindowGeometry = BrowserPoint & {
+  width: number;
+  height: number;
+};
+
+function findChromiumWindowGeometry(windowId: string): Promise<X11WindowGeometry> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "xdotool",
+      ["getwindowgeometry", "--shell", windowId],
+      { env: x11Environment(), timeout: 5_000, encoding: "utf8" },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const values = Object.fromEntries(
+          stdout
+            .split(/\r?\n/)
+            .map((line) => line.match(/^(X|Y|WIDTH|HEIGHT)=(-?\d+)$/))
+            .filter((match): match is RegExpMatchArray => Boolean(match))
+            .map((match) => [match[1], Number(match[2])]),
+        );
+        const geometry = {
+          x: values.X,
+          y: values.Y,
+          width: values.WIDTH,
+          height: values.HEIGHT,
+        };
+        if (Object.values(geometry).some((value) => !Number.isFinite(value))) {
+          reject(new Error("chromium_window_geometry_unavailable"));
+          return;
+        }
+        resolve(geometry);
+      },
+    );
+  });
+}
+
+async function translateBrowserPoint(
+  windowId: string,
+  point: BrowserPoint,
+  diagnostics: BrowserControlDiagnostics | null,
+): Promise<BrowserPoint> {
+  const metrics = diagnostics?.windowMetrics;
+  if (!metrics?.innerWidth || !metrics.innerHeight) return point;
+
+  const geometry = await findChromiumWindowGeometry(windowId);
+  const reportedChromeWidth = Math.max(0, metrics.browserChromeWidth);
+  const reportedChromeHeight = Math.max(0, metrics.browserChromeHeight);
+  const viewportPoint = {
+    x: point.x - metrics.screenX - reportedChromeWidth / 2,
+    y: point.y - metrics.screenY - reportedChromeHeight,
+  };
+  const actualChromeWidth = Math.max(0, geometry.width - metrics.innerWidth);
+  const actualChromeHeight = Math.max(0, geometry.height - metrics.innerHeight);
+  return {
+    x: Math.round(geometry.x + actualChromeWidth / 2 + viewportPoint.x),
+    y: Math.round(geometry.y + actualChromeHeight + viewportPoint.y),
+  };
+}
+
+async function runFocusedXdotoolAtPoint(
+  point: BrowserPoint,
+  diagnostics: BrowserControlDiagnostics | null,
+  tail: string[],
+): Promise<void> {
+  const windowId = await findChromiumWindow();
+  const translated = await translateBrowserPoint(windowId, point, diagnostics);
+  await runXdotool(["windowactivate", "--sync", windowId]);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await runXdotool(["mousemove", String(translated.x), String(translated.y), ...tail]);
+}
+
 async function runFocusedXdotool(arguments_: string[]): Promise<void> {
   const windowId = await findChromiumWindow();
   await runXdotool(["windowactivate", "--sync", windowId]);
@@ -255,8 +331,14 @@ function waitForClipboardExit(child: ReturnType<typeof spawn>): Promise<void> {
   });
 }
 
-async function pasteX11Text(value: string, x: number, y: number): Promise<void> {
+async function pasteX11Text(
+  value: string,
+  x: number,
+  y: number,
+  diagnostics: BrowserControlDiagnostics | null,
+): Promise<void> {
   const windowId = await findChromiumWindow();
+  const translated = await translateBrowserPoint(windowId, { x, y }, diagnostics);
   await runXdotool(["windowactivate", "--sync", windowId]);
   await new Promise((resolve) => setTimeout(resolve, 200));
   const clipboard = await startX11Clipboard(value);
@@ -264,8 +346,8 @@ async function pasteX11Text(value: string, x: number, y: number): Promise<void> 
     await new Promise((resolve) => setTimeout(resolve, 250));
     await runXdotool([
       "mousemove",
-      String(x),
-      String(y),
+      String(translated.x),
+      String(translated.y),
       "sleep",
       "0.05",
       "click",
@@ -767,14 +849,11 @@ async function main(): Promise<void> {
             if (message.x == null || message.y == null || message.text == null) {
               throw new Error("invalid_native_input");
             }
-            await pasteX11Text(message.text, message.x, message.y);
+            await pasteX11Text(message.text, message.x, message.y, controlDiagnostics);
           });
         } else {
           enqueueNativeAction(message.jobId, () =>
-            runFocusedXdotool([
-              "mousemove",
-              String(message.x),
-              String(message.y),
+            runFocusedXdotoolAtPoint({ x: message.x, y: message.y }, controlDiagnostics, [
               "sleep",
               "0.25",
               "mousedown",
