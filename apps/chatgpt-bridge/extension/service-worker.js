@@ -222,7 +222,7 @@ async function resetSlot(slot) {
     jobHash: null,
     quarantinedUntil: null,
   });
-  const previousDocumentToken = await navigateToFreshChat(slot, false);
+  const previousDocumentToken = await navigateToFreshChat(slot, false, true);
   let page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken);
   let diagnostics = page.diagnostics ?? {};
   if (diagnostics.composerTextLength > 0) {
