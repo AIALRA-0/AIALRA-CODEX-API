@@ -87,6 +87,9 @@ describe("single-page browser agent policy", () => {
     expect(serviceWorker).toContain("diagnostics.temporaryChatPersonalized !== false");
     expect(contentScript).toContain('url.searchParams.get("temporary-chat") === "true"');
     expect(contentScript).toContain("temporaryChatSemanticMarker()");
+    expect(contentScript).toContain("function temporaryChatIntroControl()");
+    expect(contentScript).toContain('"temporary_chat_intro"');
+    expect(contentScript).toContain("if (temporaryChatIntroControl())");
     expect(contentScript).toContain("unpersonalized|non-personalized");
     expect(contentScript).toContain("return null;");
     expect(serviceWorker).toContain('type: "native_reset_request"');

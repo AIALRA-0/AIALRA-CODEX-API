@@ -394,6 +394,28 @@ function temporaryChatControls() {
   );
 }
 
+function temporaryChatIntroControl() {
+  return [...document.querySelectorAll("button, [role='button']")].find((element) => {
+    const rectangle = element.getBoundingClientRect();
+    if (
+      rectangle.width <= 0 ||
+      rectangle.height <= 0 ||
+      getComputedStyle(element).visibility === "hidden"
+    ) {
+      return false;
+    }
+    const label = normalizedText(
+      `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`,
+    );
+    if (!/^(?:continue|继续)$/i.test(label)) return false;
+    let ancestor = element;
+    for (let depth = 0; ancestor && depth < 8; depth += 1, ancestor = ancestor.parentElement) {
+      if (/temporary chat|临时聊天/i.test(visibleText(ancestor))) return true;
+    }
+    return false;
+  });
+}
+
 function temporaryChatUrlEnabled() {
   try {
     const url = new URL(window.location.href);
@@ -473,6 +495,16 @@ function temporaryChatPersonalized() {
 }
 
 async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
+  const intro = temporaryChatIntroControl();
+  if (intro) {
+    await nativeClick(intro, jobId, "temporary_chat_intro");
+    const introDeadline = Math.min(deadline, Date.now() + 7_500);
+    while (Date.now() < introDeadline) {
+      if (!temporaryChatIntroControl()) break;
+      await waitForMutation(250);
+    }
+    if (temporaryChatIntroControl()) throw new Error("chatgpt_ui_changed");
+  }
   if (temporaryChatEnabled() && temporaryChatPersonalized() === false) return;
   const control = temporaryChatControls().find((candidate) => {
     const rectangle = candidate.getBoundingClientRect();
