@@ -404,15 +404,16 @@ function temporaryChatIntroControl() {
     ) {
       return false;
     }
-    const label = normalizedText(
-      `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`,
-    );
-    if (!/^(?:continue|继续)$/i.test(label)) return false;
+    const textLabel = normalizedText(visibleText(element));
+    const ariaLabel = normalizedText(element.getAttribute("aria-label") ?? "");
+    if (!/^(?:continue|继续)$/i.test(textLabel) && !/^(?:continue|继续)$/i.test(ariaLabel)) {
+      return false;
+    }
     let ancestor = element;
     for (let depth = 0; ancestor && depth < 8; depth += 1, ancestor = ancestor.parentElement) {
       if (/temporary chat|临时聊天/i.test(visibleText(ancestor))) return true;
     }
-    return false;
+    return temporaryChatUrlEnabled();
   });
 }
 
