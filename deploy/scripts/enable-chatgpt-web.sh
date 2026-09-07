@@ -61,6 +61,10 @@ case "$ACTION" in
       echo "QUALIFICATION_RUN_ID must name a completed single probe or full qualification" >&2
       exit 1
     }
+    effective_concurrency="$(awk -F= '$1=="CHATGPT_WEB_MAX_CONCURRENCY"{print $2; exit}' "$PRODUCTION_ENV")"
+    if ! [[ "$effective_concurrency" =~ ^[1-9][0-9]*$ ]] || (( effective_concurrency > 2 )); then
+      effective_concurrency=1
+    fi
     qualification_record="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
       -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
 SELECT CASE
@@ -112,7 +116,8 @@ SQL
 )"
     "${compose[@]}" exec -T postgres psql -U router -d router -v ON_ERROR_STOP=1 \
       -v qualified_at="$qualified_at" -v succeeded="$succeeded" \
-      -v run_id="$QUALIFICATION_RUN_ID" -v account_id="$account_id" <<'SQL'
+      -v run_id="$QUALIFICATION_RUN_ID" -v account_id="$account_id" \
+      -v effective_concurrency="$effective_concurrency" <<'SQL'
 UPDATE chatgpt_web_accounts
 SET enabled=TRUE,
     qualified=TRUE,
@@ -132,7 +137,7 @@ VALUES (
   TRUE,
   jsonb_build_object(
     'configuredEnabled', TRUE,
-    'effectiveConcurrency', 1,
+    'effectiveConcurrency', :'effective_concurrency'::integer,
     'maximumConcurrency', 2,
     'activeTabs', 0,
     'queuedJobs', 0,
@@ -167,7 +172,7 @@ VALUES (
 ON CONFLICT (singleton) DO UPDATE SET
   status=chatgpt_web_status.status || jsonb_build_object(
     'configuredEnabled', TRUE,
-    'effectiveConcurrency', 1,
+    'effectiveConcurrency', :'effective_concurrency'::integer,
     'maximumConcurrency', 2,
     'circuitState', 'closed',
     'circuitReason', NULL,
@@ -191,9 +196,9 @@ ON CONFLICT (singleton) DO UPDATE SET
 SQL
     set_flag true
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
-    set_environment_value CHATGPT_WEB_MAX_CONCURRENCY 2
+    set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$effective_concurrency"
     "${compose[@]}" up --detach --force-recreate api worker chatgpt-browser chatgpt-browser-b
-    echo "ChatGPT web account pool enabled at concurrency 2 (one per account)"
+    echo "ChatGPT web account pool enabled at concurrency $effective_concurrency"
     ;;
   disable)
     set_flag false
