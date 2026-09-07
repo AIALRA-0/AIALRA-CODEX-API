@@ -193,8 +193,13 @@ function accountPublicPatch(
     state = "login_required";
   } else if (heartbeatStale || !extensionConnected || !pageReady || !sandboxVerified) {
     state = "stale";
-  } else if (current.qualified) state = "ready";
-  else state = "configured";
+  } else if (current.qualified || current.lastProbePassed === true) {
+    // A browser restart can briefly report an incomplete health snapshot. Keep
+    // the successful qualification fact and restore eligibility once the
+    // bridge is healthy again instead of requiring another real submission.
+    qualified = true;
+    state = "ready";
+  } else state = "configured";
 
   if (rateLimited) {
     qualified = current.qualified;

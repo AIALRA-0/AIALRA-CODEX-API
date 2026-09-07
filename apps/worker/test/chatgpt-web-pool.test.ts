@@ -226,4 +226,42 @@ describe("ChatGptWebPoolProvider", () => {
       fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/invoke")),
     ).toHaveLength(1);
   });
+
+  it("restores a qualified account after a transient browser restart", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { lastProbePassed: true });
+    let healthReads = 0;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (!url.endsWith("/healthz")) return response([]);
+      healthReads += 1;
+      if (healthReads === 1) {
+        return new Response(
+          JSON.stringify({
+            ...health("account-a"),
+            pageReady: false,
+            authenticated: false,
+            failureCode: null,
+          }),
+        );
+      }
+      return new Response(JSON.stringify(health("account-a")));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+
+    await pool.syncAccounts();
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      qualified: false,
+      state: "login_required",
+      lastProbePassed: true,
+    });
+
+    await pool.refreshHealth();
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      qualified: true,
+      state: "ready",
+      lastProbePassed: true,
+    });
+  });
 });
