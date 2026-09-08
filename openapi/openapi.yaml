@@ -406,6 +406,7 @@ paths:
               properties:
                 label: { type: string, minLength: 1, maxLength: 64 }
                 plan: { type: string, enum: [plus, pro, unknown] }
+                priority: { type: integer, minimum: 0, maximum: 100 }
                 enabled: { type: boolean }
       responses:
         "200":
@@ -1558,6 +1559,7 @@ components:
         slot: { type: string, enum: [a, b, c, d] }
         label: { type: string, minLength: 1, maxLength: 64 }
         plan: { type: string, enum: [plus, pro, unknown] }
+        priority: { type: integer, minimum: 0, maximum: 100, default: 0 }
         enabled: { type: boolean }
         qualified: { type: boolean }
         state:

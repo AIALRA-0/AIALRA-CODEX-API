@@ -190,6 +190,7 @@ export class RunnerQuotaClient {
   async read(): Promise<QuotaSnapshot> {
     const response = await fetch(new URL("/quota", this.baseUrl), {
       headers: this.headers(),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`runner_quota_unavailable:${response.status}`);
     return QuotaSnapshotSchema.parse(await response.json());
@@ -198,6 +199,7 @@ export class RunnerQuotaClient {
   async listModels(): Promise<ModelCatalogSnapshot> {
     const response = await fetch(new URL("/models", this.baseUrl), {
       headers: this.headers(),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`runner_models_unavailable:${response.status}`);
     return ModelCatalogSnapshotSchema.parse(await response.json());
@@ -206,6 +208,7 @@ export class RunnerQuotaClient {
   async readHealth(): Promise<Record<string, unknown>> {
     const response = await fetch(new URL("/healthz", this.baseUrl), {
       headers: this.headers(),
+      signal: AbortSignal.timeout(10_000),
     });
     if (![200, 503].includes(response.status)) {
       throw new Error(`runner_health_unavailable:${response.status}`);

@@ -317,7 +317,7 @@ export class JobsService {
           createdAt: new Date().toISOString(),
         },
       );
-      await this.queue.enqueue(job.id);
+      await this.queue.enqueue(job.id, job.task.executionChannel);
     }
     return (await this.repository.findById(job.id)) as Job;
   }
@@ -500,7 +500,7 @@ export class JobsService {
         createdAt: new Date().toISOString(),
       },
     );
-    await this.queue.enqueue(id);
+    await this.queue.enqueue(id, (await this.get(id)).task.executionChannel);
     return this.get(id);
   }
 
@@ -542,10 +542,11 @@ export class JobsService {
     id: string,
     afterSequence = -1,
     deadlineMs = 3_600_000,
+    signal?: AbortSignal,
   ): AsyncGenerator<JobEvent> {
     const expires = Date.now() + deadlineMs;
     let cursor = afterSequence;
-    while (Date.now() < expires) {
+    while (Date.now() < expires && !signal?.aborted) {
       const events = await this.events(id, cursor);
       for (const event of events) {
         cursor = event.sequence;
@@ -553,6 +554,11 @@ export class JobsService {
       }
       const job = await this.get(id);
       if (TERMINAL_STATUSES.has(job.status)) {
+        // The worker can commit its final output between the event read and
+        // the status read. Drain once more after observing the terminal state.
+        for (const event of await this.events(id, cursor)) {
+          yield event;
+        }
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));

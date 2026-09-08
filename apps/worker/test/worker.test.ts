@@ -9,10 +9,33 @@ import type { ModelProvider } from "@aialra/providers";
 import {
   attachQuotaWindowDelta,
   isSafeChatGptWebRetry,
+  isSafeCodexRetry,
   nextChatGptWebStatus,
   validateOutput,
   WorkerService,
 } from "../src/worker.service.js";
+import { RunnerProviderError } from "../src/runner-client.js";
+
+describe("Codex retry boundary", () => {
+  it.each(["uncertain", "submitted"] as const)("never retries %s timeout errors", (state) => {
+    expect(
+      isSafeCodexRetry(new RunnerProviderError("codex_provider_timeout", "timeout", state)),
+    ).toBe(false);
+  });
+  it("requires an explicit pre-acceptance rejection", () => {
+    expect(isSafeCodexRetry(new Error("network timeout"))).toBe(false);
+    expect(
+      isSafeCodexRetry(
+        new RunnerProviderError("capacity", "temporarily unavailable", "not_submitted"),
+      ),
+    ).toBe(true);
+    expect(
+      isSafeCodexRetry(
+        new RunnerProviderError("codex_auth_failed", "unauthorized", "not_submitted"),
+      ),
+    ).toBe(false);
+  });
+});
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   const now = new Date().toISOString();
@@ -82,6 +105,29 @@ describe("validation", () => {
 });
 
 describe("WorkerService", () => {
+  it("persists an uncertain Codex failure without invoking a second time", async () => {
+    const repository = new InMemoryJobRepository();
+    const job = makeJob();
+    await repository.create(job);
+    const provider: ModelProvider = {
+      name: "codex",
+      workspaceMode: "provider",
+      invoke: vi.fn(async () => {
+        throw new RunnerProviderError("runner_transport_error", "network timeout", "uncertain");
+      }),
+    };
+    const worker = new WorkerService({
+      repository,
+      provider,
+      quotaClient: { read: async () => Promise.reject(new Error("offline")) },
+    });
+    await worker.processJob(job.id);
+    expect(provider.invoke).toHaveBeenCalledOnce();
+    expect(await repository.findById(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "runner_transport_error",
+    });
+  });
   it("runs one sticky provider and persists successful output", async () => {
     const repository = new InMemoryJobRepository();
     const job = makeJob();

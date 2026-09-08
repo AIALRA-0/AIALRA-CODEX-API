@@ -416,5 +416,6 @@ describe("PostgresJobRepository", () => {
 
     const pacingQuery = queries.find((query) => query.includes("lastSubmissionAt"));
     expect(pacingQuery).toContain("$2::timestamptz - INTERVAL '90 seconds'");
+    expect(pacingQuery).toContain("COALESCE((status->>'priority')::integer, 0) DESC");
   });
 });

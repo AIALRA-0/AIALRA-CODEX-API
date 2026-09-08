@@ -6,6 +6,7 @@ import { ResponsesRequestSchema, TaskContractSchema } from "@aialra/contracts";
 import type { AuthenticatedRequest } from "../common/api-key.guard.js";
 import { zodHttpError } from "../common/http-errors.js";
 import { RequireScopes } from "../common/scopes.decorator.js";
+import { openEventStream } from "../common/sse.js";
 import { JobsService } from "../jobs/jobs.service.js";
 
 function inputToText(input: unknown): string {
@@ -92,52 +93,70 @@ export class ResponsesController {
     );
 
     if (value.stream) {
-      response.status(200);
-      response.setHeader("Content-Type", "text/event-stream");
-      response.setHeader("Cache-Control", "no-cache, no-transform");
-      response.setHeader("Connection", "keep-alive");
-      response.flushHeaders();
-      const created = {
-        id: `resp_${job.id}`,
-        object: "response",
-        status: "in_progress",
-        model: job.task.model,
-        metadata: { job_id: job.id, session_key: job.task.sessionKey ?? null },
-      };
-      response.write(`event: response.created\n`);
-      response.write(`data: ${JSON.stringify(created)}\n\n`);
-      for await (const event of this.jobs.streamEvents(job.id, -1, job.task.deadlineMs + 5_000)) {
-        if (event.type === "output.delta") {
-          response.write("event: response.output_text.delta\n");
-          response.write(
-            `data: ${JSON.stringify({ type: "response.output_text.delta", delta: event.data.delta ?? "" })}\n\n`,
-          );
-        } else if (event.type === "tool") {
-          response.write("event: response.tool_event\n");
-          response.write(`data: ${JSON.stringify(event.data)}\n\n`);
+      const stream = openEventStream(response);
+      try {
+        let emittedText = false;
+        const created = {
+          id: `resp_${job.id}`,
+          object: "response",
+          status: "in_progress",
+          model: job.task.model,
+          metadata: { job_id: job.id, session_key: job.task.sessionKey ?? null },
+        };
+        response.write(`event: response.created\n`);
+        response.write(`data: ${JSON.stringify(created)}\n\n`);
+        for await (const event of this.jobs.streamEvents(
+          job.id,
+          -1,
+          job.task.deadlineMs + 5_000,
+          stream.signal,
+        )) {
+          if (stream.signal.aborted) return;
+          if (event.type === "output.delta") {
+            emittedText = true;
+            response.write("event: response.output_text.delta\n");
+            response.write(
+              `data: ${JSON.stringify({ type: "response.output_text.delta", delta: event.data.delta ?? "" })}\n\n`,
+            );
+          } else if (event.type === "tool") {
+            response.write("event: response.tool_event\n");
+            response.write(`data: ${JSON.stringify(event.data)}\n\n`);
+          }
         }
+        if (stream.signal.aborted) return;
+        const completed = await this.jobs.get(job.id);
+        if (completed.status === "succeeded" && !emittedText) {
+          const delta =
+            typeof completed.output === "string"
+              ? completed.output
+              : JSON.stringify(completed.output ?? "");
+          response.write(
+            `event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta })}\n\n`,
+          );
+        }
+        const finalEvent =
+          completed.status === "succeeded" ? "response.completed" : "response.failed";
+        response.write(`event: ${finalEvent}\n`);
+        response.write(
+          `data: ${JSON.stringify({
+            type: finalEvent,
+            response: {
+              id: `resp_${completed.id}`,
+              status: completed.status,
+              model: completed.route?.model ?? completed.task.model,
+              output: completed.output,
+              usage: completed.usage,
+              error: completed.errorCode
+                ? { code: completed.errorCode, message: completed.errorMessage }
+                : null,
+            },
+          })}\n\n`,
+        );
+        response.write("data: [DONE]\n\n");
+        response.end();
+      } finally {
+        stream.close();
       }
-      const completed = await this.jobs.get(job.id);
-      const finalEvent =
-        completed.status === "succeeded" ? "response.completed" : "response.failed";
-      response.write(`event: ${finalEvent}\n`);
-      response.write(
-        `data: ${JSON.stringify({
-          type: finalEvent,
-          response: {
-            id: `resp_${completed.id}`,
-            status: completed.status,
-            model: completed.route?.model ?? completed.task.model,
-            output: completed.output,
-            usage: completed.usage,
-            error: completed.errorCode
-              ? { code: completed.errorCode, message: completed.errorMessage }
-              : null,
-          },
-        })}\n\n`,
-      );
-      response.write("data: [DONE]\n\n");
-      response.end();
       return;
     }
 

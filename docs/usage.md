@@ -87,6 +87,8 @@ $env:MODEL_ROUTER_API_KEY = $CreatedKey.key # 把一次显示的密钥保存在�
 
 ## 4 `Responses` 兼容接口
 
+完整能力边界见 [API capabilities](api-capabilities.md)：兼容接口只覆盖已实现的参数子集，网页流式连接返回终态正文，不等同于逐 token 输出；输出 token 参数当前不是上游硬上限
+
 ### 4.1 适用场景
 
 `POST /v1/responses` 适合已有 `OpenAI Responses` 调用结构的程序

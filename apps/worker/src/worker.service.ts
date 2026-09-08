@@ -25,6 +25,7 @@ import { selectRoute } from "@aialra/router";
 import { redact, scanForExternalData } from "@aialra/security";
 
 import type { ChatGptWebPoolProvider } from "./chatgpt-web-pool.js";
+import { RunnerProviderError } from "./runner-client.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired"]);
 const CHATGPT_WEB_MIN_DISPATCH_INTERVAL_MS = 90_000;
@@ -56,6 +57,16 @@ function providerErrorCode(error: unknown): string {
 export function isSafeChatGptWebRetry(error: unknown): boolean {
   void error;
   return false;
+}
+
+export function isSafeCodexRetry(error: unknown): boolean {
+  // A transport failure does not prove that the upstream rejected the request.
+  // Only an explicit rejection before acceptance can be retried.
+  return (
+    error instanceof RunnerProviderError &&
+    error.submissionState === "not_submitted" &&
+    isTransientProviderError(error)
+  );
 }
 
 function validateChecks(output: unknown, checks: Job["task"]["validation"]["checks"]): string[] {
@@ -708,9 +719,7 @@ export class WorkerService {
           lastError = error;
           const canRetry =
             attempt < allowedAttempts &&
-            (route.provider === "codex"
-              ? isTransientProviderError(error)
-              : isSafeChatGptWebRetry(error));
+            (route.provider === "codex" ? isSafeCodexRetry(error) : isSafeChatGptWebRetry(error));
           if (!canRetry) {
             break;
           }

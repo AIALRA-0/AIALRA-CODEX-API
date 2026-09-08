@@ -414,6 +414,7 @@ export const ChatGptWebAccountSchema = z.object({
   slot: z.enum(["a", "b", "c", "d"]),
   label: z.string().min(1).max(64),
   plan: ChatGptWebAccountPlanSchema,
+  priority: z.number().int().min(0).max(100).default(0),
   enabled: z.boolean(),
   qualified: z.boolean(),
   state: ChatGptWebAccountStateSchema,
@@ -705,13 +706,11 @@ export interface ChatCompletionChunk {
   object: "chat.completion.chunk";
   created: number;
   model: string;
-  choices: [
-    {
-      index: 0;
-      delta: { role?: "assistant"; content?: string };
-      finish_reason: "stop" | "length" | null;
-    },
-  ];
+  choices: Array<{
+    index: 0;
+    delta: { role?: "assistant"; content?: string };
+    finish_reason: "stop" | "length" | null;
+  }>;
   usage?: ChatCompletionUsage | null;
 }
 

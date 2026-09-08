@@ -16,6 +16,7 @@ import {
 import type { AuthenticatedRequest } from "../common/api-key.guard.js";
 import { zodHttpError } from "../common/http-errors.js";
 import { RequireScopes } from "../common/scopes.decorator.js";
+import { openEventStream } from "../common/sse.js";
 import { JobsService } from "../jobs/jobs.service.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired"]);
@@ -234,90 +235,92 @@ export class ChatCompletionsController {
     maxOutputTokens: number,
     response: Response,
   ): Promise<void> {
-    response.status(200);
-    response.setHeader("Content-Type", "text/event-stream");
-    response.setHeader("Cache-Control", "no-cache, no-transform");
-    response.setHeader("Connection", "keep-alive");
-    response.flushHeaders();
+    const stream = openEventStream(response);
+    try {
+      const writeChunk = (chunk: ChatCompletionChunk) =>
+        response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      let emittedText = false;
 
-    const writeChunk = (chunk: ChatCompletionChunk) =>
-      response.write(`data: ${JSON.stringify(chunk)}\n\n`);
-    let emittedText = false;
+      writeChunk({
+        ...chunkBase(job),
+        choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+      });
+      for await (const event of this.jobs.streamEvents(
+        job.id,
+        -1,
+        job.task.deadlineMs + 5_000,
+        stream.signal,
+      )) {
+        if (stream.signal.aborted) return;
+        if (event.type === "output.delta") {
+          emittedText = true;
+          writeChunk({
+            ...chunkBase(job),
+            choices: [
+              { index: 0, delta: { content: String(event.data.delta ?? "") }, finish_reason: null },
+            ],
+          });
+        }
+      }
 
-    writeChunk({
-      ...chunkBase(job),
-      choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
-    });
-    for await (const event of this.jobs.streamEvents(job.id, -1, job.task.deadlineMs + 5_000)) {
-      if (event.type === "output.delta") {
-        emittedText = true;
+      if (stream.signal.aborted) return;
+      const completed = await this.jobs.get(job.id);
+      if (completed.status === "succeeded" && !emittedText) {
+        const content =
+          typeof completed.output === "string"
+            ? completed.output
+            : JSON.stringify(completed.output ?? "");
         writeChunk({
-          ...chunkBase(job),
-          choices: [
-            { index: 0, delta: { content: String(event.data.delta ?? "") }, finish_reason: null },
-          ],
+          ...chunkBase(completed),
+          choices: [{ index: 0, delta: { content }, finish_reason: null }],
         });
       }
-    }
-
-    const completed = await this.jobs.get(job.id);
-    if (
-      completed.status === "succeeded" &&
-      completed.task.executionChannel === "chatgpt_web" &&
-      !emittedText
-    ) {
-      const content =
-        typeof completed.output === "string"
-          ? completed.output
-          : JSON.stringify(completed.output ?? "");
+      if (completed.status !== "succeeded") {
+        response.write(
+          `event: error\ndata: ${JSON.stringify({
+            error: {
+              code:
+                completed.errorCode ??
+                (TERMINAL_STATUSES.has(completed.status) ? "provider_error" : "gateway_timeout"),
+              message: completed.errorMessage ?? "The call did not complete successfully.",
+              details: { job_id: completed.id, status: completed.status },
+            },
+          })}\n\n`,
+        );
+      }
       writeChunk({
         ...chunkBase(completed),
-        choices: [{ index: 0, delta: { content }, finish_reason: null }],
-      });
-    }
-    if (completed.status !== "succeeded") {
-      response.write(
-        `event: error\ndata: ${JSON.stringify({
-          error: {
-            code:
-              completed.errorCode ??
-              (TERMINAL_STATUSES.has(completed.status) ? "provider_error" : "gateway_timeout"),
-            message: completed.errorMessage ?? "The call did not complete successfully.",
-            details: { job_id: completed.id, status: completed.status },
+        choices: [
+          {
+            index: 0,
+            delta: {},
+            finish_reason:
+              completed.status === "succeeded"
+                ? completed.usage.outputTokens >= maxOutputTokens
+                  ? "length"
+                  : "stop"
+                : null,
           },
-        })}\n\n`,
-      );
-    }
-    writeChunk({
-      ...chunkBase(completed),
-      choices: [
-        {
-          index: 0,
-          delta: {},
-          finish_reason:
-            completed.status === "succeeded"
-              ? completed.usage.outputTokens >= maxOutputTokens
-                ? "length"
-                : "stop"
-              : null,
-        },
-      ],
-    });
-    if (
-      value.stream_options?.include_usage &&
-      completed.usage.measurementStatus !== "unavailable"
-    ) {
-      writeChunk({
-        ...chunkBase(completed),
-        choices: [{ index: 0, delta: {}, finish_reason: null }],
-        usage: {
-          prompt_tokens: completed.usage.inputTokens,
-          completion_tokens: completed.usage.outputTokens,
-          total_tokens: completed.usage.inputTokens + completed.usage.outputTokens,
-        },
+        ],
       });
+      if (
+        value.stream_options?.include_usage &&
+        completed.usage.measurementStatus !== "unavailable"
+      ) {
+        writeChunk({
+          ...chunkBase(completed),
+          choices: [],
+          usage: {
+            prompt_tokens: completed.usage.inputTokens,
+            completion_tokens: completed.usage.outputTokens,
+            total_tokens: completed.usage.inputTokens + completed.usage.outputTokens,
+          },
+        });
+      }
+      response.write("data: [DONE]\n\n");
+      response.end();
+    } finally {
+      stream.close();
     }
-    response.write("data: [DONE]\n\n");
-    response.end();
   }
 }

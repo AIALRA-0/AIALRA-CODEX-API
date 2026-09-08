@@ -323,6 +323,7 @@ export class GovernanceController {
       .object({
         label: z.string().trim().min(1).max(64).optional(),
         plan: ChatGptWebAccountPlanSchema.optional(),
+        priority: z.number().int().min(0).max(100).optional(),
         enabled: z.boolean().optional(),
       })
       .strict()

@@ -105,6 +105,52 @@ afterEach(() => {
 });
 
 describe("ChatGptWebPoolProvider", () => {
+  it("prefers the primary account but lends overflow to another idle account", async () => {
+    const { repository } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", {
+      priority: 100,
+      lastSubmissionAt: new Date(Date.now() - 120_000).toISOString(),
+    });
+    const first = await repository.acquireChatGptWebAccountLease(
+      randomUUID(),
+      ["account-a", "account-b"],
+      new Date(),
+      900_000,
+    );
+    const second = await repository.acquireChatGptWebAccountLease(
+      randomUUID(),
+      ["account-a", "account-b"],
+      new Date(),
+      900_000,
+    );
+    expect(first?.accountId).toBe("account-a");
+    expect(second?.accountId).toBe("account-b");
+  });
+
+  it("does not let an unauthenticated account mark the healthy pool unavailable", async () => {
+    const { repository, configs } = await readyRepository();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const isA = String(input).includes("account-a");
+        return new Response(
+          JSON.stringify({
+            ...health(isA ? "account-a" : "account-b"),
+            authenticated: !isA,
+            pageReady: !isA,
+          }),
+        );
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    expect(await pool.readHealth()).toMatchObject({
+      status: "ready",
+      authenticated: true,
+      pageReady: true,
+      effectiveConcurrency: 1,
+    });
+  });
   it("assigns concurrent tasks to different accounts", async () => {
     const { repository, configs } = await readyRepository();
     let resolveInvocations: () => void = () => undefined;

@@ -764,6 +764,7 @@ export class InMemoryJobRepository implements JobRepository {
         )
         .sort(
           (left, right) =>
+            right.priority - left.priority ||
             (left.lastSubmissionAt ? new Date(left.lastSubmissionAt).getTime() : 0) -
               (right.lastSubmissionAt ? new Date(right.lastSubmissionAt).getTime() : 0) ||
             left.slot.localeCompare(right.slot),
@@ -2031,7 +2032,8 @@ export class PostgresJobRepository implements JobRepository {
            AND (status->>'lastSubmissionAt' IS NULL OR
                 (status->>'lastSubmissionAt')::timestamptz <=
                   $2::timestamptz - INTERVAL '90 seconds')
-         ORDER BY COALESCE((status->>'lastSubmissionAt')::timestamptz, 'epoch'::timestamptz), slot
+         ORDER BY COALESCE((status->>'priority')::integer, 0) DESC,
+           COALESCE((status->>'lastSubmissionAt')::timestamptz, 'epoch'::timestamptz), slot
          LIMIT 1 FOR UPDATE SKIP LOCKED`,
         [accountIds, now],
       );

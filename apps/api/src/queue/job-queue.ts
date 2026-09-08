@@ -1,7 +1,8 @@
 import { PgBoss } from "pg-boss";
+import type { ExecutionChannel } from "@aialra/contracts";
 
 export interface JobQueue {
-  enqueue(jobId: string): Promise<void>;
+  enqueue(jobId: string, channel?: ExecutionChannel): Promise<void>;
   enqueueChatGptWebQualification(runId: string): Promise<void>;
   cancel(jobId: string): Promise<void>;
   close(): Promise<void>;
@@ -42,14 +43,16 @@ export class PgBossJobQueue implements JobQueue {
     }
     await this.boss.start();
     await this.boss.createQueue("model-router-jobs");
+    await this.boss.createQueue("model-router-codex-jobs");
+    await this.boss.createQueue("model-router-chatgpt-jobs");
     await this.boss.createQueue("chatgpt-web-qualifications");
     this.started = true;
   }
 
-  async enqueue(jobId: string): Promise<void> {
+  async enqueue(jobId: string, channel: ExecutionChannel = "codex"): Promise<void> {
     await this.start();
     await this.boss.send(
-      "model-router-jobs",
+      channel === "chatgpt_web" ? "model-router-chatgpt-jobs" : "model-router-codex-jobs",
       { jobId },
       { id: jobId, singletonKey: jobId, retryLimit: 0 },
     );
@@ -68,7 +71,11 @@ export class PgBossJobQueue implements JobQueue {
     if (!this.started) {
       return;
     }
-    await this.boss.cancel("model-router-jobs", jobId).catch(() => undefined);
+    await Promise.all(
+      ["model-router-jobs", "model-router-codex-jobs", "model-router-chatgpt-jobs"].map((queue) =>
+        this.boss.cancel(queue, jobId),
+      ),
+    );
   }
 
   async close(): Promise<void> {

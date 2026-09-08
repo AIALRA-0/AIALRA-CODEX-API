@@ -102,22 +102,31 @@ async function main(): Promise<void> {
   await boss.start();
   await boss.createQueue("model-router-jobs");
   await boss.createQueue("chatgpt-web-qualifications");
-  await boss.work<{ jobId: string }>(
-    "model-router-jobs",
-    { localConcurrency: codexConcurrency + chatgptConcurrency },
-    async (jobs: QueueJob<{ jobId: string }>[]) => {
-      for (const queueJob of jobs) {
-        const queued = await repository.findById(queueJob.data.jobId);
-        const pool =
-          queued?.task.executionChannel === "chatgpt_web" ? chatgptPermitPool : codexPool;
-        if (!pool) {
-          await service.processJob(queueJob.data.jobId, queueJob.signal);
-        } else {
-          await pool.run(() => service.processJob(queueJob.data.jobId, queueJob.signal));
+  // Keep the old queue consumer solely to drain jobs accepted before upgrade.
+  // Independent queues prevent waiting web work from occupying Codex fetch slots.
+  for (const [queue, concurrency] of [
+    ["model-router-jobs", codexConcurrency + chatgptConcurrency],
+    ["model-router-codex-jobs", codexConcurrency],
+    ["model-router-chatgpt-jobs", Math.max(1, chatgptConcurrency)],
+  ] as const) {
+    await boss.createQueue(queue);
+    await boss.work<{ jobId: string }>(
+      queue,
+      { localConcurrency: concurrency },
+      async (jobs: QueueJob<{ jobId: string }>[]) => {
+        for (const queueJob of jobs) {
+          const queued = await repository.findById(queueJob.data.jobId);
+          const pool =
+            queued?.task.executionChannel === "chatgpt_web" ? chatgptPermitPool : codexPool;
+          if (!pool) {
+            await service.processJob(queueJob.data.jobId, queueJob.signal);
+          } else {
+            await pool.run(() => service.processJob(queueJob.data.jobId, queueJob.signal));
+          }
         }
-      }
-    },
-  );
+      },
+    );
+  }
   await boss.work<{ runId: string }>(
     "chatgpt-web-qualifications",
     { localConcurrency: 1 },

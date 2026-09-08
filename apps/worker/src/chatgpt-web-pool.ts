@@ -311,7 +311,19 @@ export class ChatGptWebPoolProvider implements ModelProvider {
           ? "observation"
           : "clear";
     const retryAfter = cooldownAccounts.length
-      ? Math.min(...cooldownAccounts.map((account) => account.retryAfter ?? 1))
+      ? Math.min(
+          ...cooldownAccounts.map((account) =>
+            account.lastRateLimitAt && account.retryAfter != null
+              ? Math.max(
+                  1,
+                  Math.ceil(
+                    (Date.parse(account.lastRateLimitAt) + account.retryAfter * 1_000 - nowMs) /
+                      1_000,
+                  ),
+                )
+              : (account.retryAfter ?? 1),
+          ),
+        )
       : null;
     const lastFailure = records
       .filter((account) => account.lastFailureAt)
@@ -328,7 +340,7 @@ export class ChatGptWebPoolProvider implements ModelProvider {
       .sort((left, right) =>
         String(right.lastHeartbeatAt).localeCompare(String(left.lastHeartbeatAt)),
       )[0];
-    const configured = accounts.filter((account) => account.enabled);
+    const configured = accounts.filter((account) => accountEligibleForAdmission(account, nowMs));
     const healthValues = this.configs.map((config) => this.healthById.get(config.accountId));
     const activeTabs = healthValues.reduce(
       (total, health) => total + Number(health?.activeTabs ?? 0),
@@ -579,9 +591,10 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         // the bridge accepted the invocation, the task stays pinned forever,
         // including for UI/login failures reported after the send boundary.
         const canFailover = submissionState === "not_submitted";
+        const quarantine = hardFailure || (!canFailover && !rateLimited);
         await this.release(account, invocation.jobId, {
-          state: rateLimited ? "cooldown" : hardFailure ? "quarantined" : "stale",
-          qualified: hardFailure ? false : account.qualified,
+          state: rateLimited ? "cooldown" : quarantine ? "quarantined" : "stale",
+          qualified: quarantine ? false : account.qualified,
           rateLimitState: rateLimited ? "cooldown" : account.rateLimitState,
           retryAfter: rateLimited ? (runnerError?.retryAfter ?? 1_800) : account.retryAfter,
           lastRateLimitAt: rateLimited ? now : account.lastRateLimitAt,

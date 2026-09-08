@@ -170,6 +170,7 @@ interface ChatGptWebAccount {
   slot: "a" | "b" | "c" | "d";
   label: string;
   plan: "plus" | "pro" | "unknown";
+  priority?: number;
   enabled: boolean;
   qualified: boolean;
   state:
@@ -1782,7 +1783,7 @@ function ChatGptWebChannel() {
 
   async function updateAccount(
     account: ChatGptWebAccount,
-    patch: Partial<Pick<ChatGptWebAccount, "plan" | "enabled" | "label">>,
+    patch: Partial<Pick<ChatGptWebAccount, "plan" | "enabled" | "label" | "priority">>,
   ) {
     setBusy(true);
     try {
@@ -1925,6 +1926,23 @@ function ChatGptWebChannel() {
                       {account.label}
                       <br />
                       <span className="muted">{account.accountId}</span>
+                      <br />
+                      <select
+                        aria-label={`${account.accountId} 调度优先级`}
+                        value={account.priority ?? 0}
+                        disabled={busy}
+                        onChange={(event) =>
+                          void updateAccount(account, { priority: Number(event.target.value) })
+                        }
+                      >
+                        <option value={0}>均衡账号</option>
+                        <option value={100}>主力账号</option>
+                        {account.priority != null &&
+                          account.priority !== 0 &&
+                          account.priority !== 100 && (
+                            <option value={account.priority}>优先级 {account.priority}</option>
+                          )}
+                      </select>
                     </td>
                     <td>
                       <select

@@ -942,6 +942,8 @@ export interface components {
       label: string;
       /** @enum {string} */
       plan: "plus" | "pro" | "unknown";
+      /** @default 0 */
+      priority: number;
       enabled: boolean;
       qualified: boolean;
       /** @enum {string} */
@@ -1734,6 +1736,7 @@ export interface operations {
           label?: string;
           /** @enum {string} */
           plan?: "plus" | "pro" | "unknown";
+          priority?: number;
           enabled?: boolean;
         };
       };
