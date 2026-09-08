@@ -38,6 +38,7 @@ let currentQuota: QuotaSnapshot | null = null;
 let currentModels: ModelCatalogSnapshot | null = null;
 let currentQuotaError: RunnerExecutionError | null = null;
 let currentModelsError: RunnerExecutionError | null = null;
+let currentInvocationAuthError: RunnerExecutionError | null = null;
 
 function readRequiredSecret(name: string): string {
   const secretPath = process.env[`${name}_FILE`];
@@ -80,9 +81,9 @@ async function refreshRuntimeState(): Promise<void> {
     currentModels = null;
     currentModelsError = classifyRunnerExecutionError(modelResult.reason);
   }
-  const sharedAuthError = [currentQuotaError, currentModelsError].find((error) =>
-    error?.code.startsWith("codex_auth_"),
-  );
+  const sharedAuthError =
+    currentInvocationAuthError ??
+    [currentQuotaError, currentModelsError].find((error) => error?.code.startsWith("codex_auth_"));
   if (sharedAuthError) {
     currentQuota = null;
     currentModels = null;
@@ -139,6 +140,8 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
       signal: abortController.signal,
       onEvent: (event) => writeLine(response, { type: "event", event }),
     });
+    currentInvocationAuthError = null;
+    void refreshRuntimeState();
     writeLine(response, { type: "result", result });
     response.end();
   } catch (error) {
@@ -151,6 +154,13 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
       );
     } else {
       const publicError = classifyRunnerExecutionError(error);
+      if (publicError.code.startsWith("codex_auth_")) {
+        currentInvocationAuthError = publicError;
+        currentQuota = null;
+        currentModels = null;
+        currentQuotaError = publicError;
+        currentModelsError = publicError;
+      }
       writeLine(response, {
         type: "error",
         error: publicError,
@@ -213,7 +223,11 @@ const server = createServer((request, response) => {
       JSON.stringify({
         status: "ok",
         service: "aialra-model-router-runner",
-        codexRuntimeError: currentModelsError?.code ?? currentQuotaError?.code ?? null,
+        codexRuntimeError:
+          currentInvocationAuthError?.code ??
+          currentModelsError?.code ??
+          currentQuotaError?.code ??
+          null,
       }),
     );
     return;
