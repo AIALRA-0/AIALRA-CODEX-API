@@ -2029,7 +2029,8 @@ export class PostgresJobRepository implements JobRepository {
            AND lease_job_id IS NULL
            AND COALESCE(status->>'rateLimitState','clear') NOT IN ('cooldown','recovery_probe')
            AND (status->>'lastSubmissionAt' IS NULL OR
-                (status->>'lastSubmissionAt')::timestamptz <= $2 - INTERVAL '90 seconds')
+                (status->>'lastSubmissionAt')::timestamptz <=
+                  $2::timestamptz - INTERVAL '90 seconds')
          ORDER BY COALESCE((status->>'lastSubmissionAt')::timestamptz, 'epoch'::timestamptz), slot
          LIMIT 1 FOR UPDATE SKIP LOCKED`,
         [accountIds, now],

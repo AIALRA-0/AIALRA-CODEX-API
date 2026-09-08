@@ -12,6 +12,7 @@ import {
 import {
   configuredChatGptWebAccountConfigs,
   InMemoryJobRepository,
+  PostgresJobRepository,
   reconstructHistoricalJobEventData,
 } from "../src/index.js";
 
@@ -383,5 +384,37 @@ describe("InMemoryJobRepository", () => {
       suite: "chat_3",
     });
     expect(await repository.listChatGptWebQualificationRuns()).toHaveLength(1);
+  });
+});
+
+describe("PostgresJobRepository", () => {
+  it("types the web-account pacing cutoff as a timestamp", async () => {
+    const repository = new PostgresJobRepository(
+      "postgresql://unused:unused@127.0.0.1:1/unused",
+      Buffer.alloc(32).toString("base64"),
+    );
+    const queries: string[] = [];
+    const client = {
+      query: async (text: string) => {
+        queries.push(text);
+        return { rowCount: 0, rows: [] };
+      },
+      release: () => undefined,
+    };
+    Object.defineProperty(repository, "pool", {
+      value: { connect: async () => client },
+    });
+
+    await expect(
+      repository.acquireChatGptWebAccountLease(
+        "00000000-0000-4000-8000-000000000006",
+        ["account-b"],
+        new Date("2026-09-01T12:00:00.000Z"),
+        900_000,
+      ),
+    ).resolves.toBeNull();
+
+    const pacingQuery = queries.find((query) => query.includes("lastSubmissionAt"));
+    expect(pacingQuery).toContain("$2::timestamptz - INTERVAL '90 seconds'");
   });
 });
