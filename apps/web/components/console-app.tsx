@@ -6,6 +6,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 import { EvaluationMethods } from "./evaluation-methods";
 import { Formula } from "./formula";
+import { Disclosure, EmptyState } from "./ui";
+import { readVisibleResource } from "../lib/visible-resource";
 import { getJobResultSummary, type JobValidation } from "../lib/job-review";
 import { getRemainingPercent } from "../lib/quota-display";
 import { threadExpiryLabel, truncateSessionKey } from "../lib/thread-display";
@@ -521,7 +523,7 @@ function NativeDialog({
     if (!open && dialog.open) dialog.close();
   }, [open]);
   return (
-    <dialog ref={ref} className="confirm-dialog" onClose={onClose}>
+    <dialog ref={ref} className="confirm-dialog" aria-label="操作确认" onClose={onClose}>
       {children}
     </dialog>
   );
@@ -638,10 +640,12 @@ function Overview() {
         routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12", { signal }),
         routerFetch<Quota>("/api/v1/quota", { signal }),
       ]);
+      if (signal?.aborted) return;
       setJobs(jobResult.data);
       setQuota(quotaResult);
       setError("");
     } catch (cause) {
+      if (signal?.aborted) return;
       setError(cause instanceof Error ? cause.message : "控制面读取失败");
     }
   }, []);
@@ -738,6 +742,7 @@ function Playground() {
   const [busy, setBusy] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState("");
   const [models, setModels] = useState<ModelRecord[]>([]);
+  const [modelsError, setModelsError] = useState("");
   const chatGptWebAvailable = models.some(
     (item) => item.provider === "chatgpt_web" && item.available && item.enabled,
   );
@@ -749,8 +754,15 @@ function Playground() {
     }
   }, [searchParams]);
   const refreshModels = useCallback(async (signal?: AbortSignal) => {
-    const result = await routerFetch<{ data: ModelRecord[] }>("/api/v1/models", { signal });
-    setModels(result.data);
+    await readVisibleResource(
+      () => routerFetch<{ data: ModelRecord[] }>("/api/v1/models", { signal }),
+      signal,
+      (result) => {
+        setModels(result.data);
+        setModelsError("");
+      },
+      (cause) => setModelsError(cause instanceof Error ? cause.message : "模型列表读取失败"),
+    );
   }, []);
   useVisiblePolling(refreshModels, 30_000);
 
@@ -841,10 +853,15 @@ function Playground() {
       <PageHeading
         eyebrow="直接调用"
         title="在线调用"
-        copy="选择 Codex 或 ChatGPT Pro 网页实验通道，提交后会进入同一套持久队列"
+        copy="选择执行通道，提交任务并查看结果。高级参数按需配置。"
       />
+      <ErrorNotice message={modelsError} />
       <div className="workbench-grid">
         <section className="card form-stack">
+          <div className="panel-head">
+            <h3>新建调用</h3>
+            <span className="muted">{executionChannel === "codex" ? "Codex" : "ChatGPT 网页"}</span>
+          </div>
           <div className="field">
             <label htmlFor="objective">任务内容</label>
             <textarea
@@ -876,7 +893,7 @@ function Playground() {
                   {chatGptWebAvailable ? "" : "（当前关闭）"}
                 </option>
               </select>
-              <small className="muted">
+              <small className="field-help">
                 {executionChannel === "chatgpt_web"
                   ? "通过 VPS 上可见网页发送文本，网页登录失效或结构变化时会直接失败"
                   : chatGptWebAvailable
@@ -965,84 +982,91 @@ function Playground() {
                 必须返回可提取的网页来源
               </label>
               <small className="muted">
-                不读取既有记忆、自定义指令或插件；网页通道恢复前仍保持关闭
+                不读取既有记忆、自定义指令或插件；登录异常或界面变化时停止调用
               </small>
             </div>
           ) : null}
-          {executionChannel === "codex" ? (
-            <>
+          <Disclosure
+            title={`高级设置 · ${executionChannel === "codex" ? (permissionPreset === "full" ? "隔离区完全访问" : permissionPreset === "confirm" ? "执行前确认" : "受限模式") : "网页受限模式"}`}
+            open={searchParams.get("session") ? true : undefined}
+          >
+            <div className="form-stack">
+              {executionChannel === "codex" ? (
+                <>
+                  <div className="field">
+                    <label htmlFor="permission-preset">执行权限</label>
+                    <select
+                      id="permission-preset"
+                      value={permissionPreset}
+                      onChange={(event) =>
+                        setPermissionPreset(event.target.value as "restricted" | "confirm" | "full")
+                      }
+                    >
+                      <option value="full">隔离区完全访问（默认）</option>
+                      <option value="confirm">执行前确认</option>
+                      <option value="restricted">受限模式</option>
+                    </select>
+                    <small className="muted">
+                      {permissionPreset === "full"
+                        ? "可写本次一次性工作区并访问公开互联网，不会读取宿主机、凭据或其他调用"
+                        : permissionPreset === "confirm"
+                          ? "权限范围与隔离区完全访问相同，但必须先在权限确认页面授权"
+                          : "只能读取本次任务工作区，不能联网或写入文件"}
+                    </small>
+                  </div>
+                  <div className="form-grid">
+                    <div className="field">
+                      <label htmlFor="session-mode">会话模式</label>
+                      <select
+                        id="session-mode"
+                        value={sessionMode}
+                        onChange={(event) =>
+                          setSessionMode(event.target.value as "ephemeral" | "persistent")
+                        }
+                      >
+                        <option value="ephemeral">一次性（默认）</option>
+                        <option value="persistent">保留会话</option>
+                      </select>
+                      <small className="muted">
+                        {sessionMode === "persistent"
+                          ? "调用成功后生成可继续的对话线程，24 小时内有效，会出现在「会话线程」页面"
+                          : "调用结束后不保留任何上下文，每次都从零开始"}
+                      </small>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="session-key">继续线程（可选）</label>
+                      <input
+                        id="session-key"
+                        value={sessionKey}
+                        onChange={(event) => setSessionKey(event.target.value)}
+                        placeholder="粘贴线程标识，接着上次继续"
+                        autoComplete="off"
+                      />
+                      <small className="muted">
+                        在「会话线程」页面点「继续对话」会自动填入，也可以手动粘贴
+                      </small>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="muted">
+                  网页任务固定使用全新非个性化临时对话，不保留 Router 会话线程，也不访问任务工作区
+                </p>
+              )}
               <div className="field">
-                <label htmlFor="permission-preset">执行权限</label>
-                <select
-                  id="permission-preset"
-                  value={permissionPreset}
-                  onChange={(event) =>
-                    setPermissionPreset(event.target.value as "restricted" | "confirm" | "full")
+                <label htmlFor="schema">可选 JSON Schema</label>
+                <textarea
+                  id="schema"
+                  rows={6}
+                  placeholder={
+                    '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}'
                   }
-                >
-                  <option value="full">隔离区完全访问（默认）</option>
-                  <option value="confirm">执行前确认</option>
-                  <option value="restricted">受限模式</option>
-                </select>
-                <small className="muted">
-                  {permissionPreset === "full"
-                    ? "可写本次一次性工作区并访问公开互联网，不会读取宿主机、凭据或其他调用"
-                    : permissionPreset === "confirm"
-                      ? "权限范围与隔离区完全访问相同，但必须先在权限确认页面授权"
-                      : "只能读取本次任务工作区，不能联网或写入文件"}
-                </small>
+                  value={schemaText}
+                  onChange={(event) => setSchemaText(event.target.value)}
+                />
               </div>
-              <div className="form-grid">
-                <div className="field">
-                  <label htmlFor="session-mode">会话模式</label>
-                  <select
-                    id="session-mode"
-                    value={sessionMode}
-                    onChange={(event) =>
-                      setSessionMode(event.target.value as "ephemeral" | "persistent")
-                    }
-                  >
-                    <option value="ephemeral">一次性（默认）</option>
-                    <option value="persistent">保留会话</option>
-                  </select>
-                  <small className="muted">
-                    {sessionMode === "persistent"
-                      ? "调用成功后生成可继续的对话线程，24 小时内有效，会出现在「会话线程」页面"
-                      : "调用结束后不保留任何上下文，每次都从零开始"}
-                  </small>
-                </div>
-                <div className="field">
-                  <label htmlFor="session-key">继续线程（可选）</label>
-                  <input
-                    id="session-key"
-                    value={sessionKey}
-                    onChange={(event) => setSessionKey(event.target.value)}
-                    placeholder="粘贴线程标识，接着上次继续"
-                    autoComplete="off"
-                  />
-                  <small className="muted">
-                    在「会话线程」页面点「继续对话」会自动填入，也可以手动粘贴
-                  </small>
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className="muted">
-              网页任务固定使用全新普通对话，不保留 Router 会话线程，也不访问任务工作区
-            </p>
-          )}
-          <div className="field">
-            <label htmlFor="schema">可选 JSON Schema</label>
-            <textarea
-              id="schema"
-              rows={6}
-              placeholder={
-                '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}'
-              }
-              value={schemaText}
-              onChange={(event) => setSchemaText(event.target.value)}
-            />
-          </div>
+            </div>
+          </Disclosure>
           <button
             className="button primary"
             disabled={busy || !objective.trim()}
@@ -1065,45 +1089,47 @@ function Playground() {
           </div>
           {job ? (
             <>
-              <dl className="detail-list">
-                <div>
-                  <dt>任务编号</dt>
-                  <dd>
-                    <code>{job.id}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>实际模型</dt>
-                  <dd>{job.route?.model ?? "等待路由"}</dd>
-                </div>
-                <div>
-                  <dt>API 等效成本</dt>
-                  <dd>
-                    {job.usage.measurementStatus === "unavailable"
-                      ? "网页未提供可靠数据"
-                      : formatUsd(apiEquivalentUsd(job))}
-                  </dd>
-                </div>
-                <div>
-                  <dt>单次额度变化</dt>
-                  <dd>
-                    {job.usage.measurementStatus === "unavailable"
-                      ? "网页未提供可靠数据"
-                      : formatQuotaDelta(job.usage.quotaWindowDeltaPercent)}
-                  </dd>
-                </div>
-                {job.task.executionChannel === "chatgpt_web" ? (
+              <Disclosure title="任务详情与用量">
+                <dl className="detail-list">
                   <div>
-                    <dt>尝试次数</dt>
+                    <dt>任务编号</dt>
                     <dd>
-                      {job.usage.attemptCount ?? 1} 次
-                      {(job.usage.retryCount ?? 0) > 0
-                        ? `，其中安全重试 ${job.usage.retryCount} 次`
-                        : "，没有重试"}
+                      <code>{job.id}</code>
                     </dd>
                   </div>
-                ) : null}
-              </dl>
+                  <div>
+                    <dt>实际模型</dt>
+                    <dd>{job.route?.model ?? "等待路由"}</dd>
+                  </div>
+                  <div>
+                    <dt>API 等效成本</dt>
+                    <dd>
+                      {job.usage.measurementStatus === "unavailable"
+                        ? "网页未提供可靠数据"
+                        : formatUsd(apiEquivalentUsd(job))}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>单次额度变化</dt>
+                    <dd>
+                      {job.usage.measurementStatus === "unavailable"
+                        ? "网页未提供可靠数据"
+                        : formatQuotaDelta(job.usage.quotaWindowDeltaPercent)}
+                    </dd>
+                  </div>
+                  {job.task.executionChannel === "chatgpt_web" ? (
+                    <div>
+                      <dt>尝试次数</dt>
+                      <dd>
+                        {job.usage.attemptCount ?? 1} 次
+                        {(job.usage.retryCount ?? 0) > 0
+                          ? `，其中安全重试 ${job.usage.retryCount} 次`
+                          : "，没有重试"}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </Disclosure>
               {job.task.sessionKey ? (
                 <div className="review-summary">
                   <div className="row">
@@ -1137,7 +1163,9 @@ function Playground() {
               </pre>
             </>
           ) : (
-            <p className="muted">提交后会在这里显示状态、模型、用量和输出</p>
+            <EmptyState title="准备好接收结果">
+              在左侧填写任务并提交，执行进度和结果会显示在这里。
+            </EmptyState>
           )}
         </section>
       </div>
@@ -1799,13 +1827,40 @@ function ChatGptWebChannel() {
     }
   }
 
+  if (!status) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="实验执行通道"
+          title="ChatGPT 网页通道"
+          copy="管理网页账号、分配优先级并检查可用性。账号通过单次探针后才能接单。"
+        />
+        <ErrorNotice message={error} />
+        <section className="card" role="status" aria-live="polite">
+          <EmptyState title={error ? "状态暂不可用" : "正在读取账号状态"}>
+            {error
+              ? "请稍后重试，尚未取得的状态不会显示为关闭或故障。"
+              : "正在连接控制面，请稍候。"}
+          </EmptyState>
+          {error ? (
+            <button className="button" onClick={() => void refresh()}>
+              重新读取
+            </button>
+          ) : null}
+        </section>
+      </>
+    );
+  }
+
   const channelState = status?.configuredEnabled
     ? status.circuitState === "closed"
-      ? "实验可用"
+      ? "已开启"
       : "自动暂停"
     : activeRun
       ? "诊断中"
-      : "当前关闭";
+      : status
+        ? "当前关闭"
+        : "正在加载";
   const retryMessage =
     status?.rateLimitState === "cooldown" && status.retryAfter
       ? `下次检查 ${formatDate(status.cooldownUntil)}，约 ${Math.ceil(status.retryAfter / 60)} 分钟后`
@@ -1823,7 +1878,7 @@ function ChatGptWebChannel() {
       <PageHeading
         eyebrow="实验执行通道"
         title="ChatGPT 网页通道"
-        copy="查看可见浏览器、单页面代理和真实验收状态；单次真实探针通过前不会接收生产调用"
+        copy="管理网页账号、分配优先级并检查可用性。账号通过单次探针后才能接单。"
         action={
           <a
             className="button"
@@ -1844,7 +1899,7 @@ function ChatGptWebChannel() {
         </article>
         <article className="metric">
           <small>浏览器登录</small>
-          <strong>{status?.authenticated ? "正常" : "需要处理"}</strong>
+          <strong>{status ? (status.authenticated ? "正常" : "需要处理") : "正在加载"}</strong>
           <span className="muted">页面 {status?.pageReady ? "可识别" : "未就绪"}</span>
         </article>
         <article className="metric">
@@ -1853,7 +1908,7 @@ function ChatGptWebChannel() {
           <span className="muted">扩展 {status?.extensionConnected ? "已连接" : "未连接"}</span>
         </article>
         <article className="metric">
-          <small>单页面代理</small>
+          <small>当前并发</small>
           <strong>
             {status?.activeTabs ?? 0}/{status?.maximumConcurrency ?? 1}
           </strong>
@@ -1874,7 +1929,7 @@ function ChatGptWebChannel() {
         </article>
       </section>
 
-      <section className="card console-section">
+      <Disclosure title="浏览器运行详情" className="console-section">
         <div className="row">
           <div>
             <span className="card-index">DOM 桥接 {status?.adapterVersion ?? "—"}</span>
@@ -1886,7 +1941,7 @@ function ChatGptWebChannel() {
           {status?.slots.length ? (
             status.slots.map((slot, index) => (
               <article className="metric" key={slot.slotId}>
-                <small>唯一工作页面 {index + 1}</small>
+                <small>工作页面 {index + 1}</small>
                 <strong>{SLOT_LABELS[slot.state]}</strong>
                 <span className="muted">{slot.submitted ? "本轮已经发送" : "本轮尚未发送"}</span>
               </article>
@@ -1895,9 +1950,9 @@ function ChatGptWebChannel() {
             <p className="muted">还没有收到页面代理状态</p>
           )}
         </div>
-      </section>
+      </Disclosure>
 
-      <section className="card console-section">
+      <section className="card console-section account-pool">
         <div className="row">
           <div>
             <span className="card-index">固定账号槽位</span>
@@ -1906,7 +1961,7 @@ function ChatGptWebChannel() {
           <span className="muted">每个槽位最多一个并发；套餐为人工标签</span>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="accounts-table">
             <thead>
               <tr>
                 <th>槽位</th>
@@ -1922,29 +1977,29 @@ function ChatGptWebChannel() {
               {status?.accounts?.length ? (
                 status.accounts.map((account) => (
                   <tr key={account.accountId}>
-                    <td>
-                      {account.label}
-                      <br />
-                      <span className="muted">{account.accountId}</span>
-                      <br />
-                      <select
-                        aria-label={`${account.accountId} 调度优先级`}
-                        value={account.priority ?? 0}
-                        disabled={busy}
-                        onChange={(event) =>
-                          void updateAccount(account, { priority: Number(event.target.value) })
-                        }
-                      >
-                        <option value={0}>均衡账号</option>
-                        <option value={100}>主力账号</option>
-                        {account.priority != null &&
-                          account.priority !== 0 &&
-                          account.priority !== 100 && (
-                            <option value={account.priority}>优先级 {account.priority}</option>
-                          )}
-                      </select>
+                    <td data-label="账号">
+                      <div className="account-cell">
+                        <strong>{account.label}</strong>
+                        <code>{account.accountId}</code>
+                        <select
+                          aria-label={`${account.accountId} 调度优先级`}
+                          value={account.priority ?? 0}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void updateAccount(account, { priority: Number(event.target.value) })
+                          }
+                        >
+                          <option value={0}>均衡账号</option>
+                          <option value={100}>主力账号</option>
+                          {account.priority != null &&
+                            account.priority !== 0 &&
+                            account.priority !== 100 && (
+                              <option value={account.priority}>优先级 {account.priority}</option>
+                            )}
+                        </select>
+                      </div>
                     </td>
-                    <td>
+                    <td data-label="套餐">
                       <select
                         value={account.plan}
                         disabled={busy}
@@ -1964,35 +2019,36 @@ function ChatGptWebChannel() {
                         )}
                       </select>
                     </td>
-                    <td>
+                    <td data-label="状态">
                       {ACCOUNT_STATE_LABELS[account.state]}
                       <br />
                       <span className="muted">{account.enabled ? "已加入池" : "未加入池"}</span>
                     </td>
-                    <td>
+                    <td data-label="登录与隔离">
                       {account.authenticated ? "已登录" : "未登录"} ·{" "}
                       {account.sandboxVerified ? "沙箱正常" : "待验证"}
                     </td>
-                    <td>
+                    <td data-label="探针">
                       {account.lastProbePassed === true
                         ? "通过"
                         : account.lastProbePassed === false
                           ? "未通过"
                           : "未运行"}
                     </td>
-                    <td>
+                    <td data-label="入口">
                       <a
+                        className="button compact"
                         href={`${account.vncPath}vnc.html?autoconnect=true&resize=remote&path=${account.vncPath.slice(1, -1)}/websockify`}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        VNC
+                        登录窗口
                       </a>
                     </td>
-                    <td>
+                    <td data-label="操作">
                       <div className="action-row">
                         <button
-                          className="button"
+                          className="button compact"
                           disabled={Boolean(activeRun) || busy}
                           onClick={() => {
                             setConfirmAccountId(account.accountId);
@@ -2002,7 +2058,7 @@ function ChatGptWebChannel() {
                           检查
                         </button>
                         <button
-                          className="button primary"
+                          className="button compact"
                           disabled={Boolean(activeRun) || busy}
                           onClick={() => {
                             setConfirmAccountId(account.accountId);
@@ -2012,7 +2068,7 @@ function ChatGptWebChannel() {
                           单探针
                         </button>
                         <button
-                          className="button"
+                          className="button compact"
                           disabled={busy || (!account.enabled && !account.qualified)}
                           onClick={() => void updateAccount(account, { enabled: !account.enabled })}
                         >
@@ -2035,13 +2091,15 @@ function ChatGptWebChannel() {
             </tbody>
           </table>
         </div>
-        <p className="muted">
-          系统不会从页面、Cookie、额度或响应速度推断
-          Plus/Pro；只记录匿名槽位标签，登录请在对应受保护 VNC 页面手动完成。
-        </p>
+        <Disclosure title="账号管理说明" className="console-section">
+          <p className="muted">
+            系统不会从页面、Cookie、额度或响应速度推断
+            Plus/Pro；只记录匿名槽位标签，登录请在对应受保护 VNC 页面手动完成。
+          </p>
+        </Disclosure>
       </section>
 
-      <section className="card console-section">
+      <Disclosure title="管理员验收与诊断" className="console-section">
         <span className="card-index">管理员验收</span>
         <h3>运行真实网页门禁</h3>
         <p className="muted">
@@ -2066,7 +2124,7 @@ function ChatGptWebChannel() {
           </p>
         ) : null}
         <p className="muted">单次真实探针是启用网页通道的最低门槛；其余套件用于可选强化观察。</p>
-      </section>
+      </Disclosure>
 
       <section className="console-section">
         <div className="row">
@@ -2318,7 +2376,7 @@ function Models() {
           </article>
         ))}
       </section>
-      <section className="card console-section">
+      <Disclosure title="计量口径与计算公式" className="console-section">
         <h3>计量口径</h3>
         <p className="muted">每条公式下方列出变量、单位和计算范围</p>
         <Formula
@@ -2455,7 +2513,7 @@ function Models() {
             <dd>需要月末总 Credits 和订阅费用才能结算，系统不会用不完整数据伪造单项成本</dd>
           </div>
         </dl>
-      </section>
+      </Disclosure>
       <NativeDialog open={toggleTarget != null} onClose={() => setToggleTarget(null)}>
         <form
           method="dialog"
@@ -3185,7 +3243,6 @@ export function ConsoleApp({ section = "overview" }: { section?: string }) {
     );
   return (
     <main id="main" className="console-main">
-      <div className="private-banner">受保护控制台 · Authentik 浏览器会话已经生效</div>
       {content}
     </main>
   );

@@ -12,7 +12,12 @@ export default function ConsoleLayout({ children }: Readonly<{ children: React.R
           </Link>
           <div className="row console-account">
             <span className="status-chip">
-              <span className="status-dot" /> <span className="status-text">Authentik 已保护</span>
+              <span className="status-dot" />
+              <span className="status-text">
+                {process.env.NEXT_PUBLIC_SYNTHETIC_DEMO === "true"
+                  ? "界面预览"
+                  : "Authentik 已保护"}
+              </span>
             </span>
             <a className="button compact" href="/_aialra_auth/logout">
               退出
