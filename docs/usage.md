@@ -384,6 +384,11 @@ enabled_tools = ["delegate_codex", "delegate_chatgpt", "preview_route", "job_sta
 | `idempotency_conflict`          | 同一键值对应不同请求摘要                 | 为新业务请求生成新键，保留旧键用于原请求重试       |
 | `codex_capacity_constrained`    | 自动 Terra 或 Sol 任务遇到 85% 配额水位  | 显式指定必要模型，或等待当前额度窗口重置           |
 | `codex_capacity_reserved`       | 自动 Terra 或 Sol 任务遇到 95% 配额水位  | 仅提交必要的显式任务，或等待额度窗口重置           |
+| `codex_auth_expired`            | VPS 上的 Codex 登录令牌已经过期          | 重新完成 Codex 登录后再创建新任务                  |
+| `codex_auth_failed`             | Codex 上游拒绝当前授权                   | 检查 VPS 上的 Codex 登录状态                       |
+| `codex_quota_exhausted`         | Codex 当前额度已经耗尽                   | 等待额度窗口重置或切换有效的上游授权               |
+| `codex_provider_timeout`        | Codex 上游在任务截止时间内没有完成       | 查询原任务状态；提交状态不明时不要创建重复任务     |
+| `codex_provider_unavailable`    | Codex 上游或 App Server 暂时不可用       | 保留原任务记录，恢复服务后创建新的幂等任务         |
 | `provider_unavailable`          | Worker 没有启用 Codex Adapter            | 检查 Codex 登录和 Adapter 开关                     |
 | `invalid_validation_rule`       | 旧版验收规则没有使用允许的前缀           | 改用结构化 `checks`，或使用 `equals:`、`contains:` |
 | `validation_failed`             | 模型输出没有通过明确的 Schema 或检查规则 | 查看验证消息，修正输入或规则后重新调用             |

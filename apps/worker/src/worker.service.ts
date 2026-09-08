@@ -551,14 +551,12 @@ export class WorkerService {
         throw new Error("model_disabled");
       }
       const catalog = await this.repository.latestModelCatalog();
+      const providerModels = (catalog?.models ?? []).filter(
+        (model) => (model.provider ?? "codex") === route.provider,
+      );
       if (
-        catalog &&
-        !catalog.models.some(
-          (model) =>
-            model.id === route.model &&
-            model.available &&
-            (model.provider ?? "codex") === route.provider,
-        )
+        providerModels.length > 0 &&
+        !providerModels.some((model) => model.id === route.model && model.available)
       ) {
         throw new Error("model_unavailable");
       }

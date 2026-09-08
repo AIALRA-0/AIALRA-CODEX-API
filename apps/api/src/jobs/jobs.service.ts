@@ -57,14 +57,12 @@ export class JobsService {
       });
     }
     const catalog = await this.repository.latestModelCatalog();
+    const providerModels = (catalog?.models ?? []).filter(
+      (candidate) => (candidate.provider ?? "codex") === provider,
+    );
     if (
-      catalog &&
-      !catalog.models.some(
-        (candidate) =>
-          candidate.id === modelId &&
-          candidate.available &&
-          (candidate.provider ?? "codex") === provider,
-      )
+      providerModels.length > 0 &&
+      !providerModels.some((candidate) => candidate.id === modelId && candidate.available)
     ) {
       throw new ConflictException({
         error: { code: "model_unavailable", message: "当前执行通道无法使用该模型。" },

@@ -15,7 +15,11 @@ import {
 import { z } from "zod";
 
 import { codexEnvironment } from "./environment.js";
-import { runnerPublicMessage } from "./public-error.js";
+import {
+  classifyRunnerExecutionError,
+  runnerPublicMessage,
+  type RunnerExecutionError,
+} from "./public-error.js";
 
 const InvocationSchema = z
   .object({
@@ -32,6 +36,8 @@ const maxConcurrency = Math.max(1, Number(process.env.RUNNER_MAX_CONCURRENCY ?? 
 let activeInvocations = 0;
 let currentQuota: QuotaSnapshot | null = null;
 let currentModels: ModelCatalogSnapshot | null = null;
+let currentQuotaError: RunnerExecutionError | null = null;
+let currentModelsError: RunnerExecutionError | null = null;
 
 function readRequiredSecret(name: string): string {
   const secretPath = process.env[`${name}_FILE`];
@@ -60,8 +66,29 @@ async function refreshRuntimeState(): Promise<void> {
     appServer.readQuota(),
     appServer.listModels(),
   ]);
-  if (quotaResult.status === "fulfilled") currentQuota = quotaResult.value;
-  if (modelResult.status === "fulfilled") currentModels = modelResult.value;
+  if (quotaResult.status === "fulfilled") {
+    currentQuota = quotaResult.value;
+    currentQuotaError = null;
+  } else {
+    currentQuota = null;
+    currentQuotaError = classifyRunnerExecutionError(quotaResult.reason);
+  }
+  if (modelResult.status === "fulfilled") {
+    currentModels = modelResult.value;
+    currentModelsError = null;
+  } else {
+    currentModels = null;
+    currentModelsError = classifyRunnerExecutionError(modelResult.reason);
+  }
+  const sharedAuthError = [currentQuotaError, currentModelsError].find((error) =>
+    error?.code.startsWith("codex_auth_"),
+  );
+  if (sharedAuthError) {
+    currentQuota = null;
+    currentModels = null;
+    currentQuotaError = sharedAuthError;
+    currentModelsError = sharedAuthError;
+  }
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -114,7 +141,7 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
     });
     writeLine(response, { type: "result", result });
     response.end();
-  } catch {
+  } catch (error) {
     if (!response.headersSent) {
       response.writeHead(400, { "content-type": "application/json" });
       response.end(
@@ -123,9 +150,10 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
         }),
       );
     } else {
+      const publicError = classifyRunnerExecutionError(error);
       writeLine(response, {
         type: "error",
-        error: { code: "runner_failed", message: runnerPublicMessage("execution") },
+        error: publicError,
       });
       response.end();
     }
@@ -138,17 +166,18 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
 async function quota(response: ServerResponse): Promise<void> {
   try {
     if (!currentQuota) await refreshRuntimeState();
-    if (!currentQuota) throw new Error("quota_unavailable");
+    if (!currentQuota) throw currentQuotaError ?? new Error("quota_unavailable");
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     response.end(JSON.stringify(currentQuota));
-  } catch {
+  } catch (error) {
+    const publicError =
+      error && typeof error === "object" && "code" in error && "message" in error
+        ? (error as RunnerExecutionError)
+        : { code: "quota_unavailable", message: runnerPublicMessage("quota") };
     response.writeHead(503, { "content-type": "application/json", "retry-after": "5" });
     response.end(
       JSON.stringify({
-        error: {
-          code: "quota_unavailable",
-          message: runnerPublicMessage("quota"),
-        },
+        error: publicError,
       }),
     );
   }
@@ -157,17 +186,18 @@ async function quota(response: ServerResponse): Promise<void> {
 async function models(response: ServerResponse): Promise<void> {
   try {
     if (!currentModels) await refreshRuntimeState();
-    if (!currentModels) throw new Error("model_catalog_unavailable");
+    if (!currentModels) throw currentModelsError ?? new Error("model_catalog_unavailable");
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     response.end(JSON.stringify(currentModels));
-  } catch {
+  } catch (error) {
+    const publicError =
+      error && typeof error === "object" && "code" in error && "message" in error
+        ? (error as RunnerExecutionError)
+        : { code: "model_catalog_unavailable", message: runnerPublicMessage("models") };
     response.writeHead(503, { "content-type": "application/json", "retry-after": "5" });
     response.end(
       JSON.stringify({
-        error: {
-          code: "model_catalog_unavailable",
-          message: runnerPublicMessage("models"),
-        },
+        error: publicError,
       }),
     );
   }
@@ -179,7 +209,13 @@ const codexHome = resolve(process.env.CODEX_HOME ?? join(homedir(), ".codex"));
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/healthz") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ status: "ok", service: "aialra-model-router-runner" }));
+    response.end(
+      JSON.stringify({
+        status: "ok",
+        service: "aialra-model-router-runner",
+        codexRuntimeError: currentModelsError?.code ?? currentQuotaError?.code ?? null,
+      }),
+    );
     return;
   }
   if (!isAuthorized(request)) {
