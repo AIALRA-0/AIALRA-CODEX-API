@@ -94,6 +94,17 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
 }
 
 describe("visible thinking depth menu", () => {
+  it("does not activate a second gesture after click has opened the menu", async () => {
+    const h = harness();
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+    expect(h.control.dispatchEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a model submenu as a single thinking depth", async () => {
+    const h = harness(["High", "Latest", "GPT-5.6 Sol"]);
+    expect(await h.api.discoverThinkingDepths()).toEqual([]);
+  });
+
   it("opens pointer-down triggers with one complete gesture and no message submission", async () => {
     const h = harness();
     const open = h.control.click;

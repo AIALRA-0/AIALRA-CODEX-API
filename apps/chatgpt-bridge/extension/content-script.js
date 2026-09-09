@@ -494,9 +494,10 @@ async function readThinkingDepthChoices(menu, deadline) {
   if (!initial) {
     if (menu && [...menu.querySelectorAll("[role='slider']")].some(isDepthControlVisible))
       return [];
-    return thinkingDepthOptions(menu).filter(
-      ({ label }) => !/^(?:latest|gpt[-\s]|chatgpt\b)/i.test(label),
-    );
+    const options = thinkingDepthOptions(menu);
+    // A model submenu may contain the current depth but is not a depth catalog.
+    if (options.some(({ label }) => /^(?:latest|gpt[-\s]|chatgpt\b)/i.test(label))) return [];
+    return options;
   }
   const control = thinkingDepthControl();
   const choices = [];
@@ -519,7 +520,18 @@ async function readThinkingDepthChoices(menu, deadline) {
   return choices;
 }
 
-function clickThinkingDepthControl(control) {
+async function clickThinkingDepthControl(control) {
+  control.click();
+  await waitForMutation(50);
+  if (
+    control.getAttribute("aria-expanded") === "true" ||
+    [
+      ...document.querySelectorAll(
+        "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog']",
+      ),
+    ].some(isDepthControlVisible)
+  )
+    return;
   const rectangle = control.getBoundingClientRect();
   const point = {
     clientX: (rectangle.left ?? 0) + rectangle.width / 2,
@@ -528,8 +540,8 @@ function clickThinkingDepthControl(control) {
     bubbles: true,
     cancelable: true,
   };
-  // Match the browser's input sequence. Pointer-down menu triggers do not
-  // react to HTMLElement.click() or an untrusted Enter default action alone.
+  // Fall back only if click did not open anything. Combining both activations
+  // can open the nested model menu after React replaces the original trigger.
   control.dispatchEvent(
     new PointerEvent("pointerdown", {
       ...point,
@@ -550,7 +562,6 @@ function clickThinkingDepthControl(control) {
     }),
   );
   control.dispatchEvent(new MouseEvent("mouseup", { ...point, buttons: 0 }));
-  control.click();
 }
 
 async function discoverThinkingDepths() {
