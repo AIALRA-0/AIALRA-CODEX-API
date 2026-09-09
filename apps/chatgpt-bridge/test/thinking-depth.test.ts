@@ -215,6 +215,24 @@ function sliderHarness() {
 }
 
 describe("accessible thinking effort slider", () => {
+  it("prefers the slider over nested model options and reads the updated composer label", async () => {
+    const h = sliderHarness();
+    const attribute = h.slider.getAttribute;
+    h.slider.getAttribute = (key) => (key === "aria-valuetext" ? null : attribute(key));
+    const modelOptions = ["Latest", "GPT-5.6 Sol", "GPT-5.5"].map((innerText) => ({
+      innerText,
+      getBoundingClientRect: () => ({ width: 100, height: 30 }),
+      getAttribute: () => null,
+      hasAttribute: () => false,
+    }));
+    h.menu.querySelectorAll = (selector) =>
+      selector === "[role='slider']" ? [h.slider] : selector === "button" ? [] : modelOptions;
+    const models = await h.api.discoverThinkingDepths();
+    expect(models[0].webThinkingDepths).toEqual(h.labels);
+    expect(models[0].defaultWebThinkingDepth).toBe("Medium");
+    expect(h.value()).toBe(1);
+  });
+
   it("reads all actual labels and restores the original selection without native submission", async () => {
     const h = sliderHarness();
     const models = await h.api.discoverThinkingDepths();

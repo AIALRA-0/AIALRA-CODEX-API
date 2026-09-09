@@ -292,19 +292,48 @@ async function ensurePool() {
   return poolMutation;
 }
 
+async function probeSlot(slot, discoverModels) {
+  const page = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: false }, 2);
+  if (
+    !discoverModels ||
+    activeJobs.size ||
+    slot.state !== "idle" ||
+    slot.depthDiscoveryBusy ||
+    Date.now() - (slot.lastDepthDiscoveryAt ?? 0) < 60_000 ||
+    !page?.pageReady ||
+    !page.authenticated ||
+    page.failureCode ||
+    !page.diagnostics?.freshConversation
+  )
+    return page;
+  slot.depthDiscoveryBusy = true;
+  let previous = null;
+  let windowId = null;
+  try {
+    const tab = await chrome.tabs.get(slot.tabId);
+    windowId = tab.windowId;
+    [previous] = await chrome.tabs.query({ active: true, windowId });
+    if (activeJobs.size || slot.state !== "idle") return page;
+    slot.lastDepthDiscoveryAt = Date.now();
+    if (previous?.id !== slot.tabId) await chrome.tabs.update(slot.tabId, { active: true });
+    return await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: true }, 2);
+  } finally {
+    slot.depthDiscoveryBusy = false;
+    // Never steal focus from a task or from a tab the administrator chose meanwhile.
+    if (previous?.id && previous.id !== slot.tabId && !activeJobs.size && slot.state === "idle") {
+      const [current] = await chrome.tabs.query({ active: true, windowId });
+      if (current?.id === slot.tabId)
+        await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
+    }
+  }
+}
+
 async function probe(discoverModels = false) {
   await ensurePool();
   const readyPages = [];
   for (const slot of slots.values()) {
     try {
-      const result = await sendToTab(
-        slot.tabId,
-        {
-          type: "aialra.probe",
-          discoverModels: discoverModels && activeJobs.size === 0 && slot.state === "idle",
-        },
-        2,
-      );
+      const result = await probeSlot(slot, discoverModels);
       if (result) readyPages.push({ slot, result });
     } catch {
       // A loading or quarantined tab is represented by its slot state

@@ -448,12 +448,15 @@ function thinkingDepthSlider(menu) {
   return { element, minimum, maximum, value };
 }
 
-function thinkingDepthSliderLabel(menu, slider) {
+function thinkingDepthSliderLabel(menu, slider, control = thinkingDepthControl()) {
   const accessible = slider.element.getAttribute("aria-valuetext")?.trim();
   const buttons = [...menu.querySelectorAll("button")].filter(
     (element) => isDepthControlVisible(element) && !depthControlDisabled(element),
   );
-  const label = accessible || (buttons.length === 1 ? visibleText(buttons[0]).trim() : "");
+  const label =
+    accessible ||
+    visibleText(control).trim() ||
+    (buttons.length === 1 ? visibleText(buttons[0]).trim() : "");
   return label && label.length <= 64 && !/[\r\n@]|https?:|\//i.test(label) ? label : null;
 }
 
@@ -477,10 +480,15 @@ async function moveThinkingDepthSlider(menu, target, deadline) {
 }
 
 async function readThinkingDepthChoices(menu, deadline) {
-  const options = thinkingDepthOptions(menu);
-  if (options.length) return options;
   const initial = thinkingDepthSlider(menu);
-  if (!initial) return [];
+  if (!initial) {
+    if (menu && [...menu.querySelectorAll("[role='slider']")].some(isDepthControlVisible))
+      return [];
+    return thinkingDepthOptions(menu).filter(
+      ({ label }) => !/^(?:latest|gpt[-\s]|chatgpt\b)/i.test(label),
+    );
+  }
+  const control = thinkingDepthControl();
   const choices = [];
   let restored = false;
   try {
@@ -488,7 +496,7 @@ async function readThinkingDepthChoices(menu, deadline) {
       if (!(await moveThinkingDepthSlider(menu, value, deadline))) return [];
       await waitForMutation(50);
       const current = thinkingDepthSlider(menu);
-      const label = current ? thinkingDepthSliderLabel(menu, current) : null;
+      const label = current ? thinkingDepthSliderLabel(menu, current, control) : null;
       if (!label || choices.some((entry) => entry.label === label)) return [];
       choices.push({ label, selected: value === initial.value, sliderValue: value });
     }
@@ -624,7 +632,7 @@ async function configureThinkingDepth(invocation, deadline) {
       const selected = thinkingDepthOptions(menu).find(
         (entry) => entry.label === requested && entry.selected,
       );
-      const current = thinkingDepthControl();
+      const current = control.isConnected === false ? thinkingDepthControl() : control;
       const currentLabel = visibleText(current).split("\n")[0].trim();
       if (selected || currentLabel === requested) return;
       await waitForMutation(100);
