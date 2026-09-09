@@ -76,6 +76,27 @@ export const BrowserControlDiagnosticsSchema = z.object({
   toolsControlFound: z.boolean(),
   selectedSend: BrowserControlSchema.nullable(),
   sameRowControls: z.array(BrowserControlSchema).max(16),
+  thinkingDepthDiscovery: z
+    .object({
+      phase: z.enum([
+        "preflight",
+        "control_found",
+        "control_missing",
+        "menu_opened",
+        "menu_missing",
+        "discovered",
+        "choices_unreadable",
+      ]),
+      optionCount: z.number().int().nonnegative().optional(),
+      sliderCount: z.number().int().nonnegative().optional(),
+      buttonCount: z.number().int().nonnegative().optional(),
+      sliderMinimum: z.number().nullable().optional(),
+      sliderMaximum: z.number().nullable().optional(),
+      sliderValue: z.number().nullable().optional(),
+      sliderHasLabel: z.boolean().optional(),
+    })
+    .nullable()
+    .default(null),
   pageKind: z.enum(["home", "conversation", "other"]),
   surface: z.enum(["chat", "work", "unknown"]),
   assistantTurnCount: z.number().int().nonnegative(),

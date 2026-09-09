@@ -68,7 +68,7 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
   };
   const content = readFileSync(new URL("../extension/content-script.js", import.meta.url), "utf8");
   const functions = content.slice(
-    content.indexOf("function thinkingDepthControl()"),
+    content.indexOf("let thinkingDepthDiscoveryDiagnostics"),
     content.indexOf("function buttonByText("),
   );
   const api = runInNewContext(

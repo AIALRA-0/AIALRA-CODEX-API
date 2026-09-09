@@ -11,6 +11,7 @@ import { readVisibleResource } from "../lib/visible-resource";
 import { getJobResultSummary, type JobValidation } from "../lib/job-review";
 import { getRemainingPercent } from "../lib/quota-display";
 import { threadExpiryLabel, truncateSessionKey } from "../lib/thread-display";
+import { availableCodexEfforts, effortLabel } from "../lib/model-efforts";
 
 type JobStatus =
   | "accepted"
@@ -747,6 +748,8 @@ function Playground() {
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [modelsError, setModelsError] = useState("");
   const webDepths = models.find((item) => item.id === model)?.webThinkingDepths ?? [];
+  const codexEfforts = availableCodexEfforts(models, model);
+  const effortUnavailable = executionChannel === "codex" && !codexEfforts.includes(effort);
   const chatGptWebAvailable = models.some(
     (item) => item.provider === "chatgpt_web" && item.available && item.enabled,
   );
@@ -774,6 +777,7 @@ function Playground() {
     setBusy(true);
     setError("");
     try {
+      if (effortUnavailable) throw new Error("请先选择当前模型支持的推理等级");
       const responseSchema = schemaText.trim() ? JSON.parse(schemaText) : undefined;
       const deadlineMs =
         executionChannel === "chatgpt_web"
@@ -935,10 +939,16 @@ function Playground() {
                   value={effort}
                   onChange={(event) => setEffort(event.target.value)}
                 >
-                  <option value="low">低（low）</option>
-                  <option value="medium">中（medium）</option>
-                  <option value="high">高（high）</option>
-                  <option value="xhigh">超高（xhigh）</option>
+                  {codexEfforts.map((value) => (
+                    <option key={value} value={value}>
+                      {effortLabel(value)}
+                    </option>
+                  ))}
+                  {effortUnavailable ? (
+                    <option value={effort} disabled>
+                      {effortLabel(effort)}（当前不可用）
+                    </option>
+                  ) : null}
                 </select>
               </div>
             ) : (
@@ -1101,7 +1111,7 @@ function Playground() {
           </Disclosure>
           <button
             className="button primary"
-            disabled={busy || !objective.trim()}
+            disabled={busy || !objective.trim() || effortUnavailable}
             onClick={() => void submit()}
           >
             {busy

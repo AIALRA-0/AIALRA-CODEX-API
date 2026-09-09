@@ -147,11 +147,21 @@ export class ApiKeyGuard implements CanActivate {
       });
     }
 
+    const rateLimitTime = new Date();
     if (
-      !(await this.repository.consumeRateLimit(record.id, record.rateLimitPerMinute, new Date()))
+      !(await this.repository.consumeRateLimit(record.id, record.rateLimitPerMinute, rateLimitTime))
     ) {
       throw new HttpException(
-        { error: { code: "rate_limit_exceeded", message: "The API key rate limit was exceeded." } },
+        {
+          error: {
+            code: "rate_limit_exceeded",
+            message: "The API key rate limit was exceeded.",
+            retryAfter: Math.max(
+              1,
+              Math.ceil((60_000 - (rateLimitTime.getTime() % 60_000)) / 1_000),
+            ),
+          },
+        },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }

@@ -299,6 +299,8 @@ function modelControlForComposer() {
   return scoped ?? firstVisible(SELECTORS.modelButton) ?? buttonByText(MODEL_LABEL_PATTERN);
 }
 
+let thinkingDepthDiscoveryDiagnostics = null;
+
 function thinkingDepthControl() {
   const composer = first(SELECTORS.composer);
   const root = composer ? composerControlRoot(composer) : null;
@@ -474,13 +476,27 @@ async function readThinkingDepthChoices(menu, deadline) {
 }
 
 async function discoverThinkingDepths() {
+  thinkingDepthDiscoveryDiagnostics = { phase: "preflight" };
   if (activeJobId || !authenticated() || userMessages().length || first(SELECTORS.stop)) return [];
   const control = thinkingDepthControl();
+  thinkingDepthDiscoveryDiagnostics = { phase: control ? "control_found" : "control_missing" };
   if (!control) return [];
   let menu = null;
   try {
     menu = await openThinkingDepthMenu(control, (element) => element.click(), Date.now() + 1_500);
+    const slider = thinkingDepthSlider(menu);
+    thinkingDepthDiscoveryDiagnostics = {
+      phase: menu ? "menu_opened" : "menu_missing",
+      optionCount: thinkingDepthOptions(menu).length,
+      sliderCount: menu ? menu.querySelectorAll("[role='slider']").length : 0,
+      buttonCount: menu ? menu.querySelectorAll("button").length : 0,
+      sliderMinimum: slider?.minimum ?? null,
+      sliderMaximum: slider?.maximum ?? null,
+      sliderValue: slider?.value ?? null,
+      sliderHasLabel: Boolean(slider && thinkingDepthSliderLabel(menu, slider)),
+    };
     const options = await readThinkingDepthChoices(menu, Date.now() + 5_000);
+    thinkingDepthDiscoveryDiagnostics.phase = options.length ? "discovered" : "choices_unreadable";
     if (!options.length || options.length > 32) return [];
     return [
       {
@@ -1075,6 +1091,7 @@ function controlDiagnostics(expectedObjective = null) {
     ),
     selectedSend: composer ? describeControl(sendControlFor(composer)) : null,
     sameRowControls,
+    thinkingDepthDiscovery: thinkingDepthDiscoveryDiagnostics,
     pageKind: pageKind(),
     surface: currentSurface(),
     assistantTurnCount: assistantTurns.length,

@@ -8,28 +8,46 @@ import type { JobsService } from "../src/jobs/jobs.service.js";
 import type { AuthenticatedRequest } from "../src/common/api-key.guard.js";
 
 describe("web thinking depth compatibility", () => {
-  it.each(["chat", "responses"])("passes the discovered label intact through %s", async (kind) => {
-    const stop = new Error("captured-before-queue");
-    const create = vi.fn().mockRejectedValue(stop);
-    const jobs = { create } as unknown as JobsService;
-    const controller =
-      kind === "chat" ? new ChatCompletionsController(jobs) : new ResponsesController(jobs);
-    const body = {
-      model: "chatgpt-web.auto",
-      aialra: { thinking_depth: "Heavy" },
-      ...(kind === "chat"
-        ? { messages: [{ role: "user", content: "Synthetic" }] }
-        : { input: "Synthetic" }),
-    };
-    await expect(
-      controller.create(
-        body,
-        { header: () => "synthetic-key" } as unknown as AuthenticatedRequest,
-        {} as Response,
+  const cases = ["chat", "responses"].flatMap((kind) =>
+    ["chat", "search", "deep_research"].flatMap((mode) =>
+      ["Instant", "Medium", "High", "Extra High", "6 Pro"].flatMap((depth) =>
+        [false, true].map((stream) => ({ kind, mode, depth, stream })),
       ),
-    ).rejects.toBe(stop);
-    expect(create.mock.calls[0]?.[0].task.chatgptWeb.thinkingDepth).toBe("Heavy");
-  });
+    ),
+  );
+  it.each(cases)(
+    "maps $kind / $mode / $depth / stream=$stream without changing the label",
+    async ({ kind, mode, depth, stream }) => {
+      const stop = new Error("captured-before-queue");
+      const create = vi.fn().mockRejectedValue(stop);
+      const jobs = { create } as unknown as JobsService;
+      const controller =
+        kind === "chat" ? new ChatCompletionsController(jobs) : new ResponsesController(jobs);
+      const body = {
+        model: "chatgpt-web.auto",
+        stream,
+        aialra: { thinking_depth: depth, chatgpt_mode: mode },
+        ...(kind === "chat"
+          ? { messages: [{ role: "user", content: "Synthetic" }] }
+          : { input: "Synthetic" }),
+      };
+      await expect(
+        controller.create(
+          body,
+          { header: () => "synthetic-key" } as unknown as AuthenticatedRequest,
+          {} as Response,
+        ),
+      ).rejects.toBe(stop);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0]?.[0].task.chatgptWeb).toMatchObject({
+        thinkingDepth: depth,
+        mode,
+        temporaryChat: true,
+        personalized: false,
+        conversationMode: "temporary_per_request",
+      });
+    },
+  );
 
   it("keeps the field optional and rejects invalid labels", () => {
     const base = {

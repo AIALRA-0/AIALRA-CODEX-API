@@ -8,7 +8,7 @@ import {
   type JobRepository,
 } from "@aialra/persistence";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AppModule } from "../src/app.module.js";
 import { JOB_REPOSITORY } from "../src/tokens.js";
@@ -349,6 +349,28 @@ describe("AIALRA Model Router API", () => {
       .send({ decision: "denied", reason: "synthetic denial" })
       .expect(201);
     expect(denied.body.status).toBe("cancelled");
+  });
+
+  it("returns the API key retry delay in both the body and HTTP header", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "key-retry-after")
+      .send({ name: "Rate limit test", scopes: ["quota:read"], rateLimitPerMinute: 1 })
+      .expect(201);
+    const repository = app.get<JobRepository>(JOB_REPOSITORY);
+    const consume = vi.spyOn(repository, "consumeRateLimit").mockResolvedValue(false);
+    try {
+      const response = await request(app.getHttpServer())
+        .get("/api/v1/quota")
+        .set("Authorization", `Bearer ${created.body.key}`)
+        .expect(429);
+      expect(response.body.error.code).toBe("rate_limit_exceeded");
+      expect(response.body.error.retryAfter).toBeGreaterThanOrEqual(1);
+      expect(response.body.error.retryAfter).toBeLessThanOrEqual(60);
+      expect(response.headers["retry-after"]).toBe(String(response.body.error.retryAfter));
+    } finally {
+      consume.mockRestore();
+    }
   });
 
   it("enforces each API key execution ceiling", async () => {
