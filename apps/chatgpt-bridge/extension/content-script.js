@@ -658,14 +658,23 @@ async function configureThinkingDepth(invocation, deadline) {
       await readThinkingDepthChoices(menu, Math.min(deadline, Date.now() + 5_000))
     ).find((entry) => entry.label === requested);
     if (!option) throw new Error("chatgpt_thinking_depth_unavailable");
-    if (option.selected) return;
     if (option.sliderValue !== undefined) {
       const moved = await moveThinkingDepthSlider(menu, option.sliderValue, deadline);
-      const slider = thinkingDepthSlider(menu);
-      if (!moved || !slider || thinkingDepthSliderLabel(menu, slider) !== requested)
-        throw new Error("chatgpt_thinking_depth_unverified");
-      return;
+      // React can update aria-valuenow before the visible label. Require both
+      // to agree, but allow the label to render within the existing deadline.
+      const end = Math.min(deadline, Date.now() + 1_500);
+      while (moved && Date.now() < end) {
+        const slider = thinkingDepthSlider(menu);
+        if (
+          slider?.value === option.sliderValue &&
+          thinkingDepthSliderLabel(menu, slider) === requested
+        )
+          return;
+        await waitForMutation(50);
+      }
+      throw new Error("chatgpt_thinking_depth_unverified");
     }
+    if (option.selected) return;
     await nativeClick(option.element, invocation.jobId, "thinking_depth_option");
     const end = Math.min(deadline, Date.now() + 1_500);
     while (Date.now() < end) {

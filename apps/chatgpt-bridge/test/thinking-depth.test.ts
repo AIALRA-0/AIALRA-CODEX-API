@@ -247,6 +247,33 @@ function sliderHarness() {
 }
 
 describe("accessible thinking effort slider", () => {
+  it("waits for the visible label after the slider value updates", async () => {
+    const h = sliderHarness();
+    const attribute = h.slider.getAttribute;
+    let pendingLabel = "Medium";
+    let delayLabel = false;
+    const dispatch = h.slider.dispatchEvent.getMockImplementation()!;
+    h.slider.dispatchEvent.mockImplementation((event) => {
+      dispatch(event);
+      if (event.type !== "keydown") return;
+      const label = h.labels[h.value()]!;
+      if (delayLabel) setTimeout(() => (pendingLabel = label), 20);
+      else pendingLabel = label;
+      // Discovery finishes by restoring Medium, then configuration selects High.
+      if (h.value() === 1 && h.slider.dispatchEvent.mock.calls.length > 10) delayLabel = true;
+    });
+    h.slider.getAttribute = (key) => (key === "aria-valuetext" ? pendingLabel : attribute(key));
+    h.context.waitForMutation = () => new Promise((resolve) => setTimeout(resolve, 25));
+    await h.api.configureThinkingDepth(
+      { thinkingDepth: "High", jobId: "test" },
+      Date.now() + 5_000,
+    );
+    expect(delayLabel).toBe(true);
+    expect(h.value()).toBe(2);
+    expect(pendingLabel).toBe("High");
+    expect(h.native).toHaveBeenCalledTimes(1);
+  });
+
   it("retains a Pro badge rendered on a separate line of the slider label", async () => {
     const h = sliderHarness();
     const attribute = h.slider.getAttribute;
