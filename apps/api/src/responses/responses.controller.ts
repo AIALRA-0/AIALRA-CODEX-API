@@ -53,7 +53,7 @@ export class ResponsesController {
           ? 3_600_000
           : 600_000
         : 120_000);
-    const task = TaskContractSchema.parse({
+    const taskResult = TaskContractSchema.safeParse({
       objective: [value.instructions, inputToText(value.input)].filter(Boolean).join("\n\n"),
       taskKind: value.text?.format?.type === "json_schema" ? "bounded" : "general",
       expectedOutput: "Return the final response for the caller.",
@@ -93,6 +93,8 @@ export class ResponsesController {
         maxAttempts: executionChannel === "chatgpt_web" ? 1 : 2,
       },
     });
+    if (!taskResult.success) throw zodHttpError(taskResult.error);
+    const task = taskResult.data;
     const job = await this.jobs.create(
       { task, metadata: value.metadata },
       request.callerId ?? "unknown",

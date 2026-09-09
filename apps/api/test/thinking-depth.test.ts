@@ -69,4 +69,37 @@ describe("web thinking depth compatibility", () => {
       ).toBe(false);
     }
   });
+
+  it.each(["chat", "responses"])(
+    "returns the public retention-acknowledgement error for %s before queueing",
+    async (kind) => {
+      const create = vi.fn();
+      const jobs = { create } as unknown as JobsService;
+      const controller =
+        kind === "chat" ? new ChatCompletionsController(jobs) : new ResponsesController(jobs);
+      const body = {
+        model: "chatgpt-web.auto",
+        aialra: { chatgpt_mode: "deep_research" },
+        ...(kind === "chat"
+          ? { messages: [{ role: "user", content: "Synthetic" }] }
+          : { input: "Synthetic" }),
+      };
+
+      let responseBody: unknown;
+      try {
+        await controller.create(
+          body,
+          { header: () => "synthetic-key" } as unknown as AuthenticatedRequest,
+          {} as Response,
+        );
+      } catch (error) {
+        responseBody = (error as { getResponse(): unknown }).getResponse();
+      }
+
+      expect(responseBody).toMatchObject({
+        error: { code: "deep_research_persistence_acknowledgement_required" },
+      });
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
 });

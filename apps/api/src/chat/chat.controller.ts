@@ -173,7 +173,7 @@ export class ChatCompletionsController {
         ? `${prompt.objective}\n\nRespond with a single valid JSON object and nothing else.`
         : prompt.objective;
     const maxOutputTokens = value.max_completion_tokens ?? value.max_tokens ?? 8_192;
-    const task = TaskContractSchema.parse({
+    const taskResult = TaskContractSchema.safeParse({
       objective,
       taskKind: schema ? "bounded" : "general",
       expectedOutput: "Return the final assistant message for the caller.",
@@ -208,6 +208,8 @@ export class ChatCompletionsController {
         maxAttempts: executionChannel === "chatgpt_web" ? 1 : 2,
       },
     });
+    if (!taskResult.success) throw zodHttpError(taskResult.error);
+    const task = taskResult.data;
 
     const idempotencyKey = request.header("idempotency-key") ?? randomUUID();
     const job = await this.jobs.create(
