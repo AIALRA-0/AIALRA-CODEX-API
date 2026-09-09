@@ -372,6 +372,8 @@ async function openThinkingDepthMenu(control, click, deadline) {
   // Do not close or interact with a menu the user already has open.
   if (previous.size || control.getAttribute("aria-expanded") === "true") return null;
   await click(control);
+  const keyboardFallbackAt = Date.now() + 500;
+  let keyboardFallbackUsed = false;
   const end = Math.min(deadline, Date.now() + 1_500);
   while (Date.now() < end) {
     const ownedId = control.getAttribute("aria-controls");
@@ -379,6 +381,28 @@ async function openThinkingDepthMenu(control, click, deadline) {
     if (owned && isDepthControlVisible(owned)) return owned;
     const opened = visibleMenus().filter((menu) => !previous.has(menu));
     if (opened.length === 1) return opened[0];
+    // Some menu triggers respond to pointer-down or Enter, not HTMLElement.click().
+    // Only activate the known composer control when nothing opened; never toggle
+    // an expanded control or a menu the user already owns.
+    if (
+      !keyboardFallbackUsed &&
+      Date.now() >= keyboardFallbackAt &&
+      opened.length === 0 &&
+      control.getAttribute("aria-expanded") !== "true"
+    ) {
+      keyboardFallbackUsed = true;
+      control.focus();
+      for (const type of ["keydown", "keyup"]) {
+        control.dispatchEvent(
+          new KeyboardEvent(type, {
+            key: "Enter",
+            code: "Enter",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    }
     await waitForMutation(100);
   }
   control.dispatchEvent(

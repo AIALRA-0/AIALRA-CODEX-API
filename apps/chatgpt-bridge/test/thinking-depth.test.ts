@@ -34,6 +34,8 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
   };
   const control = {
     ...element("Standard", attributes),
+    focus: vi.fn(),
+    dispatchEvent: vi.fn<(event: unknown) => void>(),
     click: () => {
       menu.visible = !menu.visible;
       attributes["aria-expanded"] = String(menu.visible);
@@ -79,6 +81,25 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
 }
 
 describe("visible thinking depth menu", () => {
+  it("activates a keyboard menu when click alone does not open the real trigger", async () => {
+    const h = harness();
+    const open = h.control.click;
+    h.control.click = () => undefined;
+    h.control.dispatchEvent.mockImplementation((event) => {
+      const keyEvent = event as { type: string; options: { key: string } };
+      if (keyEvent.type === "keydown" && keyEvent.options.key === "Enter") open();
+    });
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toEqual([
+      "Standard",
+      "Extended",
+      "Heavy",
+      "Future depth",
+    ]);
+    expect(h.control.focus).toHaveBeenCalledOnce();
+    expect(h.native).not.toHaveBeenCalled();
+    expect(h.menu.visible).toBe(false);
+  });
+
   it("discovers every enabled label, including an unknown future depth, without selecting or sending", async () => {
     const { api, control, menu, native } = harness();
     expect(await api.discoverThinkingDepths()).toMatchObject([

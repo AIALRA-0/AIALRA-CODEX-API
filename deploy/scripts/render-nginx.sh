@@ -3,6 +3,7 @@ set -euo pipefail
 
 : "${ROUTER_HOST:?ROUTER_HOST is required}"
 : "${ROUTER_TAILSCALE_IPV4:?ROUTER_TAILSCALE_IPV4 is required}"
+: "${ROUTER_TAILSCALE_IPV6:?ROUTER_TAILSCALE_IPV6 is required}"
 : "${NGINX_TEMPLATE:?NGINX_TEMPLATE is required}"
 : "${NGINX_OUTPUT:?NGINX_OUTPUT is required}"
 : "${EDGE_PROOF_SNIPPET:?EDGE_PROOF_SNIPPET is required}"
@@ -16,11 +17,14 @@ set -euo pipefail
 : "${CHATGPT_CONTROL_SUBNET:=10.253.240.0/28}"
 
 [[ "$ROUTER_HOST" =~ ^[a-z0-9.-]+$ ]] || { echo "Invalid router hostname" >&2; exit 1; }
-python3 - "$ROUTER_TAILSCALE_IPV4" <<'PY'
+python3 - "$ROUTER_TAILSCALE_IPV4" "$ROUTER_TAILSCALE_IPV6" <<'PY'
 import ipaddress, sys
 address = ipaddress.ip_address(sys.argv[1])
 if address not in ipaddress.ip_network("100.64.0.0/10"):
     raise SystemExit("ROUTER_TAILSCALE_IPV4 must be a Tailscale IPv4 address")
+address6 = ipaddress.ip_address(sys.argv[2])
+if address6 not in ipaddress.ip_network("fd7a:115c:a1e0::/48"):
+    raise SystemExit("ROUTER_TAILSCALE_IPV6 must be a Tailscale IPv6 address")
 PY
 python3 - "$CHATGPT_BROWSER_CONTROL_IP" "$CHATGPT_BROWSER_CONTROL_IP_B" "$CHATGPT_BROWSER_CONTROL_IP_C" "$CHATGPT_BROWSER_CONTROL_IP_D" "$CHATGPT_CONTROL_SUBNET" <<'PY'
 import ipaddress, sys
@@ -48,6 +52,7 @@ printf 'proxy_set_header X-Aialra-Edge-Proof "%s";\n' "$edge_secret" >"$proof_ca
 sed \
   -e "s|__ROUTER_HOST__|$ROUTER_HOST|g" \
   -e "s|__TAILSCALE_IPV4__|$ROUTER_TAILSCALE_IPV4|g" \
+  -e "s|__TAILSCALE_IPV6__|$ROUTER_TAILSCALE_IPV6|g" \
   -e "s|__AUTH_ENDPOINTS_SNIPPET__|$AUTH_ENDPOINTS_SNIPPET|g" \
   -e "s|__AUTH_PROTECT_SNIPPET__|$AUTH_PROTECT_SNIPPET|g" \
   -e "s|__EDGE_PROOF_SNIPPET__|$EDGE_PROOF_SNIPPET|g" \

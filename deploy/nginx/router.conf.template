@@ -1,5 +1,6 @@
 server {
     listen __TAILSCALE_IPV4__:80;
+    listen [__TAILSCALE_IPV6__]:80;
     server_name __ROUTER_HOST__;
 
     location ^~ /.well-known/acme-challenge/ {
@@ -13,6 +14,7 @@ server {
 
 server {
     listen __TAILSCALE_IPV4__:443 ssl http2;
+    listen [__TAILSCALE_IPV6__]:443 ssl http2;
     server_name __ROUTER_HOST__;
 
     ssl_certificate /etc/letsencrypt/live/__ROUTER_HOST__/fullchain.pem;

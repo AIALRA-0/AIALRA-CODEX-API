@@ -80,6 +80,7 @@ sudo AUTH_GATEWAY_APPS_FILE=/root-only/apps.json \
 ```bash
 sudo ROUTER_HOST=router.example.com \
   ROUTER_TAILSCALE_IPV4=100.64.0.10 \
+  ROUTER_TAILSCALE_IPV6=fd7a:115c:a1e0::1 \
   NGINX_TEMPLATE="$PWD/deploy/nginx/router.conf.template" \
   NGINX_OUTPUT=/etc/nginx/sites-available/router.example.com.conf \
   EDGE_PROOF_SNIPPET=/etc/nginx/snippets/router-edge-proof.conf \
@@ -90,6 +91,8 @@ sudo ROUTER_HOST=router.example.com \
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+两个地址都必须来自该 VPS 的 `tailscale ip`。DNS-only AAAA 记录指向 IPv6 时，Nginx 必须同时监听该 IPv6；只配置 IPv4 会让 IPv6 客户端落到其他默认虚拟主机，出现证书域名不匹配。不要用关闭 TLS 校验来绕过这个问题
 
 `nginx -t` 失败时不得重载；部署者应保留旧站点文件，并在新入口冒烟失败时恢复旧文件
 
