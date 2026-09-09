@@ -330,12 +330,16 @@ async function pasteX11Text(
   x: number,
   y: number,
   diagnostics: BrowserControlDiagnostics | null,
+  trace: (stage: string, point?: BrowserPoint) => void = () => {},
 ): Promise<void> {
+  trace("locating_window");
   const windowId = await findChromiumWindow();
   const translated = await translateBrowserPoint(windowId, { x, y }, diagnostics);
+  trace("point_translated", translated);
   await runXdotool(["windowactivate", "--sync", windowId]);
   await new Promise((resolve) => setTimeout(resolve, 200));
   const clipboard = await startX11Clipboard(value);
+  trace("clipboard_started");
   try {
     await new Promise((resolve) => setTimeout(resolve, 250));
     await runXdotool([
@@ -357,11 +361,13 @@ async function pasteX11Text(
       "--clearmodifiers",
       "ctrl+v",
     ]);
+    trace("paste_keys_completed");
     // Chromium requests clipboard metadata before it requests the text. Keep
     // the X11 selection owner alive through the complete native paste, then
     // remove the task text before the extension verifies the editor value.
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     await stopX11Clipboard(clipboard);
+    trace("clipboard_released");
   } catch (error) {
     clipboard.kill("SIGKILL");
     throw error;
@@ -445,6 +451,7 @@ async function main(): Promise<void> {
   let lastHeartbeatAt: string | null = null;
   let lastFailureCode: string | null = null;
   let lastFailureDiagnostics: Record<string, unknown> | null = null;
+  let lastNativeInput: Record<string, unknown> | null = null;
   let lastResetAt: string | null = null;
   let lastSubmissionAt: string | null = null;
   let temporaryChatVerified = false;
@@ -486,7 +493,24 @@ async function main(): Promise<void> {
     const prior = nativeActionQueues.get(jobId) ?? Promise.resolve();
     const next = prior
       .then(operation)
-      .catch(() => failPending(jobId, "chatgpt_delivery_uncertain"))
+      .catch((error: unknown) => {
+        if (lastNativeInput?.jobId === jobId) {
+          const reason = error instanceof Error ? error.message : "";
+          const allowed = [
+            "chromium_window_unavailable",
+            "chromium_window_geometry_unavailable",
+            "clipboard_start_timeout",
+            "clipboard_consume_timeout",
+            "clipboard_write_failed",
+          ];
+          lastNativeInput = {
+            ...lastNativeInput,
+            stage: "failed",
+            failureKind: allowed.includes(reason) ? reason : "native_command_failed",
+          };
+        }
+        failPending(jobId, "chatgpt_delivery_uncertain");
+      })
       .finally(() => {
         if (nativeActionQueues.get(jobId) === next) nativeActionQueues.delete(jobId);
       });
@@ -586,7 +610,11 @@ async function main(): Promise<void> {
       return;
     }
     if (request.method === "GET" && url.pathname === "/diagnostics") {
-      json(response, 200, { diagnostics: controlDiagnostics, lastFailureDiagnostics });
+      json(response, 200, {
+        diagnostics: controlDiagnostics,
+        lastFailureDiagnostics,
+        lastNativeInput,
+      });
       return;
     }
     if (request.method === "POST" && url.pathname === "/probe") {
@@ -868,7 +896,27 @@ async function main(): Promise<void> {
             if (message.x == null || message.y == null || message.text == null) {
               throw new Error("invalid_native_input");
             }
-            await pasteX11Text(message.text, message.x, message.y, controlDiagnostics);
+            lastNativeInput = {
+              jobId: message.jobId,
+              stage: "accepted",
+              textLength: message.text.length,
+              requestedPoint: { x: message.x, y: message.y },
+              windowMetrics: controlDiagnostics?.windowMetrics ?? null,
+              at: new Date().toISOString(),
+            };
+            await pasteX11Text(
+              message.text,
+              message.x,
+              message.y,
+              controlDiagnostics,
+              (stage, point) => {
+                lastNativeInput = {
+                  ...lastNativeInput,
+                  stage,
+                  ...(point ? { translatedPoint: point } : {}),
+                };
+              },
+            );
           });
         } else {
           enqueueNativeAction(message.jobId, () =>

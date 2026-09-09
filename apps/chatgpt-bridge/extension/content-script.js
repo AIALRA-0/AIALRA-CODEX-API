@@ -302,6 +302,7 @@ function modelControlForComposer() {
 }
 
 let thinkingDepthDiscoveryDiagnostics = null;
+const thinkingDepthMenuOwnership = new WeakMap();
 
 function thinkingDepthControl() {
   const composer = first(SELECTORS.composer);
@@ -378,9 +379,18 @@ async function openThinkingDepthMenu(control, click, deadline) {
   while (Date.now() < end) {
     const ownedId = control.getAttribute("aria-controls");
     const owned = ownedId ? document.getElementById(ownedId) : null;
-    if (owned && isDepthControlVisible(owned)) return owned;
+    if (owned && isDepthControlVisible(owned)) {
+      thinkingDepthMenuOwnership.set(
+        owned,
+        visibleMenus().filter((menu) => !previous.has(menu)),
+      );
+      return owned;
+    }
     const opened = visibleMenus().filter((menu) => !previous.has(menu));
-    if (opened.length === 1) return opened[0];
+    if (opened.length === 1) {
+      thinkingDepthMenuOwnership.set(opened[0], opened);
+      return opened[0];
+    }
     // Some menu triggers respond to pointer-down or Enter, not HTMLElement.click().
     // Only activate the known composer control when nothing opened; never toggle
     // an expanded control or a menu the user already owns.
@@ -413,12 +423,19 @@ async function openThinkingDepthMenu(control, click, deadline) {
 }
 
 async function closeThinkingDepthMenu(control, menu) {
-  if (!menu || !isDepthControlVisible(menu)) return;
-  menu.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }),
-  );
-  await waitForMutation(50);
-  if (isDepthControlVisible(menu) && control.getAttribute("aria-expanded") === "true")
+  if (!menu) return;
+  const owned = thinkingDepthMenuOwnership.get(menu) ?? [menu];
+  for (let level = 0; level < 3; level += 1) {
+    const visible = owned.filter(isDepthControlVisible);
+    if (!visible.length) return;
+    visible
+      .at(-1)
+      .dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }),
+      );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (owned.some(isDepthControlVisible) && control.getAttribute("aria-expanded") === "true")
     control.click();
 }
 
@@ -459,7 +476,9 @@ function thinkingDepthSliderLabel(menu, slider, control = thinkingDepthControl()
   );
   const label =
     accessible ||
-    (depthOptions.length === 1 ? depthOptions[0].label : "") ||
+    (depthOptions.length === 1
+      ? visibleText(depthOptions[0].element).replace(/\s+/g, " ").trim()
+      : "") ||
     (!/thinking (?:time|effort|depth)|reasoning (?:effort|depth)/i.test(controlLabel)
       ? controlLabel
       : "") ||

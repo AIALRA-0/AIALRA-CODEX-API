@@ -94,6 +94,26 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
 }
 
 describe("visible thinking depth menu", () => {
+  it("closes both its nested menu and the parent popover without reopening either", async () => {
+    const h = harness();
+    const child = {
+      ...h.menu,
+      visible: false,
+      dispatchEvent: () => {
+        child.visible = false;
+      },
+    };
+    const open = h.control.click;
+    h.control.click = () => {
+      open();
+      child.visible = h.menu.visible;
+    };
+    h.context.document.querySelectorAll = () => [h.menu, child];
+    await h.api.discoverThinkingDepths();
+    expect(child.visible).toBe(false);
+    expect(h.menu.visible).toBe(false);
+  });
+
   it("does not activate a second gesture after click has opened the menu", async () => {
     const h = harness();
     expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
@@ -227,6 +247,23 @@ function sliderHarness() {
 }
 
 describe("accessible thinking effort slider", () => {
+  it("retains a Pro badge rendered on a separate line of the slider label", async () => {
+    const h = sliderHarness();
+    const attribute = h.slider.getAttribute;
+    h.slider.getAttribute = (key) => (key === "aria-valuetext" ? null : attribute(key));
+    const option = {
+      get innerText() {
+        return h.labels[h.value()]!.replace("6 Pro", "6\nPro");
+      },
+      getBoundingClientRect: () => ({ width: 100, height: 30 }),
+      getAttribute: () => null,
+      hasAttribute: () => false,
+    };
+    h.menu.querySelectorAll = (selector) =>
+      selector === "[role='slider']" ? [h.slider] : selector === "button" ? [] : [option];
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toEqual(h.labels);
+  });
+
   it("waits for the animated slider and reads its menu label when the trigger is generic", async () => {
     const h = sliderHarness();
     const attribute = h.slider.getAttribute;
