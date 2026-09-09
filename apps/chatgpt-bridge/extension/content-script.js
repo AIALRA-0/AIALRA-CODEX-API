@@ -233,6 +233,23 @@ function canonicalEditorText(value) {
     .replace(/\n$/, "");
 }
 
+function composerPlainText(composer) {
+  if (!composer) return "";
+  const paragraphs = [...(composer.children ?? [])];
+  if (!paragraphs.length || paragraphs.some((node) => node.tagName !== "P"))
+    return composer.innerText ?? composer.textContent ?? "";
+  const inlineText = (node) => {
+    if (node.nodeType === 3) return node.nodeValue ?? "";
+    if (node.nodeType !== 1) return "";
+    if (node.tagName === "BR")
+      return node.classList?.contains("ProseMirror-trailingBreak") ? "" : "\n";
+    return [...node.childNodes].map(inlineText).join("");
+  };
+  // ProseMirror represents pasted lines as paragraphs. innerText adds visual
+  // paragraph spacing; joining logical paragraphs preserves the caller's text.
+  return paragraphs.map(inlineText).join("\n");
+}
+
 async function nativeSetComposerText(composer, text, jobId, deadline) {
   const point = nativePoint(composer);
   const accepted = await sendRuntimeMessage({
@@ -251,8 +268,7 @@ async function nativeSetComposerText(composer, text, jobId, deadline) {
     const currentComposer = first(SELECTORS.composer);
     if (
       currentComposer &&
-      canonicalEditorText(currentComposer.innerText ?? currentComposer.textContent ?? "") ===
-        canonicalEditorText(text)
+      canonicalEditorText(composerPlainText(currentComposer)) === canonicalEditorText(text)
     ) {
       stableReads += 1;
       stableSince ||= Date.now();
@@ -1262,14 +1278,13 @@ function controlDiagnostics(expectedObjective = null) {
     expectedUserTextLength: expectedUserText?.length ?? null,
     latestUserMatchesObjective:
       expectedUserText === null ? null : latestUserText === expectedUserText,
-    composerTextLength: canonicalEditorText(composer?.innerText ?? composer?.textContent ?? "")
-      .length,
+    composerTextLength: canonicalEditorText(composerPlainText(composer)).length,
     documentToken: DOCUMENT_TOKEN,
     freshConversation:
       pageKind() === "home" &&
       users.length === 0 &&
       assistantTurns.length === 0 &&
-      canonicalEditorText(composer?.innerText ?? composer?.textContent ?? "").length === 0 &&
+      canonicalEditorText(composerPlainText(composer)).length === 0 &&
       !first(SELECTORS.stop),
     terminalActionCount: terminalActionsFor(latestAssistant).length,
     terminalActions: terminalActionsFor(latestAssistant).map(describeControl).filter(Boolean),
@@ -1297,9 +1312,7 @@ function completionMarkerFor(jobId) {
 }
 
 function objectiveWithCompletionMarker(objective, completionMarker) {
-  // Keep the sentinel instruction in the same editor paragraph. ChatGPT's
-  // ProseMirror editor expands pasted paragraph breaks in innerText, which
-  // makes an exact native-input verification fail before the one allowed send.
+  // Append the sentinel without rewriting any paragraphs in the caller's text.
   return `${objective} 回答完成后，在最后一行原样输出 ${completionMarker}`;
 }
 
@@ -1530,20 +1543,14 @@ async function invoke(invocation) {
     const beforeUserCount = userMessages().length;
     await nativeSetComposerText(composer, pageObjective, invocation.jobId, deadline);
     composer = await waitForElement(SELECTORS.composer, deadline);
-    if (
-      canonicalEditorText(composer.innerText ?? composer.textContent ?? "") !==
-      canonicalEditorText(pageObjective)
-    ) {
+    if (canonicalEditorText(composerPlainText(composer)) !== canonicalEditorText(pageObjective)) {
       throw new Error("chatgpt_delivery_uncertain");
     }
     // The visible DOM can become correct before ChatGPT's editor state has
     // consumed the native paste. Wait once, then verify the exact text again.
     await new Promise((resolve) => setTimeout(resolve, 750));
     composer = await waitForElement(SELECTORS.composer, deadline);
-    if (
-      canonicalEditorText(composer.innerText ?? composer.textContent ?? "") !==
-      canonicalEditorText(pageObjective)
-    ) {
+    if (canonicalEditorText(composerPlainText(composer)) !== canonicalEditorText(pageObjective)) {
       throw new Error("chatgpt_delivery_uncertain");
     }
     const send = await waitForSendControl(composer, deadline);
