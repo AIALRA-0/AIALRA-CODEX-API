@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
-import { ExtensionFailedSchema } from "../src/protocol.js";
+import { ExtensionFailedSchema, ExtensionProgressSchema } from "../src/protocol.js";
 
 function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
   const element = (text: string, attributes: Record<string, string> = {}) => ({
@@ -244,6 +244,56 @@ function sliderHarness() {
 }
 
 describe("accessible thinking effort slider", () => {
+  it("transports every depth diagnostic phase emitted by the content script", () => {
+    const source = readFileSync(new URL("../extension/content-script.js", import.meta.url), "utf8");
+    const section = source.slice(
+      source.indexOf("async function readThinkingDepthChoices"),
+      source.indexOf("function buttonByText("),
+    );
+    const phases = [...section.matchAll(/(?:phase:\s*|\.phase\s*=\s*)"([a-z_]+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(phases).toContain("selection_verified");
+    for (const phase of phases) {
+      const diagnostics = {
+        composerFound: true,
+        temporaryChatEnabled: true,
+        modelControlFound: true,
+        toolsControlFound: true,
+        selectedSend: null,
+        sameRowControls: [],
+        thinkingDepthDiscovery: { phase },
+        pageKind: "home",
+        surface: "chat",
+        assistantTurnCount: 0,
+        blankAssistantTurnCount: 0,
+        latestAssistantHasText: false,
+        generationActive: false,
+        visibleErrorCount: 0,
+      };
+      const jobId = "0190abcd-0000-7000-8000-000000000099";
+      expect(
+        ExtensionFailedSchema.safeParse({
+          type: "failed",
+          jobId,
+          code: "chatgpt_delivery_uncertain",
+          message: "page_execution_failed",
+          diagnostics,
+        }).success,
+        phase,
+      ).toBe(true);
+      expect(
+        ExtensionProgressSchema.safeParse({
+          type: "progress",
+          jobId,
+          phase: "input_ready",
+          diagnostics,
+        }).success,
+        phase,
+      ).toBe(true);
+    }
+  });
+
   it("waits for the visible label after the slider value updates", async () => {
     const h = sliderHarness();
     const attribute = h.slider.getAttribute;

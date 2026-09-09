@@ -16,6 +16,7 @@ import { z } from "zod";
 import { fixedBridgeError, sanitizeSourceUrls } from "./core.js";
 import {
   BridgeInvocationSchema,
+  ExtensionFailedSchema,
   ExtensionMessageSchema,
   type BridgeInvocation,
   type BrowserControlDiagnostics,
@@ -824,7 +825,12 @@ async function main(): Promise<void> {
     authenticated = false;
     websocket.send(JSON.stringify({ type: "configure" } satisfies ControllerMessage));
     websocket.on("message", (data) => {
-      const parsed = ExtensionMessageSchema.safeParse(JSON.parse(data.toString()));
+      const raw = JSON.parse(data.toString());
+      let parsed = ExtensionMessageSchema.safeParse(raw);
+      // Optional diagnostic drift must not discard an otherwise valid terminal
+      // failure. Keep validating the job ID and error code; never forward raw data.
+      if (!parsed.success && raw?.type === "failed")
+        parsed = ExtensionFailedSchema.safeParse({ ...raw, diagnostics: null });
       if (!parsed.success) return;
       const message = parsed.data;
       if (message.type === "keepalive") {

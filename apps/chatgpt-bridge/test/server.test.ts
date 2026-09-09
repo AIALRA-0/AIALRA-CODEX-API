@@ -305,135 +305,155 @@ describe("ChatGPT web bridge server", () => {
     extension.close();
   });
 
-  it("classifies a submitted timeout and keeps only safe diagnostic evidence", async () => {
-    const port = 22_000 + Math.floor(Math.random() * 2_000);
-    const tsxCli = fileURLToPath(
-      new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url),
-    );
-    const source = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-    const child = spawn(process.execPath, [tsxCli, source], {
-      env: {
-        ...process.env,
-        NODE_ENV: "test",
-        CHATGPT_WEB_ADAPTER_ENABLED: "true",
-        CHATGPT_BRIDGE_PORT: String(port),
-        CHATGPT_BRIDGE_API_TOKEN: "synthetic-api-token",
-        CHATGPT_EXTENSION_TOKEN: "synthetic-extension-token",
-      },
-      stdio: "ignore",
-    });
-    children.push(child);
-    await waitUntilReady(`http://127.0.0.1:${port}/healthz`);
-
-    const extension = new WebSocket(
-      `ws://127.0.0.1:${port}/extension?token=synthetic-extension-token`,
-      { origin: "chrome-extension://synthetic-test" },
-    );
-    await new Promise<void>((resolve, reject) => {
-      extension.once("open", resolve);
-      extension.once("error", reject);
-    });
-    extension.send(
-      JSON.stringify({
-        type: "hello",
-        protocolVersion: 1,
-        pageReady: true,
-        authenticated: true,
-        models: [{ id: "", displayName: "GPT-5 Pro", available: true }],
-        activeTabs: 0,
-      }),
-    );
-
-    const jobId = "0190abcd-0000-7000-8000-000000000003";
-    const task = TaskContractSchema.parse({
-      objective: "Return SYNTHETIC_TIMEOUT",
-      executionChannel: "chatgpt_web",
-      model: "chatgpt-web.auto",
-      chatgptWeb: { mode: "chat", temporaryChat: true, requireSources: false },
-      deadlineMs: 1_200,
-      budget: { maxOutputTokens: 1_000, maxAttempts: 1 },
-    });
-    const invokeResponse = fetch(`http://127.0.0.1:${port}/invoke`, {
-      method: "POST",
-      headers: {
-        authorization: "Bearer synthetic-api-token",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        jobId,
-        task,
-        route: {
-          provider: "chatgpt_web",
-          model: "chatgpt-web.auto",
-          effort: "low",
-          policyVersion: "test",
-          reasonCode: "explicit_chatgpt_web_channel",
-          sticky: true,
+  it.each([false, true])(
+    "keeps terminal failure evidence with diagnostic drift=%s",
+    async (diagnosticDrift) => {
+      const port = 22_000 + Math.floor(Math.random() * 2_000);
+      const tsxCli = fileURLToPath(
+        new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url),
+      );
+      const source = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+      const child = spawn(process.execPath, [tsxCli, source], {
+        env: {
+          ...process.env,
+          NODE_ENV: "test",
+          CHATGPT_WEB_ADAPTER_ENABLED: "true",
+          CHATGPT_BRIDGE_PORT: String(port),
+          CHATGPT_BRIDGE_API_TOKEN: "synthetic-api-token",
+          CHATGPT_EXTENSION_TOKEN: "synthetic-extension-token",
         },
-      }),
-    });
-    let controllerMessage = await nextMessage(extension);
-    if (controllerMessage.type === "configure") controllerMessage = await nextMessage(extension);
-    expect(controllerMessage.type).toBe("invoke");
-    expect((controllerMessage.invocation as { deadlineAt: number }).deadlineAt).toBeGreaterThan(
-      Date.now(),
-    );
-    extension.send(
-      JSON.stringify({
-        type: "progress",
-        jobId,
-        phase: "submitted",
-        diagnostics: {
-          composerFound: true,
-          temporaryChatEnabled: true,
-          temporaryChatPersonalized: false,
-          modelControlFound: true,
-          toolsControlFound: true,
-          selectedSend: null,
-          sameRowControls: [],
-          pageKind: "home",
-          surface: "chat",
-          assistantTurnCount: 0,
-          blankAssistantTurnCount: 0,
-          latestAssistantHasText: false,
-          generationActive: false,
-          userTurnCount: 1,
-          latestUserTextLength: 24,
-          expectedUserTextLength: 24,
-          latestUserMatchesObjective: true,
-          composerTextLength: 0,
-          documentToken: "0190abcd-0000-7000-8000-000000000099",
-          freshConversation: false,
-          terminalActionCount: 0,
-          terminalActions: [],
-          visibleErrorCount: 0,
-          visibleErrorKinds: [],
-          latestAssistant: null,
-        },
-      }),
-    );
+        stdio: "ignore",
+      });
+      children.push(child);
+      await waitUntilReady(`http://127.0.0.1:${port}/healthz`);
 
-    const response = await invokeResponse;
-    const frames = (await response.text())
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    expect(frames.at(-1)).toMatchObject({
-      type: "error",
-      error: {
-        code: "chatgpt_delivery_uncertain",
-        failurePhase: "submitted",
-        diagnosticSummary: {
-          pageKind: "home",
-          userTurnCount: 1,
-          assistantTurnCount: 0,
-          latestUserMatchesObjective: true,
-          temporaryChatVerified: true,
+      const extension = new WebSocket(
+        `ws://127.0.0.1:${port}/extension?token=synthetic-extension-token`,
+        { origin: "chrome-extension://synthetic-test" },
+      );
+      await new Promise<void>((resolve, reject) => {
+        extension.once("open", resolve);
+        extension.once("error", reject);
+      });
+      extension.send(
+        JSON.stringify({
+          type: "hello",
+          protocolVersion: 1,
+          pageReady: true,
+          authenticated: true,
+          models: [{ id: "", displayName: "GPT-5 Pro", available: true }],
+          activeTabs: 0,
+        }),
+      );
+
+      const jobId = "0190abcd-0000-7000-8000-000000000003";
+      const task = TaskContractSchema.parse({
+        objective: "Return SYNTHETIC_TIMEOUT",
+        executionChannel: "chatgpt_web",
+        model: "chatgpt-web.auto",
+        chatgptWeb: { mode: "chat", temporaryChat: true, requireSources: false },
+        deadlineMs: 1_200,
+        budget: { maxOutputTokens: 1_000, maxAttempts: 1 },
+      });
+      const invokeResponse = fetch(`http://127.0.0.1:${port}/invoke`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer synthetic-api-token",
+          "content-type": "application/json",
         },
-      },
-    });
-    expect(JSON.stringify(frames)).not.toContain("SYNTHETIC_TIMEOUT");
-    expect(JSON.stringify(frames)).not.toContain("conversationUrl");
-    extension.close();
-  });
+        body: JSON.stringify({
+          jobId,
+          task,
+          route: {
+            provider: "chatgpt_web",
+            model: "chatgpt-web.auto",
+            effort: "low",
+            policyVersion: "test",
+            reasonCode: "explicit_chatgpt_web_channel",
+            sticky: true,
+          },
+        }),
+      });
+      let controllerMessage = await nextMessage(extension);
+      if (controllerMessage.type === "configure") controllerMessage = await nextMessage(extension);
+      expect(controllerMessage.type).toBe("invoke");
+      expect((controllerMessage.invocation as { deadlineAt: number }).deadlineAt).toBeGreaterThan(
+        Date.now(),
+      );
+      extension.send(
+        JSON.stringify({
+          type: "progress",
+          jobId,
+          phase: "submitted",
+          diagnostics: {
+            composerFound: true,
+            temporaryChatEnabled: true,
+            temporaryChatPersonalized: false,
+            modelControlFound: true,
+            toolsControlFound: true,
+            selectedSend: null,
+            sameRowControls: [],
+            pageKind: "home",
+            surface: "chat",
+            assistantTurnCount: 0,
+            blankAssistantTurnCount: 0,
+            latestAssistantHasText: false,
+            generationActive: false,
+            userTurnCount: 1,
+            latestUserTextLength: 24,
+            expectedUserTextLength: 24,
+            latestUserMatchesObjective: true,
+            composerTextLength: 0,
+            documentToken: "0190abcd-0000-7000-8000-000000000099",
+            freshConversation: false,
+            terminalActionCount: 0,
+            terminalActions: [],
+            visibleErrorCount: 0,
+            visibleErrorKinds: [],
+            latestAssistant: null,
+          },
+        }),
+      );
+
+      if (diagnosticDrift) {
+        extension.send(
+          JSON.stringify({
+            type: "failed",
+            jobId,
+            code: "chatgpt_thinking_depth_unverified",
+            message: "page_execution_failed",
+            diagnostics: {
+              thinkingDepthDiscovery: { phase: "future_unknown_phase" },
+              unsafeText: "SYNTHETIC_PRIVATE_TEXT",
+            },
+          }),
+        );
+      }
+      const response = await invokeResponse;
+      const frames = (await response.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(frames.at(-1)).toMatchObject({
+        type: "error",
+        error: {
+          code: diagnosticDrift
+            ? "chatgpt_thinking_depth_unverified"
+            : "chatgpt_delivery_uncertain",
+          failurePhase: "submitted",
+          diagnosticSummary: {
+            pageKind: "home",
+            userTurnCount: 1,
+            assistantTurnCount: 0,
+            latestUserMatchesObjective: true,
+            temporaryChatVerified: true,
+          },
+        },
+      });
+      expect(JSON.stringify(frames)).not.toContain("SYNTHETIC_TIMEOUT");
+      expect(JSON.stringify(frames)).not.toContain("conversationUrl");
+      expect(JSON.stringify(frames)).not.toContain("SYNTHETIC_PRIVATE_TEXT");
+      extension.close();
+    },
+  );
 });
