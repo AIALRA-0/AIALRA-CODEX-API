@@ -37,7 +37,10 @@ export type ExecutionChannel = z.infer<typeof ExecutionChannelSchema>;
 export const ChatGptWebModeSchema = z.enum(["chat", "search", "deep_research"]);
 export type ChatGptWebMode = z.infer<typeof ChatGptWebModeSchema>;
 
-export const ChatGptWebConversationModeSchema = z.literal("temporary_per_request");
+export const ChatGptWebConversationModeSchema = z.enum([
+  "temporary_per_request",
+  "persistent_per_request",
+]);
 export type ChatGptWebConversationMode = z.infer<typeof ChatGptWebConversationModeSchema>;
 
 export const ChatGptWebOptionsSchema = z
@@ -45,7 +48,8 @@ export const ChatGptWebOptionsSchema = z
     mode: ChatGptWebModeSchema.default("chat"),
     conversationMode: ChatGptWebConversationModeSchema.default("temporary_per_request"),
     temporaryChat: z.boolean().default(true),
-    personalized: z.literal(false).default(false),
+    personalized: z.boolean().default(false),
+    persistenceAcknowledged: z.boolean().default(false),
     requireSources: z.boolean().default(false),
     thinkingDepth: z.string().trim().min(1).max(64).optional(),
   })
@@ -216,12 +220,29 @@ export const TaskContractSchema = z
         message: "The ChatGPT web channel does not support resumable Router sessions.",
       });
     }
-    if (value.executionChannel === "chatgpt_web" && value.chatgptWeb?.temporaryChat === false) {
-      context.addIssue({
-        code: "custom",
-        path: ["chatgptWeb", "temporaryChat"],
-        message: "The ChatGPT web channel requires a new non-personalized Temporary Chat.",
-      });
+    if (value.executionChannel === "chatgpt_web" && value.chatgptWeb) {
+      const web = value.chatgptWeb;
+      const persistentDeepResearch =
+        web.mode === "deep_research" &&
+        web.conversationMode === "persistent_per_request" &&
+        web.temporaryChat === false &&
+        web.personalized === true &&
+        web.persistenceAcknowledged === true;
+      const temporaryRequest =
+        web.mode !== "deep_research" &&
+        web.conversationMode === "temporary_per_request" &&
+        web.temporaryChat === true &&
+        web.personalized === false;
+      if (!persistentDeepResearch && !temporaryRequest) {
+        context.addIssue({
+          code: "custom",
+          path: ["chatgptWeb"],
+          message:
+            web.mode === "deep_research"
+              ? "Deep Research requires a fresh persistent ChatGPT conversation and an explicit data-retention acknowledgement."
+              : "Chat and search require a new non-personalized Temporary Chat.",
+        });
+      }
     }
   });
 export type TaskContract = z.infer<typeof TaskContractSchema>;
@@ -373,6 +394,7 @@ export const ChatGptWebFailurePhaseSchema = z.enum([
   "opening",
   "configuring",
   "temporary_chat_verified",
+  "persistent_chat_verified",
   "mode_selected",
   "input_ready",
   "submitted",
@@ -546,7 +568,9 @@ export const ChatGptWebQualificationItemSchema = z.object({
   submittedCount: z.number().int().nonnegative(),
   recoveryCount: z.number().int().nonnegative().default(0),
   ownershipMatched: z.boolean().nullable(),
+  conversationMode: ChatGptWebConversationModeSchema.default("temporary_per_request"),
   temporaryChatVerified: z.boolean().default(false),
+  persistentChatVerified: z.boolean().default(false),
   failurePhase: ChatGptWebFailurePhaseSchema.nullable().optional(),
   diagnosticSummary: ChatGptWebDiagnosticSummarySchema.nullable().optional(),
 });
@@ -605,6 +629,7 @@ export const SessionAialraExtensionSchema = z
     thinking_depth: z.string().trim().min(1).max(64).optional(),
     conversation_mode: ChatGptWebConversationModeSchema.optional(),
     temporary_chat: z.boolean().optional(),
+    deep_research_persistence_acknowledged: z.boolean().optional(),
     require_sources: z.boolean().optional(),
   })
   .strict();
@@ -702,6 +727,8 @@ export interface ChatCompletion {
     job_id: string;
     session_key: string | null;
     measurement_status?: "measured" | "unavailable";
+    conversation_mode?: ChatGptWebConversationMode | null;
+    data_retention?: "persistent_chat_history" | "temporary_or_provider_managed";
   };
 }
 

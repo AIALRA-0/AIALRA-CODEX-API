@@ -50,6 +50,7 @@ async function main(): Promise<void> {
       (option("--channel") as "codex" | "chatgpt_web" | undefined) ?? "codex";
     const chatgptMode =
       (option("--chatgpt-mode") as "chat" | "search" | "deep_research" | undefined) ?? "chat";
+    const persistentDeepResearch = chatgptMode === "deep_research";
     const task = TaskContractSchema.parse({
       objective,
       model:
@@ -68,9 +69,13 @@ async function main(): Promise<void> {
         executionChannel === "chatgpt_web"
           ? {
               mode: chatgptMode,
-              conversationMode: "temporary_per_request",
-              temporaryChat: true,
-              personalized: false,
+              conversationMode: persistentDeepResearch
+                ? "persistent_per_request"
+                : "temporary_per_request",
+              temporaryChat: !persistentDeepResearch,
+              personalized: persistentDeepResearch,
+              persistenceAcknowledged:
+                persistentDeepResearch && process.argv.includes("--accept-persistent-chat"),
               requireSources: process.argv.includes("--require-sources"),
               thinkingDepth: option("--thinking-depth"),
             }
@@ -97,15 +102,20 @@ async function main(): Promise<void> {
     const objective = option("--task");
     if (!objective) throw new Error("research requires --task");
     const mode = (option("--mode") as "chat" | "search" | "deep_research" | undefined) ?? "search";
+    const persistentDeepResearch = mode === "deep_research";
     const task = TaskContractSchema.parse({
       objective,
       model: option("--model") ?? "chatgpt-web.auto",
       executionChannel: "chatgpt_web",
       chatgptWeb: {
         mode,
-        conversationMode: "temporary_per_request",
-        temporaryChat: true,
-        personalized: false,
+        conversationMode: persistentDeepResearch
+          ? "persistent_per_request"
+          : "temporary_per_request",
+        temporaryChat: !persistentDeepResearch,
+        personalized: persistentDeepResearch,
+        persistenceAcknowledged:
+          persistentDeepResearch && process.argv.includes("--accept-persistent-chat"),
         requireSources: true,
         thinkingDepth: option("--thinking-depth"),
       },
@@ -170,7 +180,7 @@ async function main(): Promise<void> {
     print({ submitted: jobs?.length ?? 0, jobs });
   } else {
     process.stdout.write(
-      "AIALRA Model Router CLI\n\nCommands: call, research, chat, batch, jobs, threads, cancel, eval, quota\n\nUse research --task <text> --mode search|deep_research for the experimental ChatGPT web channel. Use --permission restricted|confirm|full with Codex call or chat. The call and research commands wait for a terminal result by default. Add --async to return after admission. Use --session persistent to start a resumable Codex conversation and --session-key <thread> to continue it.\n",
+      "AIALRA Model Router CLI\n\nCommands: call, research, chat, batch, jobs, threads, cancel, eval, quota\n\nUse research --task <text> --mode search|deep_research for the experimental ChatGPT web channel. Deep Research creates a persistent ChatGPT history entry and requires --accept-persistent-chat. Use --permission restricted|confirm|full with Codex call or chat. The call and research commands wait for a terminal result by default. Add --async to return after admission. Use --session persistent to start a resumable Codex conversation and --session-key <thread> to continue it.\n",
     );
   }
 }

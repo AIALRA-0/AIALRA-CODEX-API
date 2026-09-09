@@ -603,15 +603,19 @@ export interface components {
       thinking_depth?: string;
       /**
        * @default temporary_per_request
-       * @constant
+       * @enum {string}
        */
-      conversation_mode: "temporary_per_request";
+      conversation_mode: "temporary_per_request" | "persistent_per_request";
       /**
-       * @description Every ChatGPT web request uses a new non-personalized Temporary Chat.
+       * @description Chat and search use Temporary Chat; Deep Research requires false.
        * @default true
-       * @constant
        */
-      temporary_chat: true;
+      temporary_chat: boolean;
+      /**
+       * @description Must be true for Deep Research because the new ordinary conversation remains in ChatGPT history and may use account personalization.
+       * @default false
+       */
+      deep_research_persistence_acknowledged: boolean;
       require_sources?: boolean;
     };
     ExecutionPolicy: {
@@ -697,19 +701,18 @@ export interface components {
         mode: "chat" | "search" | "deep_research";
         /**
          * @default temporary_per_request
-         * @constant
+         * @enum {string}
          */
-        conversationMode: "temporary_per_request";
+        conversationMode: "temporary_per_request" | "persistent_per_request";
+        /** @default true */
+        temporaryChat: boolean;
+        /** @default false */
+        personalized: boolean;
         /**
-         * @default true
-         * @constant
-         */
-        temporaryChat: true;
-        /**
+         * @description Explicit acknowledgement required for persistent Deep Research calls.
          * @default false
-         * @constant
          */
-        personalized: false;
+        persistenceAcknowledged: boolean;
         requireSources: boolean;
         /** @description Exact webThinkingDepths label, verified before submission. */
         thinkingDepth?: string;
@@ -881,8 +884,8 @@ export interface components {
       /** Format: date-time */
       lastRateLimitAt: string | null;
       consecutiveRateLimits: number;
-      /** @constant */
-      conversationMode: "temporary_per_request";
+      /** @enum {string} */
+      conversationMode: "temporary_per_request" | "persistent_per_request";
       temporaryChatVerified: boolean;
       /** Format: date-time */
       lastRecoveryProbeAt: string | null;
@@ -1012,13 +1015,18 @@ export interface components {
       /** @default 0 */
       recoveryCount: number;
       ownershipMatched: boolean | null;
+      /** @enum {string} */
+      conversationMode: "temporary_per_request" | "persistent_per_request";
       /** @default false */
       temporaryChatVerified: boolean;
+      /** @default false */
+      persistentChatVerified: boolean;
       /** @enum {string|null} */
       failurePhase?:
         | "opening"
         | "configuring"
         | "temporary_chat_verified"
+        | "persistent_chat_verified"
         | "mode_selected"
         | "input_ready"
         | "submitted"
@@ -1148,6 +1156,10 @@ export interface components {
         session_key?: string | null;
         /** @enum {string} */
         measurement_status?: "measured" | "unavailable";
+        /** @enum {string|null} */
+        conversation_mode?: "temporary_per_request" | "persistent_per_request" | null;
+        /** @enum {string} */
+        data_retention?: "persistent_chat_history" | "temporary_or_provider_managed";
       };
     };
     ResponsesRequest: {

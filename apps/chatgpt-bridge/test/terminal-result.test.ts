@@ -21,6 +21,7 @@ function harness({
     visibleText: (node: typeof user) => node.text,
     normalizedText: (value: string) => value.replace(/\s+/g, " ").trim(),
     boundTemporaryDocument: () => ownership,
+    boundInvocationDocument: () => ownership,
     Node: { DOCUMENT_POSITION_FOLLOWING: 4 },
     assistantTurnElements: () => [assistant],
     assistantTextChannels: () => ({
@@ -76,6 +77,33 @@ describe("validated visible completion", () => {
       await expect(harness(options).run()).rejects.toThrow("chatgpt_delivery_uncertain");
     },
   );
+});
+
+it("binds persistent Deep Research to the same fresh non-temporary document", () => {
+  let currentToken = "document";
+  let temporary = false;
+  let supported = true;
+  const context = {
+    DOCUMENT_TOKEN: currentToken,
+    boundTemporaryDocument: () => false,
+    taskPageIsSupported: () => supported,
+    temporaryChatEnabled: () => temporary,
+  };
+  const bound = runInNewContext(
+    `${source.slice(source.indexOf("function boundInvocationDocument("), source.indexOf("function currentSurface("))}; boundInvocationDocument`,
+    context,
+  );
+
+  expect(bound("document", false)).toBe(true);
+  temporary = true;
+  expect(bound("document", false)).toBe(false);
+  temporary = false;
+  supported = false;
+  expect(bound("document", false)).toBe(false);
+  supported = true;
+  currentToken = "other";
+  context.DOCUMENT_TOKEN = currentToken;
+  expect(bound("document", false)).toBe(false);
 });
 
 it("retains the verified non-personalized fact only for the active verified document", () => {

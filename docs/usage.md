@@ -151,7 +151,7 @@ $Response | Select-Object status, model, output, usage # 查看任务状态、�
 
 ### 4.5 `Chat Completions` 兼容接口
 
-`POST /v1/chat/completions` 接受标准 OpenAI Chat Completions 请求体，任何官方 SDK 只需更换 `base_url` 和密钥即可调用
+`POST /v1/chat/completions` 接受文档所列的 OpenAI Chat Completions 文本兼容子集，支持该子集的客户端只需更换 `base_url` 和密钥即可调用
 
 - 支持 `messages`、`stream`、`stream_options.include_usage`、`max_tokens`、`max_completion_tokens`、`response_format`（`text`、`json_object`、`json_schema`）、`reasoning_effort`、`metadata` 和 `aialra` 扩展
 - 多轮对话由客户端携带完整消息历史；也可以在 `aialra.session_key` 中传入线程标识，此时只发送最新一条用户消息，上下文由 Codex 线程保留
@@ -178,6 +178,26 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 ```
 
 网页流式请求只发送状态和 1 次最终完整正文，不伪造逐 Token 增量
+
+普通聊天和搜索始终使用新的非个性化 Temporary Chat。Deep Research 改用每次新建的普通持久会话，因为当前 Temporary Chat 页面没有稳定入口；调用方必须显式传入 `deep_research_persistence_acknowledged = $true`，并承担该内容进入 ChatGPT 历史记录、可能使用账号记忆或个性化的风险
+
+```powershell
+$DeepResearchRequest = @{
+    model = "chatgpt-web.auto"
+    input = "调查一个不含隐私信息的合成主题，并列出公开来源"
+    aialra = @{
+        execution_channel = "chatgpt_web"
+        chatgpt_mode = "deep_research"
+        conversation_mode = "persistent_per_request"
+        temporary_chat = $false
+        deep_research_persistence_acknowledged = $true
+        require_sources = $true
+    }
+} | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers -ContentType "application/json" -Body $DeepResearchRequest
+```
+
+Deep Research 响应包含 `X-AIALRA-Data-Retention: persistent_chat_history`；普通聊天和搜索返回 `temporary_or_provider_managed`。网页通道不支持 `session_key` 续接，任何模式都只允许提交 1 次
 
 ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 等效价格；接口返回 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”
 

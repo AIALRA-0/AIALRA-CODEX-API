@@ -28,7 +28,9 @@ function items(count: number): ChatGptWebQualificationItem[] {
     submittedCount: 0,
     recoveryCount: 0,
     ownershipMatched: null,
+    conversationMode: "temporary_per_request",
     temporaryChatVerified: false,
+    persistentChatVerified: false,
   }));
 }
 
@@ -98,6 +100,7 @@ describe("ChatGPT web qualification", () => {
         submittedCount: 1,
         recoveryCount: 0,
         temporaryChatVerified: true,
+        persistentChatVerified: false,
       }),
     );
 
@@ -142,6 +145,7 @@ describe("ChatGPT web qualification", () => {
         submittedCount: 1,
         recoveryCount: 0,
         temporaryChatVerified: true,
+        persistentChatVerified: false,
       }),
     );
 
@@ -189,11 +193,68 @@ describe("ChatGPT web qualification", () => {
         submittedCount: 1,
         recoveryCount: 0,
         temporaryChatVerified: false,
+        persistentChatVerified: false,
       }),
     );
 
     await processChatGptWebQualification(repository, client, run.id);
     expect((await repository.findChatGptWebQualificationRun(run.id))?.status).toBe("failed");
+  });
+
+  it("passes Deep Research only with a verified fresh persistent conversation", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = new Date().toISOString();
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id: randomUUID(),
+      suite: "deep_2",
+      status: "accepted",
+      total: 2,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: items(2).map((item, index) => ({
+        ...item,
+        name: `deep-${index + 1}`,
+        mode: "deep_research",
+        conversationMode: "persistent_per_request",
+      })),
+      errorCode: null,
+      createdBy: "admin",
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+    await repository.createChatGptWebQualificationRun(run);
+    const client = new ChatGptWebDiagnosticClient(
+      "http://127.0.0.1:1",
+      "synthetic-api",
+      "synthetic-diagnostic",
+    );
+    vi.spyOn(client, "invoke").mockImplementation(
+      async (definition: Parameters<ChatGptWebDiagnosticClient["invoke"]>[0]) => ({
+        outputText: `合成研究 ${definition.marker}`,
+        sources: ["https://example.com/source"],
+        submittedCount: 1,
+        recoveryCount: 0,
+        temporaryChatVerified: false,
+        persistentChatVerified: true,
+      }),
+    );
+
+    await processChatGptWebQualification(repository, client, run.id);
+    const saved = await repository.findChatGptWebQualificationRun(run.id);
+
+    expect(saved).toMatchObject({ status: "succeeded", completed: 2, succeeded: 2, failed: 0 });
+    expect(
+      saved?.items.every(
+        (item) =>
+          item.conversationMode === "persistent_per_request" &&
+          item.persistentChatVerified &&
+          !item.temporaryChatVerified &&
+          item.submittedCount === 1,
+      ),
+    ).toBe(true);
   });
 
   it("persists only the safe failure phase and diagnostic summary", async () => {

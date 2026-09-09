@@ -1,15 +1,20 @@
 import { z } from "zod";
 
 export const ChatGptWebModeSchema = z.enum(["chat", "search", "deep_research"]);
+export const ChatGptWebConversationModeSchema = z.enum([
+  "temporary_per_request",
+  "persistent_per_request",
+]);
 
 export const BridgeInvocationSchema = z.object({
   jobId: z.string().uuid(),
   objective: z.string().min(1).max(100_000),
   model: z.string().min(1).max(128),
   mode: ChatGptWebModeSchema,
-  conversationMode: z.literal("temporary_per_request"),
+  conversationMode: ChatGptWebConversationModeSchema,
   temporaryChat: z.boolean(),
-  personalized: z.literal(false),
+  personalized: z.boolean(),
+  persistenceAcknowledged: z.boolean().default(false),
   requireSources: z.boolean(),
   deadlineMs: z.number().int().min(1_000).max(3_600_000),
   deadlineAt: z.number().int().positive(),
@@ -197,6 +202,7 @@ export const ExtensionProgressSchema = z.object({
     "opening",
     "configuring",
     "temporary_chat_verified",
+    "persistent_chat_verified",
     "mode_selected",
     "input_ready",
     "submitted",

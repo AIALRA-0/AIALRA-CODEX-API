@@ -29,6 +29,7 @@ type DiagnosticResult = {
   submittedCount: number;
   recoveryCount: number;
   temporaryChatVerified: boolean;
+  persistentChatVerified: boolean;
 };
 
 export class DiagnosticInvocationError extends Error {
@@ -39,6 +40,7 @@ export class DiagnosticInvocationError extends Error {
     readonly temporaryChatVerified = false,
     readonly failurePhase: ChatGptWebFailurePhase | null = null,
     readonly diagnosticSummary: ChatGptWebDiagnosticSummary | null = null,
+    readonly persistentChatVerified = false,
   ) {
     super(message);
   }
@@ -175,15 +177,19 @@ export class ChatGptWebDiagnosticClient {
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
     await this.waitForIdleSlot(definition.deadlineMs);
     const jobId = randomUUID();
+    const persistentDeepResearch = definition.mode === "deep_research";
     const task = TaskContractSchema.parse({
       objective: definition.objective,
       executionChannel: "chatgpt_web",
       model: "chatgpt-web.auto",
       chatgptWeb: {
         mode: definition.mode,
-        conversationMode: "temporary_per_request",
-        temporaryChat: true,
-        personalized: false,
+        conversationMode: persistentDeepResearch
+          ? "persistent_per_request"
+          : "temporary_per_request",
+        temporaryChat: !persistentDeepResearch,
+        personalized: persistentDeepResearch,
+        persistenceAcknowledged: persistentDeepResearch,
         requireSources: definition.requireSources,
       },
       deadlineMs: definition.deadlineMs,
@@ -222,6 +228,7 @@ export class ChatGptWebDiagnosticClient {
     let submittedCount = 0;
     const recoveryCount = 0;
     let temporaryChatVerified = false;
+    let persistentChatVerified = false;
     let failurePhase: ChatGptWebFailurePhase | null = null;
     let diagnosticSummary: ChatGptWebDiagnosticSummary | null = null;
     const lines = createInterface({
@@ -256,6 +263,13 @@ export class ChatGptWebDiagnosticClient {
       ) {
         temporaryChatVerified = true;
       }
+      if (
+        frame.type === "event" &&
+        frame.event?.data?.kind === "chatgpt_web" &&
+        frame.event?.data?.phase === "persistent_chat_verified"
+      ) {
+        persistentChatVerified = true;
+      }
       if (frame.type === "error") {
         errorCode = frame.error?.code ?? "chatgpt_web_failed";
         const errorPhase = ChatGptWebFailurePhaseSchema.safeParse(frame.error?.failurePhase);
@@ -274,6 +288,7 @@ export class ChatGptWebDiagnosticClient {
         temporaryChatVerified,
         failurePhase,
         diagnosticSummary,
+        persistentChatVerified,
       );
     if (!outputText) {
       throw new DiagnosticInvocationError(
@@ -283,10 +298,24 @@ export class ChatGptWebDiagnosticClient {
         temporaryChatVerified,
         failurePhase,
         diagnosticSummary,
+        persistentChatVerified,
       );
     }
-    return { outputText, sources, submittedCount, recoveryCount, temporaryChatVerified };
+    return {
+      outputText,
+      sources,
+      submittedCount,
+      recoveryCount,
+      temporaryChatVerified,
+      persistentChatVerified,
+    };
   }
+}
+
+function itemConversationVerified(item: ChatGptWebQualificationItem): boolean {
+  return item.mode === "deep_research"
+    ? item.persistentChatVerified === true
+    : item.temporaryChatVerified === true;
 }
 
 function runPassed(run: ChatGptWebQualificationRun): boolean {
@@ -301,13 +330,13 @@ function runPassed(run: ChatGptWebQualificationRun): boolean {
       item?.status === "succeeded" &&
       item.submittedCount === 1 &&
       item.ownershipMatched === true &&
-      item.temporaryChatVerified === true,
+      itemConversationVerified(item),
     );
   }
   const safeSubmissions = run.items.every(
     (item) =>
       item.submittedCount === 1 &&
-      item.temporaryChatVerified === true &&
+      itemConversationVerified(item) &&
       item.ownershipMatched !== false,
   );
   if (run.suite === "chat_3") return run.succeeded === 3 && safeSubmissions;
@@ -389,7 +418,9 @@ export async function processChatGptWebQualification(
         ownershipMatched &&
         sourcePassed &&
         result.submittedCount === 1 &&
-        result.temporaryChatVerified;
+        (definition.mode === "deep_research"
+          ? result.persistentChatVerified
+          : result.temporaryChatVerified);
       updatedItem = {
         ...run.items[index]!,
         status: passed ? "succeeded" : "failed",
@@ -401,15 +432,22 @@ export async function processChatGptWebQualification(
           ? null
           : !ownershipMatched
             ? "chatgpt_wrong_task_ownership"
-            : !result.temporaryChatVerified
-              ? "chatgpt_temporary_chat_unverified"
+            : !(definition.mode === "deep_research"
+                  ? result.persistentChatVerified
+                  : result.temporaryChatVerified)
+              ? definition.mode === "deep_research"
+                ? "chatgpt_persistent_chat_unverified"
+                : "chatgpt_temporary_chat_unverified"
               : result.submittedCount !== 1
                 ? "chatgpt_duplicate_submission"
                 : "chatgpt_sources_missing",
         submittedCount: result.submittedCount,
         recoveryCount: result.recoveryCount,
         ownershipMatched,
+        conversationMode:
+          definition.mode === "deep_research" ? "persistent_per_request" : "temporary_per_request",
         temporaryChatVerified: result.temporaryChatVerified,
+        persistentChatVerified: result.persistentChatVerified,
         failurePhase: null,
         diagnosticSummary: null,
       };
@@ -433,8 +471,12 @@ export async function processChatGptWebQualification(
         submittedCount: failedSubmittedCount,
         recoveryCount: failedRecoveryCount,
         ownershipMatched: null,
+        conversationMode:
+          definition.mode === "deep_research" ? "persistent_per_request" : "temporary_per_request",
         temporaryChatVerified:
           error instanceof DiagnosticInvocationError ? error.temporaryChatVerified : false,
+        persistentChatVerified:
+          error instanceof DiagnosticInvocationError ? error.persistentChatVerified : false,
         failurePhase: error instanceof DiagnosticInvocationError ? error.failurePhase : null,
         diagnosticSummary:
           error instanceof DiagnosticInvocationError ? error.diagnosticSummary : null,

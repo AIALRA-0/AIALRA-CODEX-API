@@ -171,7 +171,7 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 ### 4.5 Chat Completions 兼容调用
 
-已有工具如果只会说 OpenAI Chat Completions 协议，把 `base_url` 指向 Router 即可直接使用，Idempotency-Key 在此接口可选
+已有工具如果使用本项目实现的 OpenAI Chat Completions 文本子集，把 `base_url` 指向 Router 即可直接使用，Idempotency-Key 在此接口可选
 
 ```powershell
 $ChatBody = @{
@@ -201,6 +201,10 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 ```
 
 非流式调用等待最终正文，流式调用只发送状态和最终完整正文，不伪造逐 Token 输出
+
+普通聊天和搜索强制使用新的非个性化 Temporary Chat。Deep Research 使用每次新建的普通持久会话，调用时必须设置 `chatgpt_mode = "deep_research"`、`conversation_mode = "persistent_per_request"`、`temporary_chat = $false` 和 `deep_research_persistence_acknowledged = $true`。这表示调用方明确接受内容进入 ChatGPT 历史记录以及可能使用账号记忆或个性化的风险；响应头会返回 `X-AIALRA-Data-Retention: persistent_chat_history`
+
+网页持久会话不支持 `session_key` 续接，也不会复用旧对话；每个请求仍创建独立新对话并最多提交 1 次
 
 网页不提供可靠 Token、Credits、额度变化或 API 等效价格，响应使用 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”，不会把 `0` 当作实测值
 

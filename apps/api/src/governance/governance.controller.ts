@@ -91,7 +91,9 @@ function qualificationItems(suite: z.infer<typeof ChatGptWebQualificationSuiteSc
     submittedCount: 0,
     recoveryCount: 0,
     ownershipMatched: null,
+    conversationMode: mode === "deep_research" ? "persistent_per_request" : "temporary_per_request",
     temporaryChatVerified: false,
+    persistentChatVerified: false,
   }));
 }
 

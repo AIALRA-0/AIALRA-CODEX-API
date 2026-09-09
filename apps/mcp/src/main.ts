@@ -78,6 +78,7 @@ server.registerTool(
       model: z.string().min(1).max(128).default("chatgpt-web.auto"),
       require_sources: z.boolean().default(true),
       thinking_depth: z.string().trim().min(1).max(64).optional(),
+      accept_persistent_chat: z.boolean().default(false),
       deadline_ms: z.number().int().min(1_000).max(3_600_000).optional(),
     },
   },
@@ -93,9 +94,11 @@ server.registerTool(
       executionChannel: "chatgpt_web",
       chatgptWeb: {
         mode: input.mode,
-        conversationMode: "temporary_per_request",
-        temporaryChat: true,
-        personalized: false,
+        conversationMode:
+          input.mode === "deep_research" ? "persistent_per_request" : "temporary_per_request",
+        temporaryChat: input.mode !== "deep_research",
+        personalized: input.mode === "deep_research",
+        persistenceAcknowledged: input.mode === "deep_research" && input.accept_persistent_chat,
         requireSources: input.require_sources,
         thinkingDepth: input.thinking_depth,
       },

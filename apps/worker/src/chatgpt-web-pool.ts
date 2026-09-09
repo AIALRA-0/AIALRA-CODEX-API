@@ -624,7 +624,9 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         // including for UI/login failures reported after the send boundary.
         const canFailover = submissionState === "not_submitted";
         const unavailableMode =
-          code === "chatgpt_mode_unavailable" && failurePhase === "temporary_chat_verified";
+          code === "chatgpt_mode_unavailable" &&
+          (failurePhase === "temporary_chat_verified" ||
+            failurePhase === "persistent_chat_verified");
         const quarantine = hardFailure || (!canFailover && !rateLimited && !unavailableMode);
         await this.release(account, invocation.jobId, {
           state: rateLimited

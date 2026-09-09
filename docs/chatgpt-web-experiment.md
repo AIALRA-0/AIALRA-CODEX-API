@@ -36,7 +36,7 @@ flowchart TD
 
 图 2.1 ChatGPT Pro 网页实验任务从接单到结果保存的流程
 
-浏览器池中的每个账号容器只预热 1 个工作标签；每项任务都先进入新的非个性化 Temporary Chat，并确认用户消息、助手消息、编辑器内容和生成状态全部为空
+浏览器池中的每个账号容器只预热 1 个工作标签。普通聊天和搜索先进入新的非个性化 Temporary Chat；Deep Research 在调用方明确确认留存风险后进入新的普通持久会话。两类任务都必须确认用户消息、助手消息、编辑器内容和生成状态全部为空
 
 扩展只负责定位编辑器、按钮、回合和生成状态；实际输入由隔离容器中的 X11 原生键鼠代理完成：激活标签、点击编辑器、清空、粘贴、逐字核对后立即清空临时剪贴板，扩展不申请网页剪贴板权限
 
@@ -137,7 +137,7 @@ bash deploy/scripts/enable-chatgpt-web.sh
 
 当前材料不能证明 ChatGPT 为什么间歇性地为普通聊天创建空白助手消息；首个 Token 等待和重复输入事件两个假设均已单独验证，连续稳定门仍失败；系统按停止条件不继续叠加页面补丁，因此发布状态继续保持关闭
 
-2026-08-31 收尾版本把当前契约固定为 `conversationMode="temporary_per_request"`、`temporaryChat=true` 和 `personalized=false`：每项任务必须创建新的非个性化 Temporary Chat，不允许持久会话或 `sessionKey` 续接。该策略仍需重新完成本页真实门禁；门禁通过前生产网页通道继续关闭
+2026-08-31 收尾版本把普通聊天和搜索固定为 `conversationMode="temporary_per_request"`、`temporaryChat=true` 和 `personalized=false`。2026-09-09 经运营者明确批准，Deep Research 改为 `persistent_per_request`，每次新建普通会话并要求显式留存确认；所有网页模式仍拒绝 `sessionKey` 续接
 
 诊断模式使用独立开关和回环令牌，在生产 API 仍关闭时只允许 1 个显式探针；它只保存元素数量、文本长度、可见性、阶段和摘要，用于区分页面未生成正文、页面渲染失败、结果定位规则失效和输出未完成
 
@@ -170,7 +170,7 @@ node deploy/scripts/probe-chatgpt-web-readiness.mjs
 
 创建接口为 `POST /api/v1/chatgpt-web/qualification-runs`，必须提供 `Idempotency-Key`，可带 `accountId`（如 `account-a`）；查询接口为 `GET /api/v1/chatgpt-web/qualification-runs/{id}`。账号池状态和人工套餐标签由 `GET /api/v1/chatgpt-web/accounts` 查看和管理员 PATCH 修改。
 
-验收记录不保存提示词、回答、账号身份或对话地址，只保存脱敏槽位 ID、每项状态、耗时、输出长度、输出 SHA-256、来源数、提交次数、任务归属结果、Temporary Chat 验证结果和错误码；账号池状态也只保留匿名槽位、人工套餐标签和脱敏诊断
+验收记录不保存提示词、回答、账号身份或对话地址，只保存脱敏槽位 ID、会话模式、每项状态、耗时、输出长度、输出 SHA-256、来源数、提交次数、任务归属结果、临时或持久新会话验证结果和错误码；账号池状态也只保留匿名槽位、人工套餐标签和脱敏诊断
 
 ## 5 调用方法
 
@@ -189,7 +189,7 @@ $Body = @{ # 明确选择网页实验通道
         execution_channel = "chatgpt_web" # 显式选择网页通道，普通 Codex 请求不会暗中切换
         chatgpt_mode = "search" # 使用网页搜索模式
         conversation_mode = "temporary_per_request" # 每项任务创建新的临时对话
-        temporary_chat = $true # 当前契约只接受非个性化 Temporary Chat
+        temporary_chat = $true # 普通聊天和搜索必须使用非个性化 Temporary Chat
         require_sources = $true # 要求桥接器提取回答中的公网来源
     } # 完成实验参数
 } | ConvertTo-Json -Depth 8 # 保留嵌套字段
@@ -220,16 +220,17 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 该 JSON 不能合法加入注释；字段约束以 [`openapi/openapi.yaml`](../openapi/openapi.yaml) 为准
 
-每个网页任务都固定使用新的非个性化 Temporary Chat；旧版本的空白结果仅保留在 4.1 节作为历史基线。单次真实探针通过后即可按并发 1 启用生产网页通道，`full_10` 只作为可选强化观察；任何超时、限流、验证码、登录失效、页面变化或不确定状态都不会自动重试
+普通聊天和搜索固定使用新的非个性化 Temporary Chat。Deep Research 固定使用新的普通持久会话，并要求 `persistenceAcknowledged=true`；响应会明确标记 `persistent_chat_history`。任何模式都不续接旧会话，也不会在超时、限流、验证码、登录失效、页面变化或状态不确定时自动重试
 
 ### 5.3 CLI 和 MCP
 
 ```powershell
 node apps/cli/dist/main.js research --task "调查一个合成主题" --mode search --model chatgpt-web.auto # 创建网页搜索任务并返回任务编号
+node apps/cli/dist/main.js research --task "调查一个合成主题" --mode deep_research --accept-persistent-chat # 明确接受持久历史后创建深度研究任务
 node apps/cli/dist/main.js jobs --limit 20 # 查询最近调用和最终状态
 ```
 
-MCP 工具 `delegate_chatgpt` 接受 `objective`、`mode`、`model`、`require_sources` 和 `deadline_ms`；它只返回任务编号，Codex 需要通过 `job_status` 查询结果
+MCP 工具 `delegate_chatgpt` 接受 `objective`、`mode`、`model`、`require_sources`、`thinking_depth`、`accept_persistent_chat` 和 `deadline_ms`；Deep Research 必须把 `accept_persistent_chat` 设为 `true`
 
 网页任务的委派深度固定为 1，子任务不能再次调用 Router
 

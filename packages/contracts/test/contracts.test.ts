@@ -173,7 +173,7 @@ describe("TaskContractSchema", () => {
     ).toBe(false);
   });
 
-  it("requires a non-personalized Temporary Chat for every web mode", () => {
+  it("keeps chat and search temporary while requiring acknowledgement for persistent research", () => {
     expect(
       TaskContractSchema.safeParse({
         objective: "Search a synthetic topic",
@@ -191,6 +191,22 @@ describe("TaskContractSchema", () => {
         sessionMode: "ephemeral",
         chatgptWeb: { mode: "deep_research", temporaryChat: true, requireSources: true },
       }).success,
+    ).toBe(false);
+    expect(
+      TaskContractSchema.safeParse({
+        objective: "Research a synthetic topic",
+        executionChannel: "chatgpt_web",
+        model: "chatgpt-web.auto",
+        sessionMode: "ephemeral",
+        chatgptWeb: {
+          mode: "deep_research",
+          conversationMode: "persistent_per_request",
+          temporaryChat: false,
+          personalized: true,
+          persistenceAcknowledged: true,
+          requireSources: true,
+        },
+      }).success,
     ).toBe(true);
     expect(
       TaskContractSchema.safeParse({
@@ -198,7 +214,14 @@ describe("TaskContractSchema", () => {
         executionChannel: "chatgpt_web",
         model: "chatgpt-web.auto",
         sessionMode: "ephemeral",
-        chatgptWeb: { mode: "deep_research", temporaryChat: false, requireSources: true },
+        chatgptWeb: {
+          mode: "deep_research",
+          conversationMode: "persistent_per_request",
+          temporaryChat: false,
+          personalized: true,
+          persistenceAcknowledged: false,
+          requireSources: true,
+        },
       }).success,
     ).toBe(false);
   });

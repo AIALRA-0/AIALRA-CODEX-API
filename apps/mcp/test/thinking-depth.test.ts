@@ -44,15 +44,22 @@ it("passes every discovered depth through a real MCP stdio session without resub
       for (const depth of ["Instant", "Medium", "High", "Extra High", "6 Pro"]) {
         const result = await client.callTool({
           name: "delegate_chatgpt",
-          arguments: { objective: "Synthetic", mode, thinking_depth: depth },
+          arguments: {
+            objective: "Synthetic",
+            mode,
+            thinking_depth: depth,
+            accept_persistent_chat: mode === "deep_research",
+          },
         });
         expect(result.isError).not.toBe(true);
         expect(requests.at(-1)?.task.chatgptWeb).toMatchObject({
           mode,
           thinkingDepth: depth,
-          temporaryChat: true,
-          personalized: false,
-          conversationMode: "temporary_per_request",
+          temporaryChat: mode !== "deep_research",
+          personalized: mode === "deep_research",
+          persistenceAcknowledged: mode === "deep_research",
+          conversationMode:
+            mode === "deep_research" ? "persistent_per_request" : "temporary_per_request",
         });
       }
     }

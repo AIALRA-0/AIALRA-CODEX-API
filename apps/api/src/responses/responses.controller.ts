@@ -40,6 +40,12 @@ export class ResponsesController {
       value.aialra?.execution_channel ??
       (value.model.startsWith("chatgpt-web.") ? "chatgpt_web" : "codex");
     const chatgptMode = value.aialra?.chatgpt_mode ?? "chat";
+    const persistentDeepResearch =
+      executionChannel === "chatgpt_web" && chatgptMode === "deep_research";
+    const conversationMode =
+      value.aialra?.conversation_mode ??
+      (persistentDeepResearch ? "persistent_per_request" : "temporary_per_request");
+    const temporaryChat = value.aialra?.temporary_chat ?? !persistentDeepResearch;
     const deadlineMs =
       value.aialra?.deadline_ms ??
       (executionChannel === "chatgpt_web"
@@ -66,9 +72,11 @@ export class ResponsesController {
         executionChannel === "chatgpt_web"
           ? {
               mode: chatgptMode,
-              conversationMode: value.aialra?.conversation_mode ?? "temporary_per_request",
-              temporaryChat: value.aialra?.temporary_chat ?? true,
-              personalized: false,
+              conversationMode,
+              temporaryChat,
+              personalized: persistentDeepResearch,
+              persistenceAcknowledged:
+                value.aialra?.deep_research_persistence_acknowledged ?? false,
               requireSources: value.aialra?.require_sources ?? chatgptMode !== "chat",
               thinkingDepth: value.aialra?.thinking_depth,
             }
@@ -92,6 +100,10 @@ export class ResponsesController {
       request.executionPolicy,
       request.scopes ?? [],
     );
+    response.setHeader(
+      "X-AIALRA-Data-Retention",
+      persistentDeepResearch ? "persistent_chat_history" : "temporary_or_provider_managed",
+    );
 
     if (value.stream) {
       const stream = openEventStream(response);
@@ -102,7 +114,14 @@ export class ResponsesController {
           object: "response",
           status: "in_progress",
           model: job.task.model,
-          metadata: { job_id: job.id, session_key: job.task.sessionKey ?? null },
+          metadata: {
+            job_id: job.id,
+            session_key: job.task.sessionKey ?? null,
+            conversation_mode: job.task.chatgptWeb?.conversationMode ?? null,
+            data_retention: persistentDeepResearch
+              ? "persistent_chat_history"
+              : "temporary_or_provider_managed",
+          },
         };
         response.write(`event: response.created\n`);
         response.write(`data: ${JSON.stringify(created)}\n\n`);
@@ -196,7 +215,14 @@ export class ResponsesController {
           }
         : null,
       usage: completed.usage,
-      metadata: { job_id: completed.id, session_key: completed.task.sessionKey ?? null },
+      metadata: {
+        job_id: completed.id,
+        session_key: completed.task.sessionKey ?? null,
+        conversation_mode: completed.task.chatgptWeb?.conversationMode ?? null,
+        data_retention: persistentDeepResearch
+          ? "persistent_chat_history"
+          : "temporary_or_provider_managed",
+      },
     });
   }
 }

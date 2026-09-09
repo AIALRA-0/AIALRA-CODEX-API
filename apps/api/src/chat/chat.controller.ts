@@ -97,6 +97,15 @@ export function chatCompletionFromJob(job: Job, maxOutputTokens: number): ChatCo
       job_id: job.id,
       session_key: job.task.sessionKey ?? null,
       measurement_status: measured ? "measured" : "unavailable",
+      ...(job.task.chatgptWeb
+        ? {
+            conversation_mode: job.task.chatgptWeb.conversationMode,
+            data_retention:
+              job.task.chatgptWeb.conversationMode === "persistent_per_request"
+                ? ("persistent_chat_history" as const)
+                : ("temporary_or_provider_managed" as const),
+          }
+        : {}),
     },
   };
   return completion;
@@ -132,6 +141,12 @@ export class ChatCompletionsController {
       (value.model.startsWith("chatgpt-web.") ? "chatgpt_web" : "codex");
     const sessionKey = value.aialra?.session_key;
     const chatgptMode = value.aialra?.chatgpt_mode ?? "chat";
+    const persistentDeepResearch =
+      executionChannel === "chatgpt_web" && chatgptMode === "deep_research";
+    const conversationMode =
+      value.aialra?.conversation_mode ??
+      (persistentDeepResearch ? "persistent_per_request" : "temporary_per_request");
+    const temporaryChat = value.aialra?.temporary_chat ?? !persistentDeepResearch;
     const deadlineMs =
       value.aialra?.deadline_ms ??
       (executionChannel === "chatgpt_web"
@@ -173,9 +188,11 @@ export class ChatCompletionsController {
         executionChannel === "chatgpt_web"
           ? {
               mode: chatgptMode,
-              conversationMode: value.aialra?.conversation_mode ?? "temporary_per_request",
-              temporaryChat: value.aialra?.temporary_chat ?? true,
-              personalized: false,
+              conversationMode,
+              temporaryChat,
+              personalized: persistentDeepResearch,
+              persistenceAcknowledged:
+                value.aialra?.deep_research_persistence_acknowledged ?? false,
               requireSources: value.aialra?.require_sources ?? chatgptMode !== "chat",
               thinkingDepth: value.aialra?.thinking_depth,
             }
@@ -199,6 +216,10 @@ export class ChatCompletionsController {
       idempotencyKey,
       request.executionPolicy,
       request.scopes ?? [],
+    );
+    response.setHeader(
+      "X-AIALRA-Data-Retention",
+      persistentDeepResearch ? "persistent_chat_history" : "temporary_or_provider_managed",
     );
 
     if (value.stream) {

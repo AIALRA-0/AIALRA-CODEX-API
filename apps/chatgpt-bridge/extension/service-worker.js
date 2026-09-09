@@ -395,23 +395,32 @@ async function prepareSlot(slot, invocation) {
     documentToken: null,
     quarantinedUntil: null,
   });
-  const previousDocumentToken = await navigateToFreshChat(slot, true, true);
+  const previousDocumentToken = await navigateToFreshChat(slot, true, invocation.temporaryChat);
   const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken, preparationDeadline);
   const diagnostics = page.diagnostics ?? {};
+  const temporaryReady =
+    invocation.conversationMode === "temporary_per_request" &&
+    invocation.temporaryChat === true &&
+    invocation.personalized === false &&
+    diagnostics.temporaryChatEnabled === true &&
+    diagnostics.temporaryChatPersonalized === false;
+  const persistentDeepResearchReady =
+    invocation.mode === "deep_research" &&
+    invocation.conversationMode === "persistent_per_request" &&
+    invocation.temporaryChat === false &&
+    invocation.personalized === true &&
+    invocation.persistenceAcknowledged === true &&
+    diagnostics.temporaryChatEnabled === false;
   if (
     !diagnostics.freshConversation ||
     !diagnostics.documentToken ||
-    diagnostics.temporaryChatEnabled !== true ||
-    diagnostics.temporaryChatPersonalized !== false
+    (!temporaryReady && !persistentDeepResearchReady)
   ) {
     throw new Error("chatgpt_ui_changed");
   }
   await patchSlot(slot, { state: "ready", documentToken: diagnostics.documentToken });
   return {
     ...invocation,
-    conversationMode: "temporary_per_request",
-    temporaryChat: true,
-    personalized: false,
     documentToken: diagnostics.documentToken,
   };
 }

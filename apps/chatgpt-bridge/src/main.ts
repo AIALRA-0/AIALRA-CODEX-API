@@ -715,6 +715,7 @@ async function main(): Promise<void> {
           conversationMode: value.task.chatgptWeb.conversationMode,
           temporaryChat: value.task.chatgptWeb.temporaryChat,
           personalized: value.task.chatgptWeb.personalized,
+          persistenceAcknowledged: value.task.chatgptWeb.persistenceAcknowledged,
           requireSources: value.task.chatgptWeb.requireSources,
           deadlineMs: value.task.deadlineMs,
           deadlineAt: Date.now() + value.task.deadlineMs,

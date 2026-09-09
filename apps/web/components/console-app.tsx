@@ -37,7 +37,10 @@ interface Job {
     executionChannel?: "codex" | "chatgpt_web";
     chatgptWeb?: {
       mode: "chat" | "search" | "deep_research";
+      conversationMode: "temporary_per_request" | "persistent_per_request";
       temporaryChat: boolean;
+      personalized: boolean;
+      persistenceAcknowledged: boolean;
       requireSources: boolean;
     };
     permissions?: { preset?: "restricted" | "confirm" | "full" };
@@ -127,7 +130,7 @@ interface ChatGptWebStatus {
   retryAfter: number | null;
   lastRateLimitAt: string | null;
   consecutiveRateLimits: number;
-  conversationMode: "temporary_per_request";
+  conversationMode: "temporary_per_request" | "persistent_per_request";
   temporaryChatVerified: boolean;
   lastRecoveryProbeAt: string | null;
   lastRecoveryProbePassed: boolean | null;
@@ -209,6 +212,7 @@ interface ChatGptWebAccount {
     | "opening"
     | "configuring"
     | "temporary_chat_verified"
+    | "persistent_chat_verified"
     | "mode_selected"
     | "input_ready"
     | "submitted"
@@ -259,11 +263,14 @@ interface ChatGptWebQualificationRun {
     submittedCount: number;
     recoveryCount: number;
     ownershipMatched: boolean | null;
+    conversationMode: "temporary_per_request" | "persistent_per_request";
     temporaryChatVerified: boolean;
+    persistentChatVerified: boolean;
     failurePhase?:
       | "opening"
       | "configuring"
       | "temporary_chat_verified"
+      | "persistent_chat_verified"
       | "mode_selected"
       | "input_ready"
       | "submitted"
@@ -730,7 +737,8 @@ function Playground() {
   const [model, setModel] = useState("auto");
   const [executionChannel, setExecutionChannel] = useState<"codex" | "chatgpt_web">("codex");
   const [chatgptMode, setChatgptMode] = useState<"chat" | "search" | "deep_research">("search");
-  const [temporaryChat] = useState(true);
+  const [deepResearchPersistenceAcknowledged, setDeepResearchPersistenceAcknowledged] =
+    useState(false);
   const [requireSources, setRequireSources] = useState(true);
   const [effort, setEffort] = useState("medium");
   const [thinkingDepth, setThinkingDepth] = useState("");
@@ -778,6 +786,9 @@ function Playground() {
     setError("");
     try {
       if (effortUnavailable) throw new Error("请先选择当前模型支持的推理等级");
+      if (chatgptMode === "deep_research" && !deepResearchPersistenceAcknowledged) {
+        throw new Error("请先确认 Deep Research 会保留在 ChatGPT 历史记录中");
+      }
       const responseSchema = schemaText.trim() ? JSON.parse(schemaText) : undefined;
       const deadlineMs =
         executionChannel === "chatgpt_web"
@@ -799,9 +810,14 @@ function Playground() {
               ? {
                   chatgptWeb: {
                     mode: chatgptMode,
-                    conversationMode: "temporary_per_request",
-                    temporaryChat,
-                    personalized: false,
+                    conversationMode:
+                      chatgptMode === "deep_research"
+                        ? "persistent_per_request"
+                        : "temporary_per_request",
+                    temporaryChat: chatgptMode !== "deep_research",
+                    personalized: chatgptMode === "deep_research",
+                    persistenceAcknowledged:
+                      chatgptMode === "deep_research" && deepResearchPersistenceAcknowledged,
                     requireSources,
                     ...(thinkingDepth ? { thinkingDepth } : {}),
                   },
@@ -1004,6 +1020,7 @@ function Playground() {
                   onChange={(event) => {
                     const nextMode = event.target.value as "chat" | "search" | "deep_research";
                     setChatgptMode(nextMode);
+                    setDeepResearchPersistenceAcknowledged(false);
                   }}
                 >
                   <option value="chat">普通聊天</option>
@@ -1011,10 +1028,23 @@ function Playground() {
                   <option value="deep_research">深度研究</option>
                 </select>
               </div>
-              <label className="check-row">
-                <input type="checkbox" checked={temporaryChat} disabled readOnly />
-                每次调用使用新的非个性化临时对话
-              </label>
+              {chatgptMode === "deep_research" ? (
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={deepResearchPersistenceAcknowledged}
+                    onChange={(event) =>
+                      setDeepResearchPersistenceAcknowledged(event.target.checked)
+                    }
+                  />
+                  我已知晓：Deep Research 会创建新的普通会话并保留在 ChatGPT 历史记录中
+                </label>
+              ) : (
+                <label className="check-row">
+                  <input type="checkbox" checked disabled readOnly />
+                  每次调用使用新的非个性化临时对话
+                </label>
+              )}
               <label className="check-row">
                 <input
                   type="checkbox"
@@ -1024,7 +1054,9 @@ function Playground() {
                 必须返回可提取的网页来源
               </label>
               <small className="muted">
-                不读取既有记忆、自定义指令或插件；登录异常或界面变化时停止调用
+                {chatgptMode === "deep_research"
+                  ? "每个任务仍从空白新会话开始且只提交一次，但可能使用账号记忆或个性化，并会留下聊天历史"
+                  : "不读取既有记忆、自定义指令或插件；登录异常或界面变化时停止调用"}
               </small>
             </div>
           ) : null}
@@ -1466,6 +1498,14 @@ function Jobs() {
                   </dd>
                 </div>
                 <div>
+                  <dt>会话留存</dt>
+                  <dd>
+                    {selected.task.chatgptWeb?.conversationMode === "persistent_per_request"
+                      ? "新的普通会话，会保留在 ChatGPT 历史记录中"
+                      : "新的非个性化临时对话"}
+                  </dd>
+                </div>
+                <div>
                   <dt>计量数据</dt>
                   <dd>网页未提供可靠 Token、Credits、额度变化或 API 等效成本</dd>
                 </div>
@@ -1782,8 +1822,9 @@ const FAILURE_PHASE_LABELS: Record<
   string
 > = {
   opening: "打开页面",
-  configuring: "配置临时对话",
+  configuring: "配置新对话",
   temporary_chat_verified: "临时对话已验证",
+  persistent_chat_verified: "普通新会话已验证",
   mode_selected: "模式已选择",
   input_ready: "输入已核对",
   submitted: "消息已发送，等待用户回显",

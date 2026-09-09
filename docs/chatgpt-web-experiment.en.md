@@ -29,7 +29,7 @@ flowchart TD
 
 Figure 2.1. Execution path for an explicit ChatGPT web job.
 
-The browser prewarms one work tab. Every job first enters a new non-personalized Temporary Chat and proves that user turns, assistant turns, composer content, and generation state are all empty.
+Each account browser prewarms one work tab. Chat and search enter a new non-personalized Temporary Chat. Deep Research enters a new ordinary persistent conversation only after the caller explicitly acknowledges retention. Both paths prove that user turns, assistant turns, composer content, and generation state are empty before submission.
 
 The extension only locates the editor, controls, turns, and generation state. A native X11 input agent inside the isolated container activates the tab, clicks the editor, clears it, pastes the prompt, and clears the temporary clipboard after a character-for-character DOM check. The extension requests no page clipboard permission.
 
@@ -107,7 +107,7 @@ The failure is localized to the ChatGPT page output layer. The failed job's user
 
 The current evidence does not establish why ChatGPT intermittently creates a blank assistant turn for ordinary chat. The first-token wait and duplicate-input-event hypotheses were tested separately, but the consecutive stability gate still failed. The stop condition now prevents further page patches, so the release state remains disabled.
 
-The 2026-08-31 convergence contract is fixed to `conversationMode="temporary_per_request"`, `temporaryChat=true`, and `personalized=false`: every job must create a new non-personalized Temporary Chat, and persistent sessions or `sessionKey` continuation are rejected. This policy still has to pass the real-page gate on the VPS, so production web admission remains disabled until then.
+The 2026-08-31 convergence contract keeps chat and search at `conversationMode="temporary_per_request"`, `temporaryChat=true`, and `personalized=false`. Following explicit operator approval on 2026-09-09, Deep Research uses `persistent_per_request`, creates a fresh ordinary conversation, and requires an explicit retention acknowledgement. Every web mode still rejects `sessionKey` continuation.
 
 Diagnostic mode uses a separate feature flag and a loopback token while production admission stays disabled. A single explicit probe records only stages, counts, text lengths, visibility, digests, and timing to distinguish blank page generation, rendering failure, selector drift, and incomplete output.
 
@@ -140,7 +140,7 @@ The protected “ChatGPT web channel” page can run the suites below for a sele
 
 Create a run with `POST /api/v1/chatgpt-web/qualification-runs`, an `Idempotency-Key`, and optionally `accountId` such as `account-a`. Read it from `GET /api/v1/chatgpt-web/qualification-runs/{id}`. Administrators can view and edit the fixed pool's redacted state and manual plan labels through `GET /api/v1/chatgpt-web/accounts` and `PATCH /api/v1/chatgpt-web/accounts/{accountId}`.
 
-Qualification records exclude prompts, answers, account identity, and conversation URLs. They contain only a redacted slot id plus item state, duration, output length, output SHA-256, source count, submission count, ownership result, Temporary Chat verification, and error code. Pool state likewise contains only opaque slots, manual plan labels, and redacted diagnostics.
+Qualification records exclude prompts, answers, account identity, and conversation URLs. They contain only a redacted slot id plus conversation mode, item state, duration, output length, output SHA-256, source count, submission count, ownership result, fresh temporary-or-persistent conversation verification, and error code. Pool state likewise contains only opaque slots, manual plan labels, and redacted diagnostics.
 
 ## 5 Calling the channel
 
@@ -159,7 +159,7 @@ $Body = @{ # Explicitly select the web experiment.
         execution_channel = "chatgpt_web" # Codex requests never switch here implicitly.
         chatgpt_mode = "search" # Select page search mode.
         conversation_mode = "temporary_per_request" # Create a new Temporary Chat for this job.
-        temporary_chat = $true # The contract accepts only non-personalized Temporary Chat.
+        temporary_chat = $true # Chat and search require a non-personalized Temporary Chat.
         require_sources = $true # Ask the bridge to extract public sources.
     } # Finish the experiment options.
 } | ConvertTo-Json -Depth 8 # Preserve all nested fields.
@@ -190,16 +190,17 @@ Streaming requests emit state and one complete final body; they do not fabricate
 
 JSON cannot legally contain comments. See [`openapi/openapi.yaml`](../openapi/openapi.yaml) for field constraints.
 
-Every web job uses a new non-personalized Temporary Chat. The old blank-result observation remains in section 4.1 only as a historical baseline. A successful `single_probe` is sufficient to enable production web admission at concurrency one; `full_10` remains optional strengthening evidence. Timeouts, rate limits, sign-in failures, verification prompts, UI changes, and uncertain delivery are never retried automatically.
+Chat and search use a new non-personalized Temporary Chat. Deep Research uses a new ordinary persistent conversation and requires `persistenceAcknowledged=true`; responses identify `persistent_chat_history`. No web mode continues an old conversation or retries automatically after timeout, rate limit, sign-in failure, verification prompt, UI change, or uncertain delivery.
 
 ### 5.3 CLI and MCP
 
 ```powershell
 node apps/cli/dist/main.js research --task "Research a synthetic topic" --mode search --model chatgpt-web.auto # Create a web-search job and print its id.
+node apps/cli/dist/main.js research --task "Research a synthetic topic" --mode deep_research --accept-persistent-chat # Explicitly accept persistent history for Deep Research.
 node apps/cli/dist/main.js jobs --limit 20 # Inspect recent jobs and terminal states.
 ```
 
-The MCP tool `delegate_chatgpt` accepts `objective`, `mode`, `model`, `require_sources`, and `deadline_ms`. It returns a job id for `job_status`; web jobs cannot delegate again.
+The MCP tool `delegate_chatgpt` accepts `objective`, `mode`, `model`, `require_sources`, `thinking_depth`, `accept_persistent_chat`, and `deadline_ms`. Deep Research requires `accept_persistent_chat=true`.
 
 ## 6 Models, usage, and errors
 
@@ -207,7 +208,7 @@ The web channel retains the `chatgpt-web.auto` entry. Its `webThinkingDepths` in
 
 Use `task.chatgptWeb.thinkingDepth` for jobs, or `aialra.thinking_depth` for Chat Completions and Responses, with an exact discovered label. Omission preserves the page default. Discovery only opens and closes the menu on an idle page, without typing or sending messages. Results refresh on demand with a one-minute cache; an unreadable menu produces an empty list, never invented choices.
 
-The pool combines available choices but dispatches only to an account that actually offers the requested depth. Each new temporary page selects and verifies the depth before submission. Missing choices return `chatgpt_thinking_depth_unavailable`; unconfirmed selections return `chatgpt_thinking_depth_unverified`. Neither failure sends a message or silently downgrades the requested depth.
+The pool combines available choices but dispatches only to an account that actually offers the requested depth. Each fresh page selects and verifies the depth before submission. Missing choices return `chatgpt_thinking_depth_unavailable`; unconfirmed selections return `chatgpt_thinking_depth_unverified`. Neither failure sends a message or silently downgrades the requested depth.
 
 Both menus and accessible sliders are supported. Slider discovery reads each actual label and restores the original choice; counts and labels are not hardcoded. CLI `call` / `research` accepts `--thinking-depth`; MCP `delegate_chatgpt` accepts `thinking_depth`.
 

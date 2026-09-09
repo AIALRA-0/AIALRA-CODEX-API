@@ -1097,6 +1097,13 @@ function boundTemporaryDocument(documentToken) {
   );
 }
 
+function boundInvocationDocument(documentToken, temporaryChat) {
+  if (temporaryChat) return boundTemporaryDocument(documentToken);
+  return (
+    documentToken === DOCUMENT_TOKEN && taskPageIsSupported() && temporaryChatEnabled() === false
+  );
+}
+
 function currentSurface() {
   const controls = [...document.querySelectorAll("button, [role='tab']")].filter((element) => {
     const rectangle = element.getBoundingClientRect();
@@ -1358,7 +1365,14 @@ function extractResult(element, completionMarker = null) {
   return { outputText, sources };
 }
 
-async function waitForUserEcho(beforeCount, objective, documentToken, deadline, jobId) {
+async function waitForUserEcho(
+  beforeCount,
+  objective,
+  documentToken,
+  deadline,
+  jobId,
+  temporaryChat = true,
+) {
   let matchedStableReads = 0;
   let matchedStableSince = 0;
   let lastMismatch = "";
@@ -1368,7 +1382,7 @@ async function waitForUserEcho(beforeCount, objective, documentToken, deadline, 
   while (Date.now() < deadline) {
     const failure = failureState();
     if (failure) throw new Error(failure);
-    if (!boundTemporaryDocument(documentToken)) {
+    if (!boundInvocationDocument(documentToken, temporaryChat)) {
       throw new Error("chatgpt_delivery_uncertain");
     }
     const messages = userMessages();
@@ -1413,6 +1427,7 @@ async function waitForStableResult(
   documentToken,
   deadline,
   jobId,
+  temporaryChat = true,
 ) {
   let lastText = "";
   let stableReads = 0;
@@ -1429,7 +1444,7 @@ async function waitForStableResult(
     const latestUser = users.at(-1);
     const latestUserText = normalizedText(visibleText(latestUser));
     if (
-      !boundTemporaryDocument(documentToken) ||
+      !boundInvocationDocument(documentToken, temporaryChat) ||
       users.length !== beforeUserCount + 1 ||
       latestUserText !== normalizedText(objective)
     ) {
@@ -1550,19 +1565,29 @@ async function invoke(invocation) {
     let composer = await waitForElement(SELECTORS.composer, deadline);
     if (!controlDiagnostics().freshConversation) throw new Error("chatgpt_ui_changed");
     await reportProgress(invocation.jobId, "configuring");
-    if (
-      invocation.conversationMode !== "temporary_per_request" ||
-      invocation.temporaryChat !== true ||
-      invocation.personalized !== false
-    ) {
-      throw new Error("chatgpt_ui_changed");
+    const temporaryRequest =
+      invocation.mode !== "deep_research" &&
+      invocation.conversationMode === "temporary_per_request" &&
+      invocation.temporaryChat === true &&
+      invocation.personalized === false;
+    const persistentDeepResearch =
+      invocation.mode === "deep_research" &&
+      invocation.conversationMode === "persistent_per_request" &&
+      invocation.temporaryChat === false &&
+      invocation.personalized === true &&
+      invocation.persistenceAcknowledged === true;
+    if (!temporaryRequest && !persistentDeepResearch) throw new Error("chatgpt_ui_changed");
+    if (temporaryRequest) {
+      await configureNonPersonalizedTemporaryChat(invocation.jobId, deadline);
+      if (!temporaryChatEnabled() || temporaryChatPersonalized() !== false) {
+        throw new Error("chatgpt_ui_changed");
+      }
+      verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN;
+      await reportProgress(invocation.jobId, "temporary_chat_verified");
+    } else {
+      if (temporaryChatEnabled()) throw new Error("chatgpt_ui_changed");
+      await reportProgress(invocation.jobId, "persistent_chat_verified");
     }
-    await configureNonPersonalizedTemporaryChat(invocation.jobId, deadline);
-    if (!temporaryChatEnabled() || temporaryChatPersonalized() !== false) {
-      throw new Error("chatgpt_ui_changed");
-    }
-    verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN;
-    await reportProgress(invocation.jobId, "temporary_chat_verified");
     await configureMode(invocation.mode, invocation.jobId, deadline);
     await reportProgress(invocation.jobId, "mode_selected");
     await configureThinkingDepth(invocation, deadline);
@@ -1592,6 +1617,7 @@ async function invoke(invocation) {
       invocation.documentToken,
       deadline,
       invocation.jobId,
+      invocation.temporaryChat,
     );
     await reportProgress(invocation.jobId, "user_echo_verified", controlDiagnostics(pageObjective));
     await reportProgress(invocation.jobId, "generating", controlDiagnostics(pageObjective));
@@ -1603,6 +1629,7 @@ async function invoke(invocation) {
       invocation.documentToken,
       deadline,
       invocation.jobId,
+      invocation.temporaryChat,
     );
     await reportProgress(invocation.jobId, "stabilizing");
     if (invocation.requireSources && result.sources.length === 0) {

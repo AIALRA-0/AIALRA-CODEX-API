@@ -26,7 +26,11 @@ describe("web thinking depth compatibility", () => {
       const body = {
         model: "chatgpt-web.auto",
         stream,
-        aialra: { thinking_depth: depth, chatgpt_mode: mode },
+        aialra: {
+          thinking_depth: depth,
+          chatgpt_mode: mode,
+          ...(mode === "deep_research" ? { deep_research_persistence_acknowledged: true } : {}),
+        },
         ...(kind === "chat"
           ? { messages: [{ role: "user", content: "Synthetic" }] }
           : { input: "Synthetic" }),
@@ -42,9 +46,11 @@ describe("web thinking depth compatibility", () => {
       expect(create.mock.calls[0]?.[0].task.chatgptWeb).toMatchObject({
         thinkingDepth: depth,
         mode,
-        temporaryChat: true,
-        personalized: false,
-        conversationMode: "temporary_per_request",
+        temporaryChat: mode !== "deep_research",
+        personalized: mode === "deep_research",
+        persistenceAcknowledged: mode === "deep_research",
+        conversationMode:
+          mode === "deep_research" ? "persistent_per_request" : "temporary_per_request",
       });
     },
   );

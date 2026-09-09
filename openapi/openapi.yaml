@@ -997,13 +997,16 @@ components:
           description: Exact depth label discovered from the account's visible thinking menu; omitted uses the page default.
         conversation_mode:
           type: string
-          const: temporary_per_request
+          enum: [temporary_per_request, persistent_per_request]
           default: temporary_per_request
         temporary_chat:
           type: boolean
-          const: true
           default: true
-          description: Every ChatGPT web request uses a new non-personalized Temporary Chat.
+          description: Chat and search use Temporary Chat; Deep Research requires false.
+        deep_research_persistence_acknowledged:
+          type: boolean
+          default: false
+          description: Must be true for Deep Research because the new ordinary conversation remains in ChatGPT history and may use account personalization.
         require_sources:
           type: boolean
     ExecutionPolicy:
@@ -1134,23 +1137,33 @@ components:
         chatgptWeb:
           type: object
           additionalProperties: false
-          required: [mode, conversationMode, temporaryChat, personalized, requireSources]
+          required:
+            [
+              mode,
+              conversationMode,
+              temporaryChat,
+              personalized,
+              persistenceAcknowledged,
+              requireSources,
+            ]
           properties:
             mode:
               type: string
               enum: [chat, search, deep_research]
             conversationMode:
               type: string
-              const: temporary_per_request
+              enum: [temporary_per_request, persistent_per_request]
               default: temporary_per_request
             temporaryChat:
               type: boolean
-              const: true
               default: true
             personalized:
               type: boolean
-              const: false
               default: false
+            persistenceAcknowledged:
+              type: boolean
+              default: false
+              description: Explicit acknowledgement required for persistent Deep Research calls.
             requireSources:
               type: boolean
             thinkingDepth:
@@ -1492,7 +1505,7 @@ components:
         retryAfter: { type: [integer, "null"], minimum: 0 }
         lastRateLimitAt: { type: [string, "null"], format: date-time }
         consecutiveRateLimits: { type: integer, minimum: 0 }
-        conversationMode: { type: string, const: temporary_per_request }
+        conversationMode: { type: string, enum: [temporary_per_request, persistent_per_request] }
         temporaryChatVerified: { type: boolean }
         lastRecoveryProbeAt: { type: [string, "null"], format: date-time }
         lastRecoveryProbePassed: { type: [boolean, "null"] }
@@ -1618,7 +1631,9 @@ components:
           submittedCount,
           recoveryCount,
           ownershipMatched,
+          conversationMode,
           temporaryChatVerified,
+          persistentChatVerified,
         ]
       properties:
         index: { type: integer, minimum: 1, maximum: 10 }
@@ -1633,7 +1648,9 @@ components:
         submittedCount: { type: integer, minimum: 0 }
         recoveryCount: { type: integer, minimum: 0, default: 0 }
         ownershipMatched: { type: [boolean, "null"] }
+        conversationMode: { type: string, enum: [temporary_per_request, persistent_per_request] }
         temporaryChatVerified: { type: boolean, default: false }
+        persistentChatVerified: { type: boolean, default: false }
         failurePhase:
           type: [string, "null"]
           enum:
@@ -1641,6 +1658,7 @@ components:
               opening,
               configuring,
               temporary_chat_verified,
+              persistent_chat_verified,
               mode_selected,
               input_ready,
               submitted,
@@ -1836,6 +1854,12 @@ components:
             measurement_status:
               type: string
               enum: [measured, unavailable]
+            conversation_mode:
+              type: [string, "null"]
+              enum: [temporary_per_request, persistent_per_request, null]
+            data_retention:
+              type: string
+              enum: [persistent_chat_history, temporary_or_provider_managed]
     ResponsesRequest:
       type: object
       required: [input]

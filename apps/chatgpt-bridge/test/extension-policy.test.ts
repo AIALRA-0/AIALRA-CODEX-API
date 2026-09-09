@@ -82,9 +82,10 @@ describe("single-page browser agent policy", () => {
       'const TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true"',
     );
     expect(serviceWorker).toContain("navigateToFreshChat(slot, false, true)");
-    expect(serviceWorker).toContain("navigateToFreshChat(slot, true, true)");
-    expect(serviceWorker).toContain("diagnostics.temporaryChatEnabled !== true");
-    expect(serviceWorker).toContain("diagnostics.temporaryChatPersonalized !== false");
+    expect(serviceWorker).toContain("navigateToFreshChat(slot, true, invocation.temporaryChat)");
+    expect(serviceWorker).toContain("diagnostics.temporaryChatEnabled === true");
+    expect(serviceWorker).toContain("diagnostics.temporaryChatPersonalized === false");
+    expect(serviceWorker).toContain("diagnostics.temporaryChatEnabled === false");
     expect(contentScript).toContain('url.searchParams.get("temporary-chat") === "true"');
     expect(contentScript).toContain("temporaryChatSemanticMarker()");
     expect(contentScript).toContain("function temporaryChatIntroControl()");
