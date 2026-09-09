@@ -24,7 +24,12 @@
   },
   "pnpm": {
     "overrides": {
-      "esbuild": "0.28.2"
+      "esbuild": "0.28.2",
+      "multer": "2.3.0",
+      "qs": "6.16.0",
+      "sharp": "0.35.4",
+      "js-yaml@^4.0.0": "4.3.2",
+      "hono": "4.13.5"
     }
   },
   "devDependencies": {
