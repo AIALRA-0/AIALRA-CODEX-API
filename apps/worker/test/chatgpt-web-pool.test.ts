@@ -105,6 +105,49 @@ afterEach(() => {
 });
 
 describe("ChatGptWebPoolProvider", () => {
+  it.each(["temporary_chat_verified", "submitted", "generating"])(
+    "preserves ordinary-chat qualification only for verified pre-send mode absence: %s",
+    async (failurePhase) => {
+      const { repository, configs } = await readyRepository();
+      await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+      let calls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: URL | RequestInfo) => {
+          const url = String(input);
+          if (url.endsWith("/healthz"))
+            return Response.json(health(url.includes("account-b") ? "account-b" : "account-a"));
+          calls += 1;
+          return response([
+            {
+              type: "event",
+              event: { type: "tool", data: { kind: "chatgpt_web", phase: failurePhase } },
+            },
+            {
+              type: "error",
+              error: {
+                code: "chatgpt_mode_unavailable",
+                message: "mode unavailable",
+                failurePhase,
+              },
+            },
+          ]);
+        }),
+      );
+      const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+      await pool.syncAccounts();
+      await expect(pool.invoke(invocation())).rejects.toMatchObject({
+        code: "chatgpt_mode_unavailable",
+      });
+      expect(calls).toBe(1);
+      const account = (await repository.listChatGptWebAccounts()).find(
+        (item) => item.accountId === "account-a",
+      )!;
+      expect(account.activeJobId).toBeNull();
+      expect(account.qualified).toBe(failurePhase === "temporary_chat_verified");
+      if (failurePhase === "temporary_chat_verified") expect(account.lastSubmissionAt).toBeNull();
+    },
+  );
   function depthCatalog(depths: string[]) {
     return {
       source: "chatgpt-web",

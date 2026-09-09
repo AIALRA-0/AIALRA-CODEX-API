@@ -623,9 +623,17 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         // the bridge accepted the invocation, the task stays pinned forever,
         // including for UI/login failures reported after the send boundary.
         const canFailover = submissionState === "not_submitted";
-        const quarantine = hardFailure || (!canFailover && !rateLimited);
+        const unavailableMode =
+          code === "chatgpt_mode_unavailable" && failurePhase === "temporary_chat_verified";
+        const quarantine = hardFailure || (!canFailover && !rateLimited && !unavailableMode);
         await this.release(account, invocation.jobId, {
-          state: rateLimited ? "cooldown" : quarantine ? "quarantined" : "stale",
+          state: rateLimited
+            ? "cooldown"
+            : quarantine
+              ? "quarantined"
+              : unavailableMode
+                ? "ready"
+                : "stale",
           qualified: quarantine ? false : account.qualified,
           rateLimitState: rateLimited ? "cooldown" : account.rateLimitState,
           retryAfter: rateLimited ? (runnerError?.retryAfter ?? 1_800) : account.retryAfter,
@@ -634,7 +642,8 @@ export class ChatGptWebPoolProvider implements ModelProvider {
           lastFailureCode: code.slice(0, 128),
           failurePhase,
           diagnosticSummary,
-          lastSubmissionAt: submissionState === "not_submitted" ? account.lastSubmissionAt : now,
+          lastSubmissionAt:
+            submissionState === "not_submitted" || unavailableMode ? account.lastSubmissionAt : now,
         });
         const poolError = new ChatGptWebPoolError(
           code,

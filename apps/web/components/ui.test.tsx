@@ -5,6 +5,13 @@ import { describe, expect, it } from "vitest";
 import { Disclosure, EmptyState } from "./ui";
 
 describe("shared presentation", () => {
+  it("does not call temporary unavailability a closed or unqualified web channel", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain('chatGptWebAvailable ? "" : "（暂不可用）"');
+    expect(source).not.toContain(
+      "ChatGPT 网页实验通道尚未通过真实调用门禁；当前只能使用 Codex 通道",
+    );
+  });
   it("keeps advanced content accessible in a native, initially collapsed disclosure", () => {
     const html = renderToStaticMarkup(
       <Disclosure title="高级设置">

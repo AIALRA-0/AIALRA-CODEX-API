@@ -223,6 +223,7 @@ export const ExtensionFailedSchema = z.object({
     "chatgpt_login_required",
     "chatgpt_verification_required",
     "chatgpt_ui_changed",
+    "chatgpt_mode_unavailable",
     "chatgpt_rate_limited",
     "chatgpt_timeout",
     "chatgpt_delivery_uncertain",

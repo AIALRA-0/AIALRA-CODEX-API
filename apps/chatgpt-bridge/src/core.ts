@@ -56,6 +56,7 @@ export function fixedBridgeError(code: string): string {
     chatgpt_login_required: "ChatGPT 网页登录已经失效，请在受保护的可见浏览器中重新登录。",
     chatgpt_verification_required: "ChatGPT 网页要求人工验证，请完成验证后重新发起调用。",
     chatgpt_ui_changed: "当前网页结构无法安全识别，实验通道已经拒绝本次调用。",
+    chatgpt_mode_unavailable: "当前临时聊天未提供所选模式，任务未发送；普通聊天不受影响。",
     chatgpt_thinking_depth_unavailable: "当前网页没有提供所选思考深度，任务未发送。",
     chatgpt_thinking_depth_unverified: "无法确认网页已选中所需思考深度，任务未发送。",
     chatgpt_rate_limited: "ChatGPT 网页当前限制继续使用，请稍后重新发起调用。",

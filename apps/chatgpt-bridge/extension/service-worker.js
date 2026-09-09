@@ -461,6 +461,7 @@ async function invoke(invocation) {
       "chatgpt_verification_required",
       "chatgpt_rate_limited",
       "chatgpt_ui_changed",
+      "chatgpt_mode_unavailable",
       "chatgpt_delivery_uncertain",
       "chatgpt_output_incomplete",
       "chatgpt_output_incomplete_blank",

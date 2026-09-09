@@ -900,7 +900,7 @@ function Playground() {
                 <option value="codex">Codex 订阅通道</option>
                 <option value="chatgpt_web" disabled={!chatGptWebAvailable}>
                   ChatGPT Pro 网页实验通道
-                  {chatGptWebAvailable ? "" : "（当前关闭）"}
+                  {chatGptWebAvailable ? "" : "（暂不可用）"}
                 </option>
               </select>
               <small className="field-help">
@@ -908,7 +908,7 @@ function Playground() {
                   ? "通过 VPS 上可见网页发送文本，网页登录失效或结构变化时会直接失败"
                   : chatGptWebAvailable
                     ? "通过官方 Codex SDK 执行，可以使用隔离工作区和实时搜索"
-                    : "ChatGPT 网页实验通道尚未通过真实调用门禁；当前只能使用 Codex 通道"}
+                    : "网页通道暂不可用，可能正在处理任务、等待发送间隔或尚未就绪；可在「ChatGPT 网页通道」查看具体状态"}
               </small>
             </div>
             <div className="field">

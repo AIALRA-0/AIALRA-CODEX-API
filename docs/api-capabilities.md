@@ -10,6 +10,8 @@ Web administrators can PATCH an account's `priority` (integer 0–100, default 0
 
 Login is manual. A login or verification failure cannot safely be repaired by replaying a submitted task or copying another account's browser profile.
 
+Temporary Chat capabilities depend on the actual account menu. A missing Deep Research entry returns `chatgpt_mode_unavailable` before sending; it does not silently fall back to ordinary chat, leave Temporary Chat, or replay the task on another account. A verified pre-send capability absence does not revoke the account's existing ordinary-chat qualification. Research is not available merely because the API schema accepts that mode.
+
 ## Request support
 
 | Capability                  | Current implementation                                                            | Boundary                                                                                                                                |

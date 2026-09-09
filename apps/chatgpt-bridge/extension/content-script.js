@@ -792,7 +792,14 @@ async function configureMode(mode, jobId, deadline) {
   // and opened conversation search instead of enabling web search.
   const pattern = mode === "search" ? /web search|网页搜索|联网搜索/i : /deep research|深度研究/i;
   const option = await waitForButtonByText(pattern, deadline, tools);
-  if (!option) throw new Error("chatgpt_ui_changed");
+  if (!option) {
+    // A recognizable open tools menu can legitimately omit a capability in
+    // Temporary Chat. Do not classify that as a broken account or leave it.
+    if (mode === "deep_research" && buttonByText(/web search|网页搜索|联网搜索/i, tools)) {
+      throw new Error("chatgpt_mode_unavailable");
+    }
+    throw new Error("chatgpt_ui_changed");
+  }
   await nativeClick(option, jobId, "mode_option");
   const activationPattern =
     mode === "search" ? /web search|网页搜索|联网搜索/i : /deep research|深度研究/i;
