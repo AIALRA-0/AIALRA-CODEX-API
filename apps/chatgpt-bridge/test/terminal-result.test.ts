@@ -79,6 +79,26 @@ describe("validated visible completion", () => {
   );
 });
 
+it("extracts and deduplicates linked and plain-text public sources from the owned answer", () => {
+  const anchors = [{ href: "https://example.test/source" }];
+  const root = { querySelectorAll: () => anchors };
+  const context = {
+    assistantTextChannels: () => ({
+      extracted:
+        "Answer https://example.test/source and https://docs.example.test/guide). AIALRA_WEB_END_TEST",
+    }),
+    assistantTurnContainer: () => root,
+  };
+  const extractResult = runInNewContext(
+    `${source.slice(source.indexOf("function withoutCompletionMarker("), source.indexOf("async function waitForUserEcho("))}; extractResult`,
+    context,
+  );
+  expect(extractResult({}, "AIALRA_WEB_END_TEST")).toEqual({
+    outputText: "Answer https://example.test/source and https://docs.example.test/guide).",
+    sources: ["https://example.test/source", "https://docs.example.test/guide"],
+  });
+});
+
 it("binds persistent Deep Research to the same fresh non-temporary document", () => {
   let currentToken = "document";
   let temporary = false;

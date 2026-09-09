@@ -256,6 +256,7 @@ ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 
 | `chatgpt_rate_limited`            | 网页显示额度或速率限制     | 等待页面给出的恢复时间后手动重试       |
 | `chatgpt_delivery_uncertain`      | 无法证明消息是否已经发送   | 保持失败，不自动重发                   |
 | `chatgpt_output_incomplete`       | 无法证明最终正文已经稳定   | 保持失败，检查可见页面和扩展状态       |
+| `chatgpt_sources_missing`         | 回答完成但没有可验证来源   | 保持任务失败，账号继续处理其他任务     |
 | `chatgpt_page_generation_blank`   | 页面创建助手消息但正文为空 | 保持通道关闭，核对页面模式与生成状态   |
 | `chatgpt_page_rendering_failed`   | DOM 有正文但页面不可见     | 修复页面渲染判断后重新执行稳定门       |
 | `chatgpt_output_selector_changed` | 页面有可见正文但定位失败   | 更新结果定位规则并重新执行完整门禁     |

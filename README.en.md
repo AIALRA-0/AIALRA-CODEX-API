@@ -1,30 +1,26 @@
-<div align="center">
-
 <h1 align="center">AIALRA Model Router</h1>
 
-A private subscription-capacity router for an account owner's devices and internal agents
+<p align="center">A private subscription-capacity router for an account owner's devices and internal agents</p>
 
-`Codex stable channel` · `ChatGPT web experiment` · `durable Jobs` · `MCP` · `Chinese console`
+<p align="center"><code>Codex stable channel</code> · <code>ChatGPT web experiment</code> · <code>durable Jobs</code> · <code>MCP</code> · <code>Chinese console</code></p>
 
-Status: `0.1.0 prerelease`　License: `Apache-2.0`　Scope: owner devices and internal automation
+<p align="center">Status: <code>0.1.0 prerelease</code>　License: <code>Apache-2.0</code>　Scope: owner devices and internal automation</p>
 
-[中文](README.md) · [English](README.en.md) · [Usage](docs/usage.md) · [Deployment](docs/deployment.md) · [Security](SECURITY.md)
+<p align="center"><a href="README.md">中文</a> · <a href="README.en.md">English</a> · <a href="docs/usage.md">Usage</a> · <a href="docs/deployment.md">Deployment</a> · <a href="SECURITY.md">Security</a></p>
 
-The deployed root goes directly to Authentik sign-in; examples use `https://router.example.com`
+<p align="center">The deployed root goes directly to Authentik sign-in; examples use <code>https://router.example.com</code></p>
 
 ![Synthetic screenshot of the Chinese AIALRA Model Router console](docs/assets/console-synthetic.png)
 
-Figure 1. Chinese console rendered with synthetic jobs and quota only.
+<p align="center"><em>Figure 1. Chinese console rendered with synthetic jobs and quota only.</em></p>
 
-</div>
-
-## 1 Project scope
+## 1. Project scope
 
 AIALRA Model Router connects a logged-in Codex executor to a private control plane. Browsers, scripts, and internal agents submit work through one interface and pin each task to one execution channel and model. Automatic Codex routing remains limited to the calibrated Luna, Terra, and Sol set.
 
 The default stable channel uses only the official Codex CLI, TypeScript SDK, and App Server.
 
-The repository also contains a disabled-by-default, clean-room “ChatGPT Pro web experimental channel.” A dedicated visible Chromium instance uses a minimum-permission extension and semantic DOM operations. An administrator signs in and handles verification through noVNC. The implementation does not request cookie access, call private `backend-api` endpoints, intercept site SSE, expose remote debugging, or bypass verification.
+The repository also contains an administrator-enabled, clean-room “ChatGPT Pro web experimental channel.” A dedicated visible Chromium instance uses a minimum-permission extension and semantic DOM operations. An administrator signs in and handles verification through noVNC. The implementation does not request cookie access, call private `backend-api` endpoints, intercept site SSE, expose remote debugging, or bypass verification.
 
 The web experiment includes a warm tab pool, DOM location and observation, container-local native keyboard and pointer input, ten-minute failure quarantine, a restart-safe submission journal, a dedicated Chromium sandbox, persisted circuit state, and adaptive concurrency from one to four. `GET /api/v1/chatgpt-web/status` exposes only secret-free sandbox, sign-in, slot, queue, concurrency, circuit, and qualification fields; admission remains closed until the real-page gate passes.
 
@@ -34,7 +30,7 @@ The first release includes a Responses subset, an OpenAI Chat Completions compat
 
 This is not an official OpenAI project, an OpenAI API service, a subscription resale service, or a multi-account sharing service. OpenAI, ChatGPT, Codex, and related marks belong to their respective owners.
 
-## 2 User entry points
+## 2. User entry points
 
 | Entry           | Address or command           | Purpose                              | Authentication      |
 | --------------- | ---------------------------- | ------------------------------------ | ------------------- |
@@ -52,7 +48,7 @@ This is not an official OpenAI project, an OpenAI API service, a subscription re
 
 Nginx and Authentik protect browser access. Next.js uses a separate internal proof when it calls NestJS. External agents use scoped, rate-limited, expiring, revocable API keys.
 
-## 3 Local run
+## 3. Local run
 
 Install Node.js 22, pnpm 10, Docker Compose, and prepare a dedicated Codex login directory.
 
@@ -66,9 +62,9 @@ docker compose --env-file ./deploy/local.env -f ./deploy/compose.yaml --profile 
 
 Open `http://localhost:13211/setup`, register a passkey with the one-time local bootstrap token, then use `/console/playground`. Local mode uses a passkey so Authentik is not required; VPS production uses the existing Authentik service.
 
-## 4 API examples
+## 4. API examples
 
-### 4.1 Responses request
+### 4.1. Responses request
 
 ```powershell
 $RouterUrl = "https://router.example.com"
@@ -86,11 +82,11 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 The result includes the effective model, output, state, job ID, and Codex Credits. Unsupported fields return `400 unsupported_parameter`.
 
-### 4.2 JSON Schema request
+### 4.2. JSON Schema request
 
 Set `text.format.type` to `json_schema`, provide `name`, `schema`, and `strict`, then send the same `/v1/responses` request. A validation mismatch returns `failed` with `validation_failed` and never changes models automatically.
 
-### 4.3 Durable Jobs request
+### 4.3. Durable Jobs request
 
 ```powershell
 $Body = @{
@@ -108,15 +104,15 @@ Invoke-RestMethod -Method Get -Uri "$RouterUrl/api/v1/jobs/$($Job.id)" -Headers 
 
 Normal calls advance through `accepted → queued → running → validating`; terminal states are `succeeded | failed | cancelled | expired`. Only `confirm` calls enter `awaiting_approval` before queueing.
 
-### 4.4 Multi-turn conversations
+### 4.4. Multi-turn conversations
 
 Calls are one-shot by default and the session file is deleted right after execution. Set `session_mode: "persistent"` in the `aialra` namespace on the first turn; the success response carries `metadata.session_key`. Later turns pass `aialra.session_key` to resume the same Codex thread, pinned to the first turn's model and effort. Threads expire after 24 hours by default (`SESSION_THREAD_TTL_MS`), unknown or expired threads return `409 session_expired`, and another caller's thread returns `403 session_access_denied`. Session files stay in the Runner's Codex home and are reaped on a schedule (`CODEX_SESSION_TTL_MS`); they never enter the database or backups. The native Jobs contract exposes the same capability as `sessionMode` and `sessionKey`.
 
-### 4.5 Chat Completions compatibility
+### 4.5. Chat Completions compatibility
 
 `POST /v1/chat/completions` accepts the standard OpenAI request body, so any official SDK works by only changing `base_url` and the key. Supported fields: `messages`, `stream`, `stream_options.include_usage`, `max_tokens`, `max_completion_tokens`, `response_format` (`text`, `json_object`, `json_schema`), `reasoning_effort`, `metadata`, and the `aialra` extension namespace. The Idempotency-Key header is optional here. Unsupported fields return `400 unsupported_parameter`; if the call is still running when the wait budget ends, the endpoint returns `504 gateway_timeout` with the job id for polling via the Jobs API.
 
-### 4.6 ChatGPT Pro web experimental channel
+### 4.6. ChatGPT Pro web experimental channel
 
 After an administrator signs in through the protected visible browser and enables a discovered web model, callers must select the experimental channel explicitly:
 
@@ -137,9 +133,13 @@ Non-streaming requests wait for the final body. Streaming requests emit state an
 
 Search defaults to ten minutes and deep research to sixty minutes. Use Jobs for long work. See the [experimental channel guide](docs/chatgpt-web-experiment.en.md) for enablement, sign-in, errors, security boundaries, and probe gates.
 
-The protected “ChatGPT web channel” console page can run the read-only check, three-chat gate, two-deep-research gate, or complete ten-job gate. The corresponding API endpoints are `POST /api/v1/chatgpt-web/qualification-runs` and `GET /api/v1/chatgpt-web/qualification-runs/{id}`. Records contain only stage, duration, length, digest, source count, and error class; prompts, answers, accounts, and conversation URLs are excluded.
+The protected “ChatGPT web channel” console page provides a no-message readiness check and one real `single_probe` per account. `full_10` remains optional strengthening evidence. The corresponding API endpoints are `POST /api/v1/chatgpt-web/qualification-runs` and `GET /api/v1/chatgpt-web/qualification-runs/{id}`. Records contain only stage, duration, length, digest, source count, and error class; prompts, answers, accounts, and conversation URLs are excluded.
 
-## 5 Programmatic access
+`chatgpt-web.auto` is the web model entry, not a thinking depth. Callers may set `thinking_depth` to an option actually discovered from the page. When omitted, the bridge reads and records the current page default. The console shows requested and resolved depth separately.
+
+A Search request with `require_sources = $true` fails with `chatgpt_sources_missing` if the completed answer has no verifiable public URL. That task failure does not quarantine a healthy account and never causes a post-submit retry.
+
+## 5. Programmatic access
 
 ```powershell
 $env:MODEL_ROUTER_URL = "https://router.example.com"
@@ -167,7 +167,7 @@ const client = new ModelRouterClient({
 const result = await client.createResponse({ model: "luna", input: "Return only OK" });
 ```
 
-## 6 Architecture
+## 6. Architecture
 
 ```mermaid
 flowchart TD
@@ -198,7 +198,7 @@ Admission pins one model and reasoning effort for the task lifetime.
 | Everyday coding, debugging, integration, review | Terra         | Fixes, reviews, and integration work                    |
 | Ambiguous, high-risk, or disputed               | Sol           | Architecture, threat analysis, complex planning         |
 
-## 7 Security boundaries
+## 7. Security boundaries
 
 - The trusted scheduling Worker owns database and payload-key access but never executes Codex tasks.
 - The isolated Runner receives one contract, an ephemeral workspace, and the Codex identity mount; it receives no database or payload key.
@@ -217,7 +217,7 @@ Admission pins one model and reasoning effort for the task lifetime.
 
 See the [threat model](docs/threat-model.md).
 
-## 8 VPS deployment
+## 8. VPS deployment
 
 Production reuses Docker Compose, Tailscale, Nginx, Authentik, and Cloudflare DNS:
 
@@ -226,11 +226,11 @@ Production reuses Docker Compose, Tailscale, Nginx, Authentik, and Cloudflare DN
 3. Create a DNS-only AAAA record for the Tailscale IPv6 address, obtain the certificate with DNS-01, register the Authentik application, render a Tailscale-bound Nginx server, and run `nginx -t`.
 4. Complete a fresh dedicated Codex login and Linux isolation canary.
 5. Start the isolated Runner and trusted Worker, then open admission only after attack probes and health checks succeed.
-6. Optionally run `enable-chatgpt-web.sh` with `ACTION=start`, sign in through protected noVNC, complete the ten-task probe, then run it with `ACTION=enable`.
+6. Optionally run `enable-chatgpt-web.sh` with `ACTION=start`, sign in through protected noVNC, complete readiness and one successful `single_probe`, then run it with `ACTION=enable`.
 
 See the [deployment guide](docs/deployment.md). Templates use `router.example.com`; real infrastructure values do not enter the public repository.
 
-## 9 Repository map
+## 9. Repository map
 
 ```text
 apps/api        # NestJS control plane, Responses, Jobs
@@ -247,33 +247,23 @@ skill           # Reusable router skill
 evals           # Anonymous evaluation fixtures
 ```
 
-## 10 Verification
+## 10. Verification
 
 ```powershell
 pnpm check
 ```
 
-Automated checks cover routing, caller authorization, key idempotency, Authentik groups and proofs, AAD encryption, retention, Runner environment filtering, Worker output scanning, Responses errors, bridge protocol, and a synthetic DOM contract.
+Automated checks cover routing, quota parsing, caller authorization, key idempotency, Authentik groups and proofs, AAD encryption, retention, Responses errors, Runner environment filtering, Worker output scanning, bridge protocol, thinking-depth discovery, source extraction, and account-pool failure isolation.
 
-This change passed synthetic model discovery, extension authentication, single-send protection, complete-output stabilization, and source extraction. The ten real ChatGPT page probes have not run, so the web experiment remains disabled by default.
+Passing repository tests does not prove that a specific deployment has completed real-account qualification. Operators must also verify `/healthz`, `/readyz`, one minimal Codex job, web-account readiness, and one `single_probe`. See [implementation status](docs/implementation-status.md).
 
-The 2026-08-26 VPS baseline confirmed that:
-
-- the dedicated Codex Worker can invoke Luna with ChatGPT authentication;
-- regular Responses, SSE, JSON Schema, Jobs, events, and same-key idempotent replay succeed;
-- the former Codex sandbox could not read its authentication file or resolve an external domain; the new Worker/Runner boundary must pass fresh attack probes before admission reopens;
-- an unauthenticated console request redirects to Authentik while the public Chinese site returns 200;
-- an encrypted PostgreSQL backup can be read by tools from the matching major version.
-
-Formal release gates still include the 30/150-task evaluations, concurrency 1→2→4, a 24-hour soak, a complete restore drill, and final-image SBOMs. The source repository is public while production access stays private to the Tailnet. Experimental code does not mean the channel is enabled in production. See [implementation status](docs/implementation-status.md).
-
-## 11 Reuse
+## 11. Reuse
 
 OpenAPI is the sole HTTP contract and generates the client. Hostnames, credentials, certificates, and Authentik inventory are injected at deployment and never committed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
-## 12 License record
+## 12. License record
 
 The repository uses [Apache-2.0](LICENSE). Third-party and clean-room records are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The owner approved the license record for publication; that is not legal advice on trademarks, subscription terms, or patents.
 

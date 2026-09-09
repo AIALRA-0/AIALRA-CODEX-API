@@ -627,7 +627,9 @@ export class ChatGptWebPoolProvider implements ModelProvider {
           code === "chatgpt_mode_unavailable" &&
           (failurePhase === "temporary_chat_verified" ||
             failurePhase === "persistent_chat_verified");
-        const quarantine = hardFailure || (!canFailover && !rateLimited && !unavailableMode);
+        const taskResultFailure = code === "chatgpt_sources_missing";
+        const quarantine =
+          hardFailure || (!canFailover && !rateLimited && !unavailableMode && !taskResultFailure);
         await this.release(account, invocation.jobId, {
           state: rateLimited
             ? "cooldown"
@@ -635,7 +637,9 @@ export class ChatGptWebPoolProvider implements ModelProvider {
               ? "quarantined"
               : unavailableMode
                 ? "ready"
-                : "stale",
+                : taskResultFailure
+                  ? "ready"
+                  : "stale",
           qualified: quarantine ? false : account.qualified,
           rateLimitState: rateLimited ? "cooldown" : account.rateLimitState,
           retryAfter: rateLimited ? (runnerError?.retryAfter ?? 1_800) : account.retryAfter,

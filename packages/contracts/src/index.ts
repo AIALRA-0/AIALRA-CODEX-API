@@ -416,6 +416,7 @@ export const ChatGptWebDiagnosticSummarySchema = z.object({
     .array(z.enum(["continue_generating", "retry", "generation_error", "other"]))
     .max(16),
   temporaryChatVerified: z.boolean(),
+  resolvedThinkingDepth: z.string().min(1).max(64).nullable().default(null),
 });
 export type ChatGptWebDiagnosticSummary = z.infer<typeof ChatGptWebDiagnosticSummarySchema>;
 

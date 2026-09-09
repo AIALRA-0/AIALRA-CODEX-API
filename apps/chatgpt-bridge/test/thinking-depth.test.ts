@@ -201,7 +201,9 @@ describe("visible thinking depth menu", () => {
 
   it("selects and verifies exactly the requested depth before any submission", async () => {
     const { api, control, native } = harness();
-    await api.configureThinkingDepth({ thinkingDepth: "Heavy", jobId: "test" }, Date.now() + 5_000);
+    await expect(
+      api.configureThinkingDepth({ thinkingDepth: "Heavy", jobId: "test" }, Date.now() + 5_000),
+    ).resolves.toBe("Heavy");
     expect(control.innerText).toBe("Heavy");
     expect(native.mock.calls.map((call) => call[2])).toEqual(["thinking_depth_option"]);
   });
@@ -215,9 +217,9 @@ describe("visible thinking depth menu", () => {
     expect(native).not.toHaveBeenCalled();
   });
 
-  it("keeps old requests unchanged and refuses an unconfirmed selection", async () => {
+  it("records the visible default for old requests and refuses an unconfirmed selection", async () => {
     const { api, native } = harness();
-    await api.configureThinkingDepth({}, Date.now() + 5_000);
+    await expect(api.configureThinkingDepth({}, Date.now() + 5_000)).resolves.toBe("Standard");
     expect(native).not.toHaveBeenCalled();
     native.mockImplementation(async (_target, _job, action) => {
       if (action === "thinking_depth_menu") _target.click();
@@ -225,6 +227,14 @@ describe("visible thinking depth menu", () => {
     await expect(
       api.configureThinkingDepth({ thinkingDepth: "Heavy", jobId: "test" }, Date.now() + 30),
     ).rejects.toThrow("chatgpt_thinking_depth_unverified");
+  });
+
+  it("reads the selected default from a generic depth control without changing it", async () => {
+    const { api, control, native } = harness();
+    control.innerText = "Thinking effort";
+    await expect(api.configureThinkingDepth({}, Date.now() + 5_000)).resolves.toBe("Standard");
+    expect(control.innerText).toBe("Thinking effort");
+    expect(native).not.toHaveBeenCalled();
   });
 });
 

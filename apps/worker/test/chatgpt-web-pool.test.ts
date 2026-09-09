@@ -405,6 +405,48 @@ describe("ChatGptWebPoolProvider", () => {
     ).toHaveLength(1);
   });
 
+  it("fails a source-required task once without quarantining the healthy account", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      const accountId = url.includes("account-b") ? "account-b" : "account-a";
+      if (url.endsWith("/healthz")) return Response.json(health(accountId));
+      return response([
+        {
+          type: "event",
+          event: { type: "tool", data: { kind: "chatgpt_web", phase: "submitted" } },
+        },
+        {
+          type: "error",
+          error: {
+            code: "chatgpt_sources_missing",
+            message: "answer had no public source",
+            failurePhase: "stabilizing",
+          },
+        },
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+
+    await expect(pool.invoke(invocation())).rejects.toMatchObject({
+      code: "chatgpt_sources_missing",
+      submissionState: "submitted",
+      accountId: "account-a",
+    });
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/invoke")),
+    ).toHaveLength(1);
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      state: "ready",
+      qualified: true,
+      activeJobId: null,
+      lastFailureCode: "chatgpt_sources_missing",
+    });
+  });
+
   it("restores a qualified account after a transient browser restart", async () => {
     const { repository, configs } = await readyRepository();
     await repository.updateChatGptWebAccount("account-a", { lastProbePassed: true });

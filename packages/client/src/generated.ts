@@ -1045,6 +1045,7 @@ export interface components {
         latestAssistantHasText: boolean;
         visibleErrorKinds: ("continue_generating" | "retry" | "generation_error" | "other")[];
         temporaryChatVerified: boolean;
+        resolvedThinkingDepth: string | null;
       } | null;
     };
     ChatGptWebQualificationRun: {

@@ -423,6 +423,7 @@ enabled_tools = ["delegate_codex", "delegate_chatgpt", "preview_route", "job_sta
 | `chatgpt_ui_changed`            | 必要页面元素无法识别                     | 关闭实验通道并重新验证页面契约                     |
 | `chatgpt_delivery_uncertain`    | 无法证明网页消息是否已经发送             | 保持失败并检查页面；系统不会自动重发               |
 | `chatgpt_output_incomplete`     | 无法证明最终正文已经稳定                 | 检查可见页面和扩展健康状态                         |
+| `chatgpt_sources_missing`       | 回答完成但没有提供可验证的公网来源       | 调整来源要求；账号不会因此被隔离                   |
 
 </div>
 

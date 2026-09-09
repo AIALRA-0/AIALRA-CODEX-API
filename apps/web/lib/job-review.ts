@@ -58,6 +58,15 @@ export function getJobResultSummary(job: SummarizedJob): JobResultSummary | null
     };
   }
   if (job.status !== "failed") return null;
+  if (job.errorCode === "chatgpt_sources_missing") {
+    return {
+      label: "来源缺失",
+      title: "回答完成，但没有可验证来源",
+      description: "系统没有把缺少来源的网页回答误报为成功，账号仍可继续处理其他任务",
+      details: ["错误代码：chatgpt_sources_missing"],
+      action: "补充来源要求或改用能够返回公网链接的搜索任务",
+    };
+  }
   return {
     label: "调用失败",
     title: "Codex 没有正常完成",

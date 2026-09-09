@@ -46,6 +46,7 @@ type PublicDiagnosticSummary = {
   latestAssistantHasText: boolean;
   visibleErrorKinds: BrowserControlDiagnostics["visibleErrorKinds"];
   temporaryChatVerified: boolean;
+  resolvedThinkingDepth: string | null;
 };
 
 function diagnosticSummary(
@@ -62,6 +63,7 @@ function diagnosticSummary(
     visibleErrorKinds: diagnostics.visibleErrorKinds,
     temporaryChatVerified:
       diagnostics.temporaryChatEnabled && diagnostics.temporaryChatPersonalized === false,
+    resolvedThinkingDepth: diagnostics.resolvedThinkingDepth,
   };
 }
 

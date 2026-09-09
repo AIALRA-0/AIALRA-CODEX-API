@@ -292,6 +292,7 @@ describe("ChatGPT web qualification", () => {
         latestAssistantHasText: false,
         visibleErrorKinds: [],
         temporaryChatVerified: true,
+        resolvedThinkingDepth: "High",
       }),
     );
 

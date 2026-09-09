@@ -37,6 +37,7 @@ interface Job {
     executionChannel?: "codex" | "chatgpt_web";
     chatgptWeb?: {
       mode: "chat" | "search" | "deep_research";
+      thinkingDepth?: string;
       conversationMode: "temporary_per_request" | "persistent_per_request";
       temporaryChat: boolean;
       personalized: boolean;
@@ -361,6 +362,61 @@ const TASK_KIND_LABEL: Record<string, string> = {
 
 const LEVEL_LABEL = ["很低", "低", "中", "高", "很高"] as const;
 
+const WEB_MODE_LABEL = {
+  chat: "普通聊天",
+  search: "联网搜索",
+  deep_research: "深度研究",
+} as const;
+
+const WEB_PHASE_LABEL: Record<string, string> = {
+  opening: "打开新对话",
+  configuring: "配置网页",
+  temporary_chat_verified: "临时对话已验证",
+  persistent_chat_verified: "普通会话已验证",
+  mode_selected: "模式与思考深度已确认",
+  input_ready: "输入已就绪",
+  submitted: "消息已提交",
+  user_echo_verified: "用户消息已回显",
+  generating: "正在生成",
+  stabilizing: "等待结果稳定",
+  resetting: "正在重置页面",
+};
+
+function webModeLabel(job: Job): string {
+  const mode = job.task.chatgptWeb?.mode ?? "chat";
+  return WEB_MODE_LABEL[mode];
+}
+
+function webRequestDepthLabel(job: Job): string {
+  return job.task.chatgptWeb?.thinkingDepth ?? "跟随网页默认";
+}
+
+function webEventMetadata(events: JobEventRecord[]): {
+  accountId: string | null;
+  resolvedThinkingDepth: string | null;
+  failurePhase: string | null;
+} {
+  let accountId: string | null = null;
+  let resolvedThinkingDepth: string | null = null;
+  let failurePhase: string | null = null;
+  for (const event of events) {
+    if (typeof event.data.accountId === "string") accountId = event.data.accountId;
+    const phase =
+      typeof event.data.failurePhase === "string"
+        ? event.data.failurePhase
+        : typeof event.data.phase === "string"
+          ? event.data.phase
+          : null;
+    if (phase) failurePhase = phase;
+    const diagnosticSummary = event.data.diagnosticSummary;
+    if (diagnosticSummary && typeof diagnosticSummary === "object") {
+      const depth = (diagnosticSummary as Record<string, unknown>).resolvedThinkingDepth;
+      if (typeof depth === "string" && depth.trim()) resolvedThinkingDepth = depth.trim();
+    }
+  }
+  return { accountId, resolvedThinkingDepth, failurePhase };
+}
+
 async function routerFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/router${path}`, {
     ...init,
@@ -613,9 +669,17 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
                     {resultSummary?.label ?? JOB_STATUS_LABEL[job.status]}
                   </td>
                   <td>
-                    {job.task.executionChannel === "chatgpt_web" ? "ChatGPT 网页" : "Codex"}
-                    {" · "}
-                    {job.route?.model ?? job.task.model}
+                    {job.task.executionChannel === "chatgpt_web" ? (
+                      <>
+                        ChatGPT 网页自动模型
+                        <br />
+                        <span className="muted">
+                          {webModeLabel(job)} · {webRequestDepthLabel(job)}
+                        </span>
+                      </>
+                    ) : (
+                      <>Codex · {job.route?.model ?? job.task.model}</>
+                    )}
                   </td>
                   <td>{TASK_KIND_LABEL[job.task.taskKind] ?? job.task.taskKind}</td>
                   <td>
@@ -1258,6 +1322,7 @@ function Jobs() {
   const requestedJobId = useRef<string | null>(null);
   const [missingJobId, setMissingJobId] = useState<string | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<JobEventRecord[]>([]);
+  const selectedWebMetadata = useMemo(() => webEventMetadata(selectedEvents), [selectedEvents]);
 
   useEffect(() => {
     requestedJobId.current = new URLSearchParams(window.location.search).get("job");
@@ -1345,6 +1410,7 @@ function Jobs() {
       setSelectedEvents([]);
       return;
     }
+    setSelectedEvents([]);
     const controller = new AbortController();
     void routerFetch<{ data: JobEventRecord[] }>(
       `/api/v1/jobs/${encodeURIComponent(selected.id)}/events`,
@@ -1472,9 +1538,11 @@ function Jobs() {
             <div>
               <dt>路由</dt>
               <dd>
-                {selected.route
-                  ? `${selected.route.model} · ${selected.route.reasonCode}`
-                  : "等待路由"}
+                {selected.task.executionChannel === "chatgpt_web"
+                  ? `ChatGPT 网页自动模型 · ${selected.route?.reasonCode ?? "等待路由"}`
+                  : selected.route
+                    ? `${selected.route.model} · ${selected.route.reasonCode}`
+                    : "等待路由"}
               </dd>
             </div>
             <div>
@@ -1489,12 +1557,27 @@ function Jobs() {
               <>
                 <div>
                   <dt>网页模式</dt>
+                  <dd>{webModeLabel(selected)}</dd>
+                </div>
+                <div>
+                  <dt>请求思考深度</dt>
+                  <dd>{webRequestDepthLabel(selected)}</dd>
+                </div>
+                <div>
+                  <dt>实际思考深度</dt>
+                  <dd>{selectedWebMetadata.resolvedThinkingDepth ?? "历史任务未记录"}</dd>
+                </div>
+                <div>
+                  <dt>执行账号</dt>
+                  <dd>{selectedWebMetadata.accountId ?? "历史任务未记录"}</dd>
+                </div>
+                <div>
+                  <dt>最后网页阶段</dt>
                   <dd>
-                    {selected.task.chatgptWeb?.mode === "deep_research"
-                      ? "深度研究"
-                      : selected.task.chatgptWeb?.mode === "search"
-                        ? "联网搜索"
-                        : "普通聊天"}
+                    {selectedWebMetadata.failurePhase
+                      ? (WEB_PHASE_LABEL[selectedWebMetadata.failurePhase] ??
+                        selectedWebMetadata.failurePhase)
+                      : "历史任务未记录"}
                   </dd>
                 </div>
                 <div>

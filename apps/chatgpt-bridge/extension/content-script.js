@@ -69,6 +69,7 @@ const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快�
 
 let activeJobId = null;
 let verifiedNonPersonalizedDocumentToken = null;
+let resolvedThinkingDepth = null;
 let cancelled = false;
 let depthDiscovery = null;
 let depthCatalog = [];
@@ -666,9 +667,23 @@ async function discoverThinkingDepths() {
 
 async function configureThinkingDepth(invocation, deadline) {
   const requested = invocation.thinkingDepth;
-  if (!requested) return;
   const control = thinkingDepthControl();
-  if (!control) throw new Error("chatgpt_thinking_depth_unavailable");
+  if (!control) {
+    if (requested) throw new Error("chatgpt_thinking_depth_unavailable");
+    return null;
+  }
+  const visibleLabel = visibleText(control).replace(/\s+/g, " ").trim();
+  if (
+    !requested &&
+    visibleLabel &&
+    visibleLabel.length <= 64 &&
+    !/[\r\n@]|https?:|\//i.test(visibleLabel) &&
+    !/thinking (?:time|effort|depth)|reasoning (?:effort|depth)|思考(?:时间|强度|深度)/i.test(
+      visibleLabel,
+    )
+  ) {
+    return visibleLabel;
+  }
   let menu = null;
   try {
     // Use the same verified opener as discovery. Moving the real pointer onto
@@ -678,8 +693,9 @@ async function configureThinkingDepth(invocation, deadline) {
     thinkingDepthDiscoveryDiagnostics.phase = "reading_choices";
     const option = (
       await readThinkingDepthChoices(menu, Math.min(deadline, Date.now() + 5_000))
-    ).find((entry) => entry.label === requested);
+    ).find((entry) => (requested ? entry.label === requested : entry.selected));
     if (!option) throw new Error("chatgpt_thinking_depth_unavailable");
+    if (!requested) return option.label;
     if (option.sliderValue !== undefined) {
       thinkingDepthDiscoveryDiagnostics.phase = "moving_selection";
       const moved = await moveThinkingDepthSlider(menu, option.sliderValue, deadline);
@@ -694,13 +710,13 @@ async function configureThinkingDepth(invocation, deadline) {
           thinkingDepthSliderLabel(menu, slider) === requested
         ) {
           thinkingDepthDiscoveryDiagnostics.phase = "selection_verified";
-          return;
+          return requested;
         }
         await waitForMutation(50);
       }
       throw new Error("chatgpt_thinking_depth_unverified");
     }
-    if (option.selected) return;
+    if (option.selected) return requested;
     await nativeClick(option.element, invocation.jobId, "thinking_depth_option");
     const end = Math.min(deadline, Date.now() + 1_500);
     while (Date.now() < end) {
@@ -709,7 +725,7 @@ async function configureThinkingDepth(invocation, deadline) {
       );
       const current = control.isConnected === false ? thinkingDepthControl() : control;
       const currentLabel = visibleText(current).split("\n")[0].trim();
-      if (selected || currentLabel === requested) return;
+      if (selected || currentLabel === requested) return requested;
       await waitForMutation(100);
     }
     throw new Error("chatgpt_thinking_depth_unverified");
@@ -1295,6 +1311,7 @@ function controlDiagnostics(expectedObjective = null) {
     selectedSend: composer ? describeControl(sendControlFor(composer)) : null,
     sameRowControls,
     thinkingDepthDiscovery: thinkingDepthDiscoveryDiagnostics,
+    resolvedThinkingDepth,
     pageKind: pageKind(),
     surface: currentSurface(),
     assistantTurnCount: assistantTurns.length,
@@ -1361,7 +1378,16 @@ function extractResult(element, completionMarker = null) {
     ? withoutCompletionMarker(rawOutputText, completionMarker)
     : rawOutputText;
   const root = assistantTurnContainer(element);
-  const sources = [...(root ?? element).querySelectorAll("a[href]")].map((anchor) => anchor.href);
+  const sourceRoot = root ?? element;
+  const linkedSources = [...sourceRoot.querySelectorAll("a[href]")].map((anchor) => anchor.href);
+  const textSources = rawOutputText.match(/https?:\/\/[^\s<>"')\]]+/g) ?? [];
+  const sources = [
+    ...new Set(
+      [...linkedSources, ...textSources]
+        .map((source) => source.replace(/[.,;:!?，。；：！？]+$/u, ""))
+        .filter(Boolean),
+    ),
+  ];
   return { outputText, sources };
 }
 
@@ -1553,6 +1579,7 @@ async function invoke(invocation) {
     return { ok: false, code: "chatgpt_delivery_uncertain", documentToken: DOCUMENT_TOKEN };
   }
   activeJobId = invocation.jobId;
+  resolvedThinkingDepth = null;
   cancelled = false;
   const deadline = invocation.deadlineAt - TERMINAL_REPORT_GRACE_MS;
   try {
@@ -1589,8 +1616,8 @@ async function invoke(invocation) {
       await reportProgress(invocation.jobId, "persistent_chat_verified");
     }
     await configureMode(invocation.mode, invocation.jobId, deadline);
-    await reportProgress(invocation.jobId, "mode_selected");
-    await configureThinkingDepth(invocation, deadline);
+    resolvedThinkingDepth = await configureThinkingDepth(invocation, deadline);
+    await reportProgress(invocation.jobId, "mode_selected", controlDiagnostics());
     composer = await waitForElement(SELECTORS.composer, deadline);
     const beforeAssistantCount = assistantTurnElements().length;
     const beforeUserCount = userMessages().length;
@@ -1633,7 +1660,7 @@ async function invoke(invocation) {
     );
     await reportProgress(invocation.jobId, "stabilizing");
     if (invocation.requireSources && result.sources.length === 0) {
-      throw new Error("chatgpt_output_incomplete");
+      throw new Error("chatgpt_sources_missing");
     }
     return { ok: true, ...result, conversationUrl: location.href, documentToken: DOCUMENT_TOKEN };
   } catch (error) {
@@ -1650,6 +1677,7 @@ async function invoke(invocation) {
   } finally {
     activeJobId = null;
     verifiedNonPersonalizedDocumentToken = null;
+    resolvedThinkingDepth = null;
     cancelled = false;
   }
 }

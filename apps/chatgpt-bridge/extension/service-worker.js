@@ -473,6 +473,7 @@ async function invoke(invocation) {
       "chatgpt_mode_unavailable",
       "chatgpt_delivery_uncertain",
       "chatgpt_output_incomplete",
+      "chatgpt_sources_missing",
       "chatgpt_output_incomplete_blank",
       "chatgpt_page_not_ready",
       "chatgpt_page_generation_blank",

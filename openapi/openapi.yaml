@@ -1680,6 +1680,7 @@ components:
               latestAssistantHasText,
               visibleErrorKinds,
               temporaryChatVerified,
+              resolvedThinkingDepth,
             ]
           properties:
             pageKind: { type: string, enum: [home, conversation, other] }
@@ -1693,6 +1694,7 @@ components:
               maxItems: 16
               items: { type: string, enum: [continue_generating, retry, generation_error, other] }
             temporaryChatVerified: { type: boolean }
+            resolvedThinkingDepth: { type: [string, "null"], minLength: 1, maxLength: 64 }
     ChatGptWebQualificationRun:
       type: object
       required:

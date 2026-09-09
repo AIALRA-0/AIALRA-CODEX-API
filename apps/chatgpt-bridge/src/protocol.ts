@@ -113,6 +113,7 @@ export const BrowserControlDiagnosticsSchema = z.object({
     })
     .nullable()
     .default(null),
+  resolvedThinkingDepth: z.string().min(1).max(64).nullable().default(null),
   pageKind: z.enum(["home", "conversation", "other"]),
   surface: z.enum(["chat", "work", "unknown"]),
   assistantTurnCount: z.number().int().nonnegative(),
@@ -234,6 +235,7 @@ export const ExtensionFailedSchema = z.object({
     "chatgpt_timeout",
     "chatgpt_delivery_uncertain",
     "chatgpt_output_incomplete",
+    "chatgpt_sources_missing",
     "chatgpt_output_incomplete_blank",
     "chatgpt_page_not_ready",
     "chatgpt_page_generation_blank",

@@ -64,6 +64,7 @@ export function fixedBridgeError(code: string): string {
     chatgpt_delivery_uncertain:
       "系统无法确认消息是否已经成功发送，为防止重复调用，本次不会自动重试。",
     chatgpt_output_incomplete: "系统无法确认网页输出已经完整结束，因此没有返回可能残缺的结果。",
+    chatgpt_sources_missing: "网页回答已经完成，但没有提供可验证的公网来源。",
     chatgpt_output_incomplete_blank: "ChatGPT 网页在期限内没有生成可读取的正文。",
     chatgpt_page_not_ready: "ChatGPT 网页在发送前没有完成新对话初始化。",
     chatgpt_page_generation_blank: "ChatGPT 网页创建了助手消息，但页面没有生成可读取的正文。",

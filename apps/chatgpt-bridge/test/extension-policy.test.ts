@@ -52,6 +52,8 @@ describe("single-page browser agent policy", () => {
     expect(contentScript).toContain("withoutCompletionMarker(rawOutputText, completionMarker)");
     expect(contentScript).toContain("chatgpt_page_generation_blank");
     expect(contentScript).toContain("chatgpt_output_incomplete_blank");
+    expect(contentScript).toContain("chatgpt_sources_missing");
+    expect(serviceWorker).toContain("chatgpt_sources_missing");
     expect(contentScript).toContain('kind === "home" || kind === "conversation"');
     expect(contentScript).toContain("personalized !== true");
     expect(contentScript).toContain("const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000");

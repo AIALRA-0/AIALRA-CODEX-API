@@ -3,6 +3,19 @@ import { describe, expect, it } from "vitest";
 import { getJobResultSummary } from "./job-review";
 
 describe("getJobResultSummary", () => {
+  it("explains a completed answer that did not provide required sources", () => {
+    expect(
+      getJobResultSummary({
+        status: "failed",
+        errorCode: "chatgpt_sources_missing",
+        errorMessage: "missing sources",
+        validation: null,
+      }),
+    ).toMatchObject({
+      label: "来源缺失",
+      title: "回答完成，但没有可验证来源",
+    });
+  });
   it("explains a deterministic validation failure", () => {
     const summary = getJobResultSummary({
       status: "failed",

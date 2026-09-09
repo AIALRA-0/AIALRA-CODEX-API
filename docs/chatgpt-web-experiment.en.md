@@ -222,6 +222,7 @@ The page supplies no reliable token, Codex Credit, quota-delta, or API-equivalen
 | `chatgpt_rate_limited`            | The page shows a usage or rate limit             | Wait for the page's stated recovery time                         |
 | `chatgpt_delivery_uncertain`      | The bridge cannot prove whether send occurred    | Keep the job failed and do not auto-resend                       |
 | `chatgpt_output_incomplete`       | The final text never became provably stable      | Inspect the visible page and extension state                     |
+| `chatgpt_sources_missing`         | The answer completed without a verifiable source | Keep the task failed; the account remains available              |
 | `chatgpt_page_generation_blank`   | The page created an assistant turn without text  | Keep admission closed and inspect page mode and generation state |
 | `chatgpt_page_rendering_failed`   | DOM text exists but is not visible               | Repair rendering detection and rerun the stable-chat gate        |
 | `chatgpt_output_selector_changed` | Visible output exists outside the known selector | Update result targeting and rerun the complete gate              |
