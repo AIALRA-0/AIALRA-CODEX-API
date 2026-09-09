@@ -137,6 +137,10 @@ export class ResponsesController {
         }
         const finalEvent =
           completed.status === "succeeded" ? "response.completed" : "response.failed";
+        const retryAfter =
+          completed.errorCode === "chatgpt_rate_limited"
+            ? await this.jobs.retryAfterFor(completed)
+            : undefined;
         response.write(`event: ${finalEvent}\n`);
         response.write(
           `data: ${JSON.stringify({
@@ -148,7 +152,11 @@ export class ResponsesController {
               output: completed.output,
               usage: completed.usage,
               error: completed.errorCode
-                ? { code: completed.errorCode, message: completed.errorMessage }
+                ? {
+                    code: completed.errorCode,
+                    message: completed.errorMessage,
+                    ...(retryAfter !== undefined ? { retryAfter } : {}),
+                  }
                 : null,
             },
           })}\n\n`,
@@ -162,7 +170,18 @@ export class ResponsesController {
     }
 
     const completed = await this.jobs.waitForTerminal(job.id, job.task.deadlineMs);
-    response.status(completed.status === "queued" || completed.status === "running" ? 202 : 200);
+    const retryAfter =
+      completed.errorCode === "chatgpt_rate_limited"
+        ? await this.jobs.retryAfterFor(completed)
+        : undefined;
+    if (retryAfter !== undefined) response.setHeader("Retry-After", String(retryAfter));
+    response.status(
+      retryAfter !== undefined
+        ? 429
+        : completed.status === "queued" || completed.status === "running"
+          ? 202
+          : 200,
+    );
     response.json({
       id: `resp_${completed.id}`,
       object: "response",
@@ -170,7 +189,11 @@ export class ResponsesController {
       model: completed.route?.model ?? completed.task.model,
       output: completed.output,
       error: completed.errorCode
-        ? { code: completed.errorCode, message: completed.errorMessage }
+        ? {
+            code: completed.errorCode,
+            message: completed.errorMessage,
+            ...(retryAfter !== undefined ? { retryAfter } : {}),
+          }
         : null,
       usage: completed.usage,
       metadata: { job_id: completed.id, session_key: completed.task.sessionKey ?? null },

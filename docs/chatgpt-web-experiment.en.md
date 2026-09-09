@@ -227,7 +227,7 @@ The page supplies no reliable token, Codex Credit, quota-delta, or API-equivalen
 | `chatgpt_clarification_required`  | Deep research asks for more information          | Amend the contract and create a new job                          |
 | `chatgpt_timeout`                 | The job exceeded its own deadline                | Inspect the page before deciding on a new job                    |
 
-`chatgpt_rate_limited` uses HTTP `429`; the body `retryAfter` value and the `Retry-After` response header always carry the same number of seconds.
+Ordinary HTTP responses use `429` for `chatgpt_rate_limited`, with matching seconds in the body `retryAfter` and the `Retry-After` header. Pool cooldown hints use the earliest account recovery time while respecting any active global cooldown. Once an SSE response has started, its HTTP status cannot change to `429`: the terminal error event instead includes `chatgpt_rate_limited` and `retryAfter`, then the stream ends without reporting success or automatically resubmitting the task.
 
 ## 7 Concurrency and automatic shutdown
 

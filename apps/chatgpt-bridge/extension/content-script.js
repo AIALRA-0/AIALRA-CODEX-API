@@ -296,7 +296,9 @@ function modelControlForComposer() {
         return MODEL_LABEL_PATTERN.test(label);
       })
     : null;
-  return scoped ?? firstVisible(SELECTORS.modelButton) ?? buttonByText(MODEL_LABEL_PATTERN);
+  // Global label substring searches can mistake a sidebar conversation title
+  // for a model control. Outside the composer only trust dedicated test IDs.
+  return scoped ?? firstVisible(SELECTORS.modelButton.slice(0, 2));
 }
 
 let thinkingDepthDiscoveryDiagnostics = null;
@@ -483,10 +485,28 @@ async function discoverThinkingDepths() {
   if (!control) return [];
   let menu = null;
   try {
+    const hadOpenMenu =
+      control.getAttribute("aria-expanded") === "true" ||
+      [
+        ...document.querySelectorAll(
+          "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog']",
+        ),
+      ].some(isDepthControlVisible);
     menu = await openThinkingDepthMenu(control, (element) => element.click(), Date.now() + 1_500);
     const slider = thinkingDepthSlider(menu);
     thinkingDepthDiscoveryDiagnostics = {
       phase: menu ? "menu_opened" : "menu_missing",
+      hadOpenMenu,
+      menuFound: Boolean(menu),
+      controlExpanded: control.getAttribute("aria-expanded") === "true",
+      visiblePopupCount: [
+        ...document.querySelectorAll(
+          "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog'], [data-radix-popper-content-wrapper]",
+        ),
+      ].filter(isDepthControlVisible).length,
+      visibleSliderCount: [
+        ...document.querySelectorAll("[role='slider'], input[type='range']"),
+      ].filter(isDepthControlVisible).length,
       optionCount: thinkingDepthOptions(menu).length,
       sliderCount: menu ? menu.querySelectorAll("[role='slider']").length : 0,
       buttonCount: menu ? menu.querySelectorAll("button").length : 0,
@@ -496,7 +516,11 @@ async function discoverThinkingDepths() {
       sliderHasLabel: Boolean(slider && thinkingDepthSliderLabel(menu, slider)),
     };
     const options = await readThinkingDepthChoices(menu, Date.now() + 5_000);
-    thinkingDepthDiscoveryDiagnostics.phase = options.length ? "discovered" : "choices_unreadable";
+    thinkingDepthDiscoveryDiagnostics.phase = options.length
+      ? "discovered"
+      : menu
+        ? "choices_unreadable"
+        : "menu_missing";
     if (!options.length || options.length > 32) return [];
     return [
       {
@@ -866,6 +890,26 @@ async function submitComposer(send, jobId) {
   await nativeClick(send, jobId, "send_prompt");
 }
 
+function safeControlLabel(label) {
+  if (!label) return null;
+  const categories = [
+    ["send", /^(?:send\b|发送)/i],
+    ["voice", /^(?:(?:start|use|open)\s+)?(?:voice\b|语音)/i],
+    ["dictation", /^(?:(?:start|stop)\s+)?(?:dictation\b|听写)/i],
+    ["microphone", /^(?:microphone\b|麦克风)/i],
+    ["add", /^(?:add\b|添加)/i],
+    ["attach", /^(?:attach\b|附件)/i],
+    ["model", /^(?:(?:select|choose|change|switch)\s+)?(?:model\b|模型)/i],
+    ["tools", /^(?:tools?\b|工具)/i],
+    ["temporary", /^(?:temporary\b|临时)/i],
+    ["copy", /^(?:copy\b|复制)/i],
+    ["regenerate", /^(?:regenerate\b|重新生成)/i],
+    ["share", /^(?:share\b|分享)/i],
+    ["retry", /^(?:try again\b|retry\b|重试)/i],
+  ];
+  return categories.find(([, pattern]) => pattern.test(label.trim()))?.[0] ?? null;
+}
+
 function describeControl(element) {
   if (!element) return null;
   const rawTestId = element.getAttribute("data-testid");
@@ -873,13 +917,7 @@ function describeControl(element) {
   return {
     tag: element.tagName.toLowerCase(),
     testId: rawTestId && /^[a-z0-9_-]+$/i.test(rawTestId) ? rawTestId : null,
-    ariaLabel:
-      rawAriaLabel &&
-      /send|voice|dictation|microphone|add|attach|model|tool|temporary|copy|regenerate|share|try again|retry|发送|语音|听写|麦克风|添加|附件|模型|工具|临时|复制|重新生成|分享|重试/i.test(
-        rawAriaLabel,
-      )
-        ? rawAriaLabel
-        : null,
+    ariaLabel: safeControlLabel(rawAriaLabel),
     role: element.getAttribute("role"),
     buttonType: element.getAttribute("type"),
     disabled: Boolean(element.disabled) || element.getAttribute("aria-disabled") === "true",

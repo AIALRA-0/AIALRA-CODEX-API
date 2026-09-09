@@ -261,7 +261,7 @@ ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 
 | `chatgpt_clarification_required`  | 深度研究要求补充信息       | 修改任务合同后创建新任务               |
 | `chatgpt_timeout`                 | 任务超过自身期限           | 查询网页状态后决定是否重新创建任务     |
 
-`chatgpt_rate_limited` 使用 HTTP `429`；正文 `retryAfter` 与 `Retry-After` 响应头始终使用相同的秒数
+普通 HTTP 响应中的 `chatgpt_rate_limited` 使用 `429`，正文 `retryAfter` 与 `Retry-After` 响应头使用相同的秒数；账号池冷却时间取最早可恢复账号的剩余时间，并遵守仍生效的全局冷却。若 SSE 已经开始，HTTP 状态不能再改为 `429`，接口会在终态错误事件中返回 `chatgpt_rate_limited` 和 `retryAfter`，随后结束流，不伪装成功，也不自动重新提交任务
 
 ## 7 并发和自动关闭
 

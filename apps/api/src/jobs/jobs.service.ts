@@ -132,7 +132,27 @@ export class JobsService {
             new Date(account.lastRateLimitAt).getTime() + account.retryAfter * 1_000 > Date.now(),
         );
       if (cooldownActive || recoveryProbeActive || allAccountsCoolingDown) {
-        const retryAfter = recoveryProbeActive ? recoveryRetryAfter : cooldownRetryAfter;
+        const accountRetryAfter = allAccountsCoolingDown
+          ? Math.max(
+              1,
+              Math.ceil(
+                (Math.min(
+                  ...qualifiedAccounts.map(
+                    (account) =>
+                      new Date(account.lastRateLimitAt!).getTime() + account.retryAfter! * 1_000,
+                  ),
+                ) -
+                  Date.now()) /
+                  1_000,
+              ),
+            )
+          : 0;
+        const retryAfter = Math.max(
+          1,
+          recoveryProbeActive ? recoveryRetryAfter : 0,
+          cooldownActive ? cooldownRetryAfter : 0,
+          accountRetryAfter,
+        );
         throw new HttpException(
           {
             error: {
@@ -357,6 +377,33 @@ export class JobsService {
         error: { code: "job_access_denied", message: "You cannot access this job." },
       });
     }
+  }
+
+  async retryAfterFor(job: Job): Promise<number | undefined> {
+    if (job.errorCode !== "chatgpt_rate_limited") return undefined;
+    const now = Date.now();
+    const status = await this.repository.readChatGptWebStatus();
+    const accounts = await this.repository.listChatGptWebAccounts();
+    const accountDelays = accounts
+      .filter(
+        (account) => account.enabled && account.qualified && account.rateLimitState === "cooldown",
+      )
+      .map((account) =>
+        account.lastRateLimitAt && account.retryAfter != null
+          ? Math.ceil(
+              (new Date(account.lastRateLimitAt).getTime() + account.retryAfter * 1_000 - now) /
+                1_000,
+            )
+          : 0,
+      )
+      .filter((delay) => delay > 0);
+    const globalDelay =
+      status.rateLimitState === "cooldown"
+        ? status.cooldownUntil
+          ? Math.ceil((new Date(status.cooldownUntil).getTime() - now) / 1_000)
+          : (status.retryAfter ?? 1)
+        : 0;
+    return Math.max(1, globalDelay, accountDelays.length ? Math.min(...accountDelays) : 0);
   }
 
   async get(id: string): Promise<Job> {

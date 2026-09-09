@@ -186,6 +186,46 @@ describe("AIALRA Model Router API", () => {
     }
   });
 
+  it("uses the earliest account cooldown instead of the clear global retry value", async () => {
+    const repository = app.get<JobRepository>(JOB_REPOSITORY);
+    await repository.syncChatGptWebAccounts(configuredChatGptWebAccountConfigs("a,b"));
+    const accounts = await repository.listChatGptWebAccounts();
+    const list = vi.spyOn(repository, "listChatGptWebAccounts").mockResolvedValue(
+      accounts.map((account, index) => ({
+        ...account,
+        enabled: true,
+        qualified: true,
+        state: "cooldown",
+        rateLimitState: "cooldown",
+        lastRateLimitAt: new Date(Date.now() - 100_000).toISOString(),
+        retryAfter: index === 0 ? 600 : 1200,
+      })),
+    );
+    process.env.CHATGPT_WEB_ADAPTER_ENABLED = "true";
+    try {
+      const response = await request(app.getHttpServer())
+        .post("/api/v1/jobs")
+        .set("Authorization", `Bearer ${bootstrapKey}`)
+        .set("Idempotency-Key", "pool-cooldown-only")
+        .send({
+          task: {
+            objective: "Synthetic",
+            model: "chatgpt-web.auto",
+            executionChannel: "chatgpt_web",
+            chatgptWeb: { mode: "chat", temporaryChat: true, requireSources: false },
+          },
+        })
+        .expect(429);
+      expect(response.body.error.code).toBe("chatgpt_rate_limited");
+      expect(response.body.error.retryAfter).toBeGreaterThanOrEqual(499);
+      expect(response.body.error.retryAfter).toBeLessThanOrEqual(500);
+      expect(response.headers["retry-after"]).toBe(String(response.body.error.retryAfter));
+    } finally {
+      list.mockRestore();
+      process.env.CHATGPT_WEB_ADAPTER_ENABLED = "false";
+    }
+  });
+
   it("returns a secret-free ChatGPT web experiment status", async () => {
     const response = await request(app.getHttpServer())
       .get("/api/v1/chatgpt-web/status")

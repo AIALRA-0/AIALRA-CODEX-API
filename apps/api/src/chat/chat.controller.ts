@@ -218,10 +218,16 @@ export class ChatCompletionsController {
       return;
     }
     if (completed.status !== "succeeded") {
-      response.status(502).json({
+      const retryAfter =
+        completed.errorCode === "chatgpt_rate_limited"
+          ? await this.jobs.retryAfterFor(completed)
+          : undefined;
+      if (retryAfter !== undefined) response.setHeader("Retry-After", String(retryAfter));
+      response.status(retryAfter !== undefined ? 429 : 502).json({
         error: {
           code: completed.errorCode ?? "provider_error",
           message: completed.errorMessage ?? "The call did not complete successfully.",
+          ...(retryAfter !== undefined ? { retryAfter } : {}),
           details: { job_id: completed.id, status: completed.status },
         },
       });
@@ -277,6 +283,10 @@ export class ChatCompletionsController {
         });
       }
       if (completed.status !== "succeeded") {
+        const retryAfter =
+          completed.errorCode === "chatgpt_rate_limited"
+            ? await this.jobs.retryAfterFor(completed)
+            : undefined;
         response.write(
           `event: error\ndata: ${JSON.stringify({
             error: {
@@ -284,6 +294,7 @@ export class ChatCompletionsController {
                 completed.errorCode ??
                 (TERMINAL_STATUSES.has(completed.status) ? "provider_error" : "gateway_timeout"),
               message: completed.errorMessage ?? "The call did not complete successfully.",
+              ...(retryAfter !== undefined ? { retryAfter } : {}),
               details: { job_id: completed.id, status: completed.status },
             },
           })}\n\n`,
