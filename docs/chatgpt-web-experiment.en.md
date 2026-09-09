@@ -203,7 +203,13 @@ The MCP tool `delegate_chatgpt` accepts `objective`, `mode`, `model`, `require_s
 
 ## 6 Models, usage, and errors
 
-Web models come from the visible page's current model menu. `GET /api/v1/models` reports web visibility separately from Router enablement, and an administrator must enable each model.
+The web channel retains the `chatgpt-web.auto` entry. Its `webThinkingDepths` in `GET /api/v1/models` lists all enabled choices discovered from the current thinking menu of authenticated, qualified accounts. Labels remain native to the page, not mapped to Codex reasoning levels.
+
+Use `task.chatgptWeb.thinkingDepth` for jobs, or `aialra.thinking_depth` for Chat Completions and Responses, with an exact discovered label. Omission preserves the page default. Discovery only opens and closes the menu on an idle page, without typing or sending messages. Results refresh on demand with a one-minute cache; an unreadable menu produces an empty list, never invented choices.
+
+The pool combines available choices but dispatches only to an account that actually offers the requested depth. Each new temporary page selects and verifies the depth before submission. Missing choices return `chatgpt_thinking_depth_unavailable`; unconfirmed selections return `chatgpt_thinking_depth_unverified`. Neither failure sends a message or silently downgrades the requested depth.
+
+Both menus and accessible sliders are supported. Slider discovery reads each actual label and restores the original choice; counts and labels are not hardcoded. CLI `call` / `research` accepts `--thinking-depth`; MCP `delegate_chatgpt` accepts `thinking_depth`.
 
 The page supplies no reliable token, Codex Credit, quota-delta, or API-equivalent-price measurement. Results use `measurementStatus: "unavailable"`; the console displays that the page did not provide reliable data and never substitutes zero.
 

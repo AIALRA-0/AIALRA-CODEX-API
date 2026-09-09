@@ -47,6 +47,7 @@ export const ChatGptWebOptionsSchema = z
     temporaryChat: z.boolean().default(true),
     personalized: z.literal(false).default(false),
     requireSources: z.boolean().default(false),
+    thinkingDepth: z.string().trim().min(1).max(64).optional(),
   })
   .strict();
 export type ChatGptWebOptions = z.infer<typeof ChatGptWebOptionsSchema>;
@@ -356,6 +357,8 @@ export const RuntimeModelSchema = z.object({
   hidden: z.boolean().default(false),
   isDefault: z.boolean().default(false),
   supportedReasoningEfforts: z.array(ReasoningEffortSchema),
+  webThinkingDepths: z.array(z.string().min(1).max(64)).max(32).optional(),
+  defaultWebThinkingDepth: z.string().min(1).max(64).nullable().optional(),
   defaultReasoningEffort: ReasoningEffortSchema.nullable(),
   inputModalities: z.array(z.string()),
   creditRate: ModelRateSchema.nullable(),
@@ -599,6 +602,7 @@ export const SessionAialraExtensionSchema = z
     deadline_ms: z.number().int().min(1_000).max(3_600_000).optional(),
     execution_channel: ExecutionChannelSchema.optional(),
     chatgpt_mode: ChatGptWebModeSchema.optional(),
+    thinking_depth: z.string().trim().min(1).max(64).optional(),
     conversation_mode: ChatGptWebConversationModeSchema.optional(),
     temporary_chat: z.boolean().optional(),
     require_sources: z.boolean().optional(),

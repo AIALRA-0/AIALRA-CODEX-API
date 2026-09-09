@@ -297,14 +297,21 @@ async function probe(discoverModels = false) {
   const readyPages = [];
   for (const slot of slots.values()) {
     try {
-      const result = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels }, 2);
+      const result = await sendToTab(
+        slot.tabId,
+        {
+          type: "aialra.probe",
+          discoverModels: discoverModels && activeJobs.size === 0 && slot.state === "idle",
+        },
+        2,
+      );
       if (result) readyPages.push({ slot, result });
     } catch {
       // A loading or quarantined tab is represented by its slot state
     }
   }
   const first = readyPages.find(({ result }) => result.pageReady && result.authenticated)?.result;
-  if (first?.models?.length) discoveredModels = first.models;
+  if (first?.models) discoveredModels = first.models;
   controlDiagnostics = first?.diagnostics ?? null;
   pageFailureCode = first?.failureCode ?? null;
   send({
@@ -404,6 +411,8 @@ async function invoke(invocation) {
       "chatgpt_page_generation_blank",
       "chatgpt_page_rendering_failed",
       "chatgpt_output_selector_changed",
+      "chatgpt_thinking_depth_unavailable",
+      "chatgpt_thinking_depth_unverified",
     ].includes(code)
       ? code
       : !pageBound && (code.includes("browser") || code === "chatgpt_ui_changed")

@@ -105,6 +105,95 @@ afterEach(() => {
 });
 
 describe("ChatGptWebPoolProvider", () => {
+  function depthCatalog(depths: string[]) {
+    return {
+      source: "chatgpt-web",
+      fetchedAt: new Date().toISOString(),
+      models: [
+        {
+          id: "chatgpt-web.auto",
+          displayName: "ChatGPT web",
+          provider: "chatgpt_web",
+          available: true,
+          hidden: false,
+          isDefault: true,
+          supportedReasoningEfforts: [],
+          defaultReasoningEffort: null,
+          webThinkingDepths: depths,
+          defaultWebThinkingDepth: depths[0] ?? null,
+          inputModalities: ["text"],
+          creditRate: null,
+          apiRate: null,
+          rateStatus: "unavailable",
+          discoveredAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  it("merges actual account depths and dispatches only to an account that supports the selection", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = String(input);
+        const id = url.includes("account-b") ? "account-b" : "account-a";
+        if (url.endsWith("/healthz")) return Response.json(health(id));
+        if (url.endsWith("/models"))
+          return Response.json(
+            depthCatalog(id === "account-a" ? ["Standard"] : ["Standard", "Heavy"]),
+          );
+        sent.push(id);
+        return response([
+          { type: "result", result: { output: "OK", outputText: "OK", threadId: null, usage } },
+        ]);
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    expect((await pool.listModels()).models[0]?.webThinkingDepths).toEqual(["Standard", "Heavy"]);
+    const task = invocation();
+    task.task.chatgptWeb!.thinkingDepth = "Heavy";
+    await expect(pool.invoke(task)).resolves.toMatchObject({ outputText: "OK" });
+    expect(sent).toEqual(["account-b"]);
+    expect(
+      (await repository.listChatGptWebAccounts()).find(
+        (account) => account.accountId === "account-a",
+      )?.qualified,
+    ).toBe(true);
+  });
+
+  it("does not submit or leak a lease when every account lacks a requested depth", async () => {
+    const { repository, configs } = await readyRepository();
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = String(input);
+        if (url.endsWith("/healthz")) return Response.json(health("synthetic"));
+        if (url.endsWith("/models")) return Response.json(depthCatalog(["Standard"]));
+        sent.push(url);
+        throw new Error("Unexpected submission");
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    const task = invocation();
+    task.task.chatgptWeb!.thinkingDepth = "Missing";
+    await expect(pool.invoke(task)).rejects.toMatchObject({
+      code: "chatgpt_thinking_depth_unavailable",
+      submissionState: "not_submitted",
+    });
+    expect(sent).toEqual([]);
+    expect(
+      (await repository.listChatGptWebAccounts()).every(
+        (account) => !account.activeJobId && account.qualified,
+      ),
+    ).toBe(true);
+  });
+
   it("prefers the primary account but lends overflow to another idle account", async () => {
     const { repository } = await readyRepository();
     await repository.updateChatGptWebAccount("account-a", {

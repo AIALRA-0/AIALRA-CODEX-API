@@ -1,0 +1,218 @@
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import { describe, expect, it, vi } from "vitest";
+import { ExtensionFailedSchema } from "../src/protocol.js";
+
+function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
+  const element = (text: string, attributes: Record<string, string> = {}) => ({
+    innerText: text,
+    visible: true,
+    disabled: false,
+    getAttribute: (key: string) => attributes[key] ?? null,
+    hasAttribute: (key: string) => key in attributes,
+    getBoundingClientRect() {
+      return { width: this.visible ? 100 : 0, height: this.visible ? 30 : 0 };
+    },
+  });
+  const attributes: Record<string, string> = {
+    "aria-label": "Thinking effort",
+    "aria-expanded": "false",
+    "aria-controls": "depths",
+  };
+  const options = labels.map((label, index) =>
+    element(label, { "aria-checked": String(index === 0) }),
+  );
+  const menu = {
+    ...element(""),
+    visible: false,
+    querySelectorAll: (selector?: string): unknown[] =>
+      selector === "[role='slider']" ? [] : options,
+    dispatchEvent: () => {
+      menu.visible = false;
+      attributes["aria-expanded"] = "false";
+    },
+  };
+  const control = {
+    ...element("Standard", attributes),
+    click: () => {
+      menu.visible = !menu.visible;
+      attributes["aria-expanded"] = String(menu.visible);
+    },
+  };
+  const native = vi.fn(async (target: typeof control, _job: string, action: string) => {
+    if (action === "thinking_depth_menu") control.click();
+    else {
+      control.innerText = target.innerText;
+      menu.visible = false;
+      attributes["aria-expanded"] = "false";
+    }
+  });
+  const context = {
+    activeJobId: null as string | null,
+    authenticated: () => true,
+    userMessages: () => [],
+    SELECTORS: { composer: ["composer"], stop: ["stop"] },
+    first: (selectors: string[]) => (selectors[0] === "composer" ? {} : null),
+    composerControlRoot: () => ({ querySelectorAll: () => [control] }),
+    document: { querySelectorAll: () => [menu], getElementById: () => menu },
+    getComputedStyle: () => ({ visibility: "visible" }),
+    visibleText: (target: typeof control | null) => target?.innerText ?? "",
+    waitForMutation: () => Promise.resolve(),
+    nativeClick: native,
+    KeyboardEvent: class {
+      constructor(
+        public type: string,
+        public options: { key: string },
+      ) {}
+    },
+  };
+  const content = readFileSync(new URL("../extension/content-script.js", import.meta.url), "utf8");
+  const functions = content.slice(
+    content.indexOf("function thinkingDepthControl()"),
+    content.indexOf("function buttonByText("),
+  );
+  const api = runInNewContext(
+    `${functions}\n({ discoverThinkingDepths, configureThinkingDepth, thinkingDepthOptions, readThinkingDepthChoices })`,
+    context,
+  );
+  return { api, context, control, menu, options, native };
+}
+
+describe("visible thinking depth menu", () => {
+  it("discovers every enabled label, including an unknown future depth, without selecting or sending", async () => {
+    const { api, control, menu, native } = harness();
+    expect(await api.discoverThinkingDepths()).toMatchObject([
+      {
+        webThinkingDepths: ["Standard", "Extended", "Heavy", "Future depth"],
+        defaultWebThinkingDepth: "Standard",
+      },
+    ]);
+    expect(control.innerText).toBe("Standard");
+    expect(menu.visible).toBe(false);
+    expect(native).not.toHaveBeenCalled();
+  });
+
+  it("does not advertise disabled choices or private-looking labels", async () => {
+    const { api, options } = harness(["Standard", "Extended", "user@example.test"]);
+    options[1]!.disabled = true;
+    expect((await api.discoverThinkingDepths())[0].webThinkingDepths).toEqual(["Standard"]);
+  });
+
+  it("never opens a menu while a task or a user-owned menu is active", async () => {
+    const { api, context, menu } = harness();
+    context.activeJobId = "busy";
+    expect(await api.discoverThinkingDepths()).toEqual([]);
+    context.activeJobId = null;
+    menu.visible = true;
+    expect(await api.discoverThinkingDepths()).toEqual([]);
+    expect(menu.visible).toBe(true);
+  });
+
+  it("selects and verifies exactly the requested depth before any submission", async () => {
+    const { api, control, native } = harness();
+    await api.configureThinkingDepth({ thinkingDepth: "Heavy", jobId: "test" }, Date.now() + 5_000);
+    expect(control.innerText).toBe("Heavy");
+    expect(native.mock.calls.map((call) => call[2])).toEqual([
+      "thinking_depth_menu",
+      "thinking_depth_option",
+    ]);
+  });
+
+  it("rejects an absent depth without selecting a fallback", async () => {
+    const { api, control, native } = harness();
+    await expect(
+      api.configureThinkingDepth({ thinkingDepth: "Missing", jobId: "test" }, Date.now() + 5_000),
+    ).rejects.toThrow("chatgpt_thinking_depth_unavailable");
+    expect(control.innerText).toBe("Standard");
+    expect(native).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps old requests unchanged and refuses an unconfirmed selection", async () => {
+    const { api, native } = harness();
+    await api.configureThinkingDepth({}, Date.now() + 5_000);
+    expect(native).not.toHaveBeenCalled();
+    native.mockImplementation(async (_target, _job, action) => {
+      if (action === "thinking_depth_menu") _target.click();
+    });
+    await expect(
+      api.configureThinkingDepth({ thinkingDepth: "Heavy", jobId: "test" }, Date.now() + 30),
+    ).rejects.toThrow("chatgpt_thinking_depth_unverified");
+  });
+});
+
+function sliderHarness() {
+  const h = harness();
+  const labels = ["Instant", "Medium", "High", "Extra High", "6 Pro"];
+  let value = 1;
+  const slider = {
+    getBoundingClientRect: () => ({ width: 16, height: 16 }),
+    getAttribute: (key: string) =>
+      ({
+        "aria-valuemin": "0",
+        "aria-valuemax": "4",
+        "aria-valuenow": String(value),
+        "aria-valuetext": labels[value],
+      })[key] ?? null,
+    hasAttribute: () => false,
+    focus: vi.fn(),
+    dispatchEvent: vi.fn((event: { type: string; options: { key: string } }) => {
+      if (event.type !== "keydown") return;
+      value = Math.max(0, Math.min(4, value + (event.options.key === "ArrowRight" ? 1 : -1)));
+      h.control.innerText = labels[value]!;
+    }),
+  };
+  h.menu.querySelectorAll = (selector?: string) => (selector === "[role='slider']" ? [slider] : []);
+  h.control.innerText = "Medium";
+  return { ...h, slider, labels, value: () => value };
+}
+
+describe("accessible thinking effort slider", () => {
+  it("reads all actual labels and restores the original selection without native submission", async () => {
+    const h = sliderHarness();
+    const models = await h.api.discoverThinkingDepths();
+    expect(models[0].webThinkingDepths).toEqual(h.labels);
+    expect(models[0].defaultWebThinkingDepth).toBe("Medium");
+    expect(h.value()).toBe(1);
+    expect(h.control.innerText).toBe("Medium");
+    expect(h.menu.visible).toBe(false);
+    expect(h.native).not.toHaveBeenCalled();
+  });
+  it.each(["Instant", "Medium", "High", "Extra High", "6 Pro"])(
+    "selects and verifies %s",
+    async (label) => {
+      const h = sliderHarness();
+      await h.api.configureThinkingDepth(
+        { thinkingDepth: label, jobId: "test" },
+        Date.now() + 5_000,
+      );
+      expect(h.control.innerText).toBe(label);
+      expect(h.native.mock.calls.map((call) => call[2])).toEqual(["thinking_depth_menu"]);
+      expect(h.menu.visible).toBe(false);
+    },
+  );
+  it("does not advertise a slider that ignores keyboard changes", async () => {
+    const h = sliderHarness();
+    h.slider.dispatchEvent.mockImplementation(() => undefined);
+    expect(await h.api.discoverThinkingDepths()).toEqual([]);
+    expect(h.value()).toBe(1);
+  });
+  it("restores the original value after encountering an unreadable position", async () => {
+    const h = sliderHarness();
+    h.labels[3] = "";
+    expect(await h.api.discoverThinkingDepths()).toEqual([]);
+    expect(h.value()).toBe(1);
+  });
+  it.each(["chatgpt_thinking_depth_unavailable", "chatgpt_thinking_depth_unverified"])(
+    "transports %s instead of discarding it and timing out",
+    (code) => {
+      expect(
+        ExtensionFailedSchema.safeParse({
+          type: "failed",
+          jobId: "0190abcd-0000-7000-8000-000000000099",
+          code,
+          message: "page_execution_failed",
+        }).success,
+      ).toBe(true);
+    },
+  );
+});

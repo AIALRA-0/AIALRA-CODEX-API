@@ -99,6 +99,8 @@ interface ModelRecord {
   available: boolean;
   enabled: boolean;
   supportedReasoningEfforts: string[];
+  webThinkingDepths?: string[];
+  defaultWebThinkingDepth?: string | null;
   defaultReasoningEffort: string | null;
   inputModalities: string[];
   rateStatus: "available" | "unavailable";
@@ -730,6 +732,7 @@ function Playground() {
   const [temporaryChat] = useState(true);
   const [requireSources, setRequireSources] = useState(true);
   const [effort, setEffort] = useState("medium");
+  const [thinkingDepth, setThinkingDepth] = useState("");
   const [taskKind, setTaskKind] = useState("general");
   const [permissionPreset, setPermissionPreset] = useState<"restricted" | "confirm" | "full">(
     "full",
@@ -743,6 +746,7 @@ function Playground() {
   const [copyFeedback, setCopyFeedback] = useState("");
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [modelsError, setModelsError] = useState("");
+  const webDepths = models.find((item) => item.id === model)?.webThinkingDepths ?? [];
   const chatGptWebAvailable = models.some(
     (item) => item.provider === "chatgpt_web" && item.available && item.enabled,
   );
@@ -795,6 +799,7 @@ function Playground() {
                     temporaryChat,
                     personalized: false,
                     requireSources,
+                    ...(thinkingDepth ? { thinkingDepth } : {}),
                   },
                 }
               : {}),
@@ -881,6 +886,7 @@ function Playground() {
                   const channel = event.target.value as "codex" | "chatgpt_web";
                   setExecutionChannel(channel);
                   setModel(channel === "chatgpt_web" ? "chatgpt-web.auto" : "auto");
+                  setThinkingDepth("");
                   if (channel === "chatgpt_web") {
                     setSessionMode("ephemeral");
                     setSessionKey("");
@@ -935,7 +941,33 @@ function Playground() {
                   <option value="xhigh">超高（xhigh）</option>
                 </select>
               </div>
-            ) : null}
+            ) : (
+              <div className="field">
+                <label htmlFor="thinking-depth">思考深度</label>
+                <select
+                  id="thinking-depth"
+                  value={thinkingDepth}
+                  onChange={(event) => setThinkingDepth(event.target.value)}
+                >
+                  <option value="">跟随网页默认</option>
+                  {webDepths.map((depth) => (
+                    <option key={depth} value={depth}>
+                      {depth}
+                    </option>
+                  ))}
+                  {thinkingDepth && !webDepths.includes(thinkingDepth) ? (
+                    <option value={thinkingDepth} disabled>
+                      {thinkingDepth}（当前不可用）
+                    </option>
+                  ) : null}
+                </select>
+                <small className="field-help">
+                  {webDepths.length
+                    ? "档位来自账号网页菜单；发送前会再次确认实际选中值。"
+                    : "尚未读取到可选档位，暂用网页默认；账号就绪后会自动更新。"}
+                </small>
+              </div>
+            )}
             <div className="field">
               <label htmlFor="kind">任务类型</label>
               <select
@@ -2348,6 +2380,11 @@ function Models() {
               <p className="muted">
                 网页动态发现 ·{" "}
                 {model.streamingMode === "final_only" ? "仅返回最终完整正文" : "流式"}
+                <br />
+                思考深度{" "}
+                {model.webThinkingDepths?.length
+                  ? model.webThinkingDepths.join("、")
+                  : "尚未读取到菜单"}
               </p>
             ) : (
               <p className="muted">

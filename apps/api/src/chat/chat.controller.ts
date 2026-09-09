@@ -177,6 +177,7 @@ export class ChatCompletionsController {
               temporaryChat: value.aialra?.temporary_chat ?? true,
               personalized: false,
               requireSources: value.aialra?.require_sources ?? chatgptMode !== "chat",
+              thinkingDepth: value.aialra?.thinking_depth,
             }
           : undefined,
       sessionKey,

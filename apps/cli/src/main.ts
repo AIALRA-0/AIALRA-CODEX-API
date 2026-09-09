@@ -72,6 +72,7 @@ async function main(): Promise<void> {
               temporaryChat: true,
               personalized: false,
               requireSources: process.argv.includes("--require-sources"),
+              thinkingDepth: option("--thinking-depth"),
             }
           : undefined,
       deadlineMs:
@@ -106,6 +107,7 @@ async function main(): Promise<void> {
         temporaryChat: true,
         personalized: false,
         requireSources: true,
+        thinkingDepth: option("--thinking-depth"),
       },
       sessionMode: "ephemeral",
       permissions: { preset: "restricted" },

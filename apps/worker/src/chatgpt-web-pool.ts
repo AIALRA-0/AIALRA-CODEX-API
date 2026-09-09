@@ -5,6 +5,7 @@ import {
   ChatGptWebStatusSchema,
   type ChatGptWebAccount,
   type ChatGptWebStatus,
+  type ModelCatalogSnapshot,
 } from "@aialra/contracts";
 import type {
   ChatGptWebAccountConfig,
@@ -527,6 +528,37 @@ export class ChatGptWebPoolProvider implements ModelProvider {
       const account = await this.waitForLease(invocation.jobId, excluded, invocation.signal);
       excluded.add(account.accountId);
       const client = this.clients.get(account.accountId);
+      const requestedDepth = invocation.task.chatgptWeb?.thinkingDepth;
+      if (requestedDepth) {
+        try {
+          const catalog = await this.quotaClients.get(account.accountId)?.listModels();
+          if (
+            !catalog?.models.some(
+              (model) =>
+                model.id === invocation.route.model &&
+                model.available &&
+                model.webThinkingDepths?.includes(requestedDepth),
+            )
+          ) {
+            await this.release(account, invocation.jobId, { state: "ready" });
+            lastPreSubmitError = new ChatGptWebPoolError(
+              "chatgpt_thinking_depth_unavailable",
+              "The requested depth is not available on this account.",
+              "not_submitted",
+              account.accountId,
+            );
+            continue;
+          }
+        } catch {
+          await this.release(account, invocation.jobId, { state: "ready" });
+          throw new ChatGptWebPoolError(
+            "chatgpt_thinking_depth_unavailable",
+            "Could not verify the account's thinking menu before submission.",
+            "not_submitted",
+            account.accountId,
+          );
+        }
+      }
       if (!client) {
         await this.release(account, invocation.jobId, {
           state: "quarantined",
@@ -629,15 +661,41 @@ export class ChatGptWebPoolProvider implements ModelProvider {
   }
 
   async listModels() {
-    const clients = [...this.quotaClients.values()];
-    for (const client of clients) {
+    const accounts = await this.repository.listChatGptWebAccounts();
+    const catalogs: ModelCatalogSnapshot[] = [];
+    for (const account of accounts.filter(
+      (item) => item.enabled && item.qualified && item.authenticated,
+    )) {
       try {
-        return await client.listModels();
+        const catalog = await this.quotaClients.get(account.accountId)?.listModels();
+        if (catalog) catalogs.push(catalog);
       } catch {
         continue;
       }
     }
-    throw new Error("runner_models_unavailable:pool");
+    const first = catalogs[0];
+    if (!first) throw new Error("runner_models_unavailable:pool");
+    const merged = new Map<string, ModelCatalogSnapshot["models"][number]>();
+    for (const catalog of catalogs) {
+      for (const model of catalog.models) {
+        const previous = merged.get(model.id);
+        merged.set(model.id, {
+          ...model,
+          available: model.available || previous?.available === true,
+          webThinkingDepths: [
+            ...new Set([
+              ...(previous?.webThinkingDepths ?? []),
+              ...(model.webThinkingDepths ?? []),
+            ]),
+          ],
+          defaultWebThinkingDepth:
+            previous && previous.defaultWebThinkingDepth !== model.defaultWebThinkingDepth
+              ? null
+              : model.defaultWebThinkingDepth,
+        });
+      }
+    }
+    return { ...first, models: [...merged.values()] };
   }
 
   async readHealth(): Promise<Record<string, unknown>> {

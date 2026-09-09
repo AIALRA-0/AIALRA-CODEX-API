@@ -599,6 +599,8 @@ export interface components {
       execution_channel?: "codex" | "chatgpt_web";
       /** @enum {string} */
       chatgpt_mode?: "chat" | "search" | "deep_research";
+      /** @description Exact depth label discovered from the account's visible thinking menu; omitted uses the page default. */
+      thinking_depth?: string;
       /**
        * @default temporary_per_request
        * @constant
@@ -709,6 +711,8 @@ export interface components {
          */
         personalized: false;
         requireSources: boolean;
+        /** @description Exact webThinkingDepths label, verified before submission. */
+        thinkingDepth?: string;
       };
       /** @default auto */
       model: string;
@@ -839,6 +843,8 @@ export interface components {
       hidden: boolean;
       isDefault: boolean;
       supportedReasoningEfforts: string[];
+      webThinkingDepths?: string[];
+      defaultWebThinkingDepth?: string | null;
       defaultReasoningEffort: string | null;
       inputModalities: string[];
       creditRate: {

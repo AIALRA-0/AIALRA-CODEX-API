@@ -69,7 +69,15 @@ describe("ChatGPT web bridge server", () => {
         protocolVersion: 1,
         pageReady: true,
         authenticated: true,
-        models: [{ id: "", displayName: "GPT-5 Pro", available: true }],
+        models: [
+          {
+            id: "chatgpt-web.auto",
+            displayName: "GPT-5 Pro",
+            available: true,
+            webThinkingDepths: ["Standard", "Extended", "Heavy"],
+            defaultWebThinkingDepth: "Standard",
+          },
+        ],
         activeTabs: 0,
         diagnostics: {
           composerFound: true,
@@ -108,13 +116,21 @@ describe("ChatGPT web bridge server", () => {
     });
     const catalog = (await modelResponse.json()) as { models: Array<{ id: string }> };
     expect(catalog.models.map((model) => model.id)).toEqual(["chatgpt-web.auto"]);
+    expect(catalog.models[0]).toMatchObject({
+      webThinkingDepths: ["Standard", "Extended", "Heavy"],
+    });
 
     const jobId = "0190abcd-0000-7000-8000-000000000001";
     const task = TaskContractSchema.parse({
       objective: "Return SYNTHETIC_OK",
       executionChannel: "chatgpt_web",
       model: "chatgpt-web.auto",
-      chatgptWeb: { mode: "chat", temporaryChat: true, requireSources: false },
+      chatgptWeb: {
+        mode: "chat",
+        temporaryChat: true,
+        requireSources: false,
+        thinkingDepth: "Heavy",
+      },
       deadlineMs: 10_000,
       budget: { maxOutputTokens: 1_000, maxAttempts: 1 },
     });
@@ -141,6 +157,7 @@ describe("ChatGPT web bridge server", () => {
     if (controllerMessage.type === "configure") controllerMessage = await nextMessage(extension);
     expect(controllerMessage.type).toBe("invoke");
     expect((controllerMessage.invocation as { modelLabel: string | null }).modelLabel).toBeNull();
+    expect(controllerMessage.invocation).toMatchObject({ thinkingDepth: "Heavy" });
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     extension.send(
       JSON.stringify({

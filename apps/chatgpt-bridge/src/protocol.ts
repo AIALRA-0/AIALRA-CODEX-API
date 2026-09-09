@@ -14,6 +14,7 @@ export const BridgeInvocationSchema = z.object({
   deadlineMs: z.number().int().min(1_000).max(3_600_000),
   deadlineAt: z.number().int().positive(),
   modelLabel: z.string().min(1).max(256).nullable().optional(),
+  thinkingDepth: z.string().min(1).max(64).optional(),
   documentToken: z.string().uuid().nullable().optional(),
   diagnostic: z.boolean().default(false),
   attempt: z.number().int().min(1).max(2).default(1),
@@ -24,6 +25,8 @@ export const BrowserModelSchema = z.object({
   id: z.string().max(128).default(""),
   displayName: z.string().min(1).max(256),
   available: z.boolean(),
+  webThinkingDepths: z.array(z.string().min(1).max(64)).max(32).optional(),
+  defaultWebThinkingDepth: z.string().min(1).max(64).nullable().optional(),
 });
 export type BrowserModel = z.infer<typeof BrowserModelSchema>;
 
@@ -198,6 +201,8 @@ export const ExtensionFailedSchema = z.object({
     "chatgpt_page_rendering_failed",
     "chatgpt_output_selector_changed",
     "chatgpt_clarification_required",
+    "chatgpt_thinking_depth_unavailable",
+    "chatgpt_thinking_depth_unverified",
     "chatgpt_browser_unavailable",
   ]),
   message: z.string().max(500),
@@ -230,6 +235,8 @@ export const ExtensionNativeClickRequestSchema = z.object({
     "temporary_chat",
     "temporary_chat_non_personalized",
     "send_prompt",
+    "thinking_depth_menu",
+    "thinking_depth_option",
   ]),
   x: z.number().int().min(0).max(1_439),
   y: z.number().int().min(0).max(899),

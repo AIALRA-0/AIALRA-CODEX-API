@@ -990,6 +990,11 @@ components:
         chatgpt_mode:
           type: string
           enum: [chat, search, deep_research]
+        thinking_depth:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Exact depth label discovered from the account's visible thinking menu; omitted uses the page default.
         conversation_mode:
           type: string
           const: temporary_per_request
@@ -1148,6 +1153,11 @@ components:
               default: false
             requireSources:
               type: boolean
+            thinkingDepth:
+              type: string
+              minLength: 1
+              maxLength: 64
+              description: Exact webThinkingDepths label, verified before submission.
         model:
           type: string
           pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
@@ -1407,6 +1417,11 @@ components:
         supportedReasoningEfforts:
           type: array
           items: { type: string }
+        webThinkingDepths:
+          type: array
+          maxItems: 32
+          items: { type: string, minLength: 1, maxLength: 64 }
+        defaultWebThinkingDepth: { type: [string, "null"] }
         defaultReasoningEffort: { type: [string, "null"] }
         inputModalities:
           type: array

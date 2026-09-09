@@ -21,6 +21,7 @@ import {
   type BrowserControlDiagnostics,
   type BrowserPageFailureCode,
   type BrowserSlot,
+  type BrowserModel,
   type ControllerMessage,
 } from "./protocol.js";
 
@@ -423,6 +424,7 @@ async function main(): Promise<void> {
   let extensionConnectedAt: string | null = null;
   let pageReady = false;
   let authenticated = false;
+  let discoveredModels: BrowserModel[] = [];
   let activeTabs = 0;
   let controlDiagnostics: BrowserControlDiagnostics | null = null;
   let browserFailureCode: BrowserPageFailureCode | null = null;
@@ -550,6 +552,9 @@ async function main(): Promise<void> {
       return;
     }
     if (request.method === "GET" && url.pathname === "/models") {
+      if (extension && !activeJobId) {
+        extension.send(JSON.stringify({ type: "probe", discoverModels: true }));
+      }
       const snapshot = ModelCatalogSnapshotSchema.parse({
         source: extension && pageReady && authenticated ? "chatgpt-web" : "unavailable",
         fetchedAt: new Date().toISOString(),
@@ -557,6 +562,13 @@ async function main(): Promise<void> {
           { id: "chatgpt-web.auto", displayName: "ChatGPT 网页自动选择", available: true },
         ].map((model) => ({
           ...model,
+          webThinkingDepths: authenticated
+            ? (discoveredModels.find((entry) => entry.id === model.id)?.webThinkingDepths ?? [])
+            : [],
+          defaultWebThinkingDepth: authenticated
+            ? (discoveredModels.find((entry) => entry.id === model.id)?.defaultWebThinkingDepth ??
+              null)
+            : null,
           provider: "chatgpt_web",
           hidden: false,
           isDefault: model.id === "chatgpt-web.auto",
@@ -678,6 +690,9 @@ async function main(): Promise<void> {
           deadlineMs: value.task.deadlineMs,
           deadlineAt: Date.now() + value.task.deadlineMs,
           modelLabel: null,
+          ...(value.task.chatgptWeb.thinkingDepth
+            ? { thinkingDepth: value.task.chatgptWeb.thinkingDepth }
+            : {}),
           diagnostic: diagnosticRequest,
           attempt: value.attempt,
         } satisfies BridgeInvocation);
@@ -872,6 +887,7 @@ async function main(): Promise<void> {
         return;
       }
       if (message.type === "hello" || message.type === "models") {
+        discoveredModels = message.authenticated ? message.models : [];
         pageReady = message.pageReady;
         authenticated = message.authenticated;
         activeTabs = message.activeTabs;

@@ -69,6 +69,9 @@ const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快�
 
 let activeJobId = null;
 let cancelled = false;
+let depthDiscovery = null;
+let depthCatalog = [];
+let depthCatalogAt = 0;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
 const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000;
 const TERMINAL_BLANK_CONFIRM_MS = 15_000;
@@ -294,6 +297,244 @@ function modelControlForComposer() {
       })
     : null;
   return scoped ?? firstVisible(SELECTORS.modelButton) ?? buttonByText(MODEL_LABEL_PATTERN);
+}
+
+function thinkingDepthControl() {
+  const composer = first(SELECTORS.composer);
+  const root = composer ? composerControlRoot(composer) : null;
+  if (!root) return null;
+  return (
+    [...root.querySelectorAll("button, [role='combobox']")].find((element) => {
+      if (!isDepthControlVisible(element) || depthControlDisabled(element)) return false;
+      const label = `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`.trim();
+      return (
+        /thinking (?:time|effort|depth)|reasoning (?:effort|depth)|思考(?:时间|强度|深度)/i.test(
+          label,
+        ) ||
+        /^(?:instant|medium|high|extra high|light|standard|extended|heavy|\d+(?:\.\d+)? pro|轻量|标准|扩展|深度|轻度|加强)$/i.test(
+          label,
+        ) ||
+        /thinking.*(?:effort|time)|reasoning-effort/.test(element.getAttribute("data-testid") ?? "")
+      );
+    }) ?? null
+  );
+}
+
+function isDepthControlVisible(element) {
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== "hidden";
+}
+
+function depthControlDisabled(element) {
+  return (
+    element.disabled === true ||
+    element.getAttribute("aria-disabled") === "true" ||
+    element.hasAttribute("data-disabled")
+  );
+}
+
+function thinkingDepthOptions(menu) {
+  if (!menu) return [];
+  return [
+    ...menu.querySelectorAll(
+      "[role='menuitemradio'], [role='option'], [role='radio'], [role='menuitem']",
+    ),
+  ]
+    .filter((element) => isDepthControlVisible(element) && !depthControlDisabled(element))
+    .map((element) => ({
+      element,
+      label: visibleText(element).split("\n")[0].trim(),
+      selected:
+        element.getAttribute("aria-checked") === "true" ||
+        element.getAttribute("aria-selected") === "true" ||
+        element.getAttribute("data-state") === "checked",
+    }))
+    .filter(
+      ({ label }) => label.length > 0 && label.length <= 64 && !/[\r\n@]|https?:|\//i.test(label),
+    )
+    .filter(
+      (entry, index, entries) => entries.findIndex((item) => item.label === entry.label) === index,
+    );
+}
+
+async function openThinkingDepthMenu(control, click, deadline) {
+  const visibleMenus = () =>
+    [
+      ...document.querySelectorAll(
+        "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog']",
+      ),
+    ].filter(isDepthControlVisible);
+  const previous = new Set(visibleMenus());
+  // Do not close or interact with a menu the user already has open.
+  if (previous.size || control.getAttribute("aria-expanded") === "true") return null;
+  await click(control);
+  const end = Math.min(deadline, Date.now() + 1_500);
+  while (Date.now() < end) {
+    const ownedId = control.getAttribute("aria-controls");
+    const owned = ownedId ? document.getElementById(ownedId) : null;
+    if (owned && isDepthControlVisible(owned)) return owned;
+    const opened = visibleMenus().filter((menu) => !previous.has(menu));
+    if (opened.length === 1) return opened[0];
+    await waitForMutation(100);
+  }
+  control.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }),
+  );
+  if (control.getAttribute("aria-expanded") === "true") control.click();
+  return null;
+}
+
+async function closeThinkingDepthMenu(control, menu) {
+  if (!menu || !isDepthControlVisible(menu)) return;
+  menu.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }),
+  );
+  await waitForMutation(50);
+  if (isDepthControlVisible(menu) && control.getAttribute("aria-expanded") === "true")
+    control.click();
+}
+
+// Newer ChatGPT pages expose the effort choices as an accessible slider, not
+// radio options. Read its actual labels; neither indices nor labels are models.
+function thinkingDepthSlider(menu) {
+  if (!menu) return null;
+  const sliders = [...menu.querySelectorAll("[role='slider']")].filter(
+    (element) => isDepthControlVisible(element) && !depthControlDisabled(element),
+  );
+  if (sliders.length !== 1) return null;
+  const element = sliders[0];
+  const minimum = Number(element.getAttribute("aria-valuemin"));
+  const maximum = Number(element.getAttribute("aria-valuemax"));
+  const value = Number(element.getAttribute("aria-valuenow"));
+  if (
+    ["aria-valuemin", "aria-valuemax", "aria-valuenow"].some(
+      (attribute) => element.getAttribute(attribute) === null,
+    ) ||
+    ![minimum, maximum, value].every(Number.isSafeInteger) ||
+    maximum <= minimum ||
+    maximum - minimum > 31 ||
+    value < minimum ||
+    value > maximum
+  )
+    return null;
+  return { element, minimum, maximum, value };
+}
+
+function thinkingDepthSliderLabel(menu, slider) {
+  const accessible = slider.element.getAttribute("aria-valuetext")?.trim();
+  const buttons = [...menu.querySelectorAll("button")].filter(
+    (element) => isDepthControlVisible(element) && !depthControlDisabled(element),
+  );
+  const label = accessible || (buttons.length === 1 ? visibleText(buttons[0]).trim() : "");
+  return label && label.length <= 64 && !/[\r\n@]|https?:|\//i.test(label) ? label : null;
+}
+
+async function moveThinkingDepthSlider(menu, target, deadline) {
+  for (let step = 0; step < 32 && Date.now() < deadline; step += 1) {
+    const slider = thinkingDepthSlider(menu);
+    if (!slider || target < slider.minimum || target > slider.maximum) return false;
+    if (slider.value === target) return true;
+    const key = target < slider.value ? "ArrowLeft" : "ArrowRight";
+    slider.element.focus();
+    slider.element.dispatchEvent(new KeyboardEvent("keydown", { key, code: key, bubbles: true }));
+    slider.element.dispatchEvent(new KeyboardEvent("keyup", { key, code: key, bubbles: true }));
+    const end = Math.min(deadline, Date.now() + 500);
+    while (Date.now() < end && thinkingDepthSlider(menu)?.value === slider.value)
+      await waitForMutation(25);
+    const current = thinkingDepthSlider(menu);
+    if (!current || current.value === slider.value || Math.abs(current.value - slider.value) !== 1)
+      return false;
+  }
+  return thinkingDepthSlider(menu)?.value === target;
+}
+
+async function readThinkingDepthChoices(menu, deadline) {
+  const options = thinkingDepthOptions(menu);
+  if (options.length) return options;
+  const initial = thinkingDepthSlider(menu);
+  if (!initial) return [];
+  const choices = [];
+  let restored = false;
+  try {
+    for (let value = initial.minimum; value <= initial.maximum; value += 1) {
+      if (!(await moveThinkingDepthSlider(menu, value, deadline))) return [];
+      await waitForMutation(50);
+      const current = thinkingDepthSlider(menu);
+      const label = current ? thinkingDepthSliderLabel(menu, current) : null;
+      if (!label || choices.some((entry) => entry.label === label)) return [];
+      choices.push({ label, selected: value === initial.value, sliderValue: value });
+    }
+  } finally {
+    // Discovery must leave the user's original selection intact, including when
+    // reading a later position fails. Restoration has its own bounded budget.
+    restored = await moveThinkingDepthSlider(menu, initial.value, Date.now() + 2_000);
+    if (!restored) throw new Error("chatgpt_thinking_depth_unverified");
+  }
+  return choices;
+}
+
+async function discoverThinkingDepths() {
+  if (activeJobId || !authenticated() || userMessages().length || first(SELECTORS.stop)) return [];
+  const control = thinkingDepthControl();
+  if (!control) return [];
+  let menu = null;
+  try {
+    menu = await openThinkingDepthMenu(control, (element) => element.click(), Date.now() + 1_500);
+    const options = await readThinkingDepthChoices(menu, Date.now() + 5_000);
+    if (!options.length || options.length > 32) return [];
+    return [
+      {
+        id: "chatgpt-web.auto",
+        displayName: "ChatGPT 网页自动选择",
+        available: true,
+        webThinkingDepths: options.map((option) => option.label),
+        defaultWebThinkingDepth: options.find((option) => option.selected)?.label ?? null,
+      },
+    ];
+  } finally {
+    await closeThinkingDepthMenu(control, menu);
+  }
+}
+
+async function configureThinkingDepth(invocation, deadline) {
+  const requested = invocation.thinkingDepth;
+  if (!requested) return;
+  const control = thinkingDepthControl();
+  if (!control) throw new Error("chatgpt_thinking_depth_unavailable");
+  let menu = null;
+  try {
+    menu = await openThinkingDepthMenu(
+      control,
+      (element) => nativeClick(element, invocation.jobId, "thinking_depth_menu"),
+      deadline,
+    );
+    const option = (
+      await readThinkingDepthChoices(menu, Math.min(deadline, Date.now() + 5_000))
+    ).find((entry) => entry.label === requested);
+    if (!option) throw new Error("chatgpt_thinking_depth_unavailable");
+    if (option.selected) return;
+    if (option.sliderValue !== undefined) {
+      const moved = await moveThinkingDepthSlider(menu, option.sliderValue, deadline);
+      const slider = thinkingDepthSlider(menu);
+      if (!moved || !slider || thinkingDepthSliderLabel(menu, slider) !== requested)
+        throw new Error("chatgpt_thinking_depth_unverified");
+      return;
+    }
+    await nativeClick(option.element, invocation.jobId, "thinking_depth_option");
+    const end = Math.min(deadline, Date.now() + 1_500);
+    while (Date.now() < end) {
+      const selected = thinkingDepthOptions(menu).find(
+        (entry) => entry.label === requested && entry.selected,
+      );
+      const current = thinkingDepthControl();
+      const currentLabel = visibleText(current).split("\n")[0].trim();
+      if (selected || currentLabel === requested) return;
+      await waitForMutation(100);
+    }
+    throw new Error("chatgpt_thinking_depth_unverified");
+  } finally {
+    await closeThinkingDepthMenu(control, menu);
+  }
 }
 
 function buttonByText(pattern, excluded = null) {
@@ -1084,6 +1325,7 @@ async function invoke(invocation) {
   cancelled = false;
   const deadline = invocation.deadlineAt - TERMINAL_REPORT_GRACE_MS;
   try {
+    if (depthDiscovery) await depthDiscovery;
     if (deadline <= Date.now()) throw new Error("chatgpt_page_not_ready");
     const failure = failureState();
     if (failure) throw new Error(failure);
@@ -1106,6 +1348,7 @@ async function invoke(invocation) {
     await reportProgress(invocation.jobId, "temporary_chat_verified");
     await configureMode(invocation.mode, invocation.jobId, deadline);
     await reportProgress(invocation.jobId, "mode_selected");
+    await configureThinkingDepth(invocation, deadline);
     composer = await waitForElement(SELECTORS.composer, deadline);
     const beforeAssistantCount = assistantTurnElements().length;
     const beforeUserCount = userMessages().length;
@@ -1181,11 +1424,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!primaryContentScript) return false;
   if (message.type === "aialra.probe") {
     const failureCode = failureState();
-    void Promise.resolve([]).then((models) =>
+    if (!authenticated()) depthCatalog = [];
+    if (
+      message.discoverModels &&
+      !activeJobId &&
+      !depthDiscovery &&
+      Date.now() - depthCatalogAt > 60_000
+    ) {
+      depthDiscovery = discoverThinkingDepths()
+        .then((models) => {
+          depthCatalog = models;
+          depthCatalogAt = Date.now();
+        })
+        .catch(() => {
+          depthCatalog = [];
+        })
+        .finally(() => {
+          depthDiscovery = null;
+        });
+    }
+    void Promise.resolve(depthDiscovery).then(() =>
       sendResponse({
         pageReady: Boolean(first(SELECTORS.composer)),
         authenticated: authenticated(),
-        models,
+        models: depthCatalog,
         diagnostics: controlDiagnostics(),
         documentToken: DOCUMENT_TOKEN,
         failureCode,
