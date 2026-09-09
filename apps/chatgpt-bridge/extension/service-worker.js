@@ -307,6 +307,10 @@ async function probeSlot(slot, discoverModels) {
   )
     return page;
   slot.depthDiscoveryBusy = true;
+  let finishDiscovery;
+  slot.depthDiscoveryFinished = new Promise((resolve) => {
+    finishDiscovery = resolve;
+  });
   let previous = null;
   let windowId = null;
   try {
@@ -316,15 +320,38 @@ async function probeSlot(slot, discoverModels) {
     if (activeJobs.size || slot.state !== "idle") return page;
     slot.lastDepthDiscoveryAt = Date.now();
     if (previous?.id !== slot.tabId) await chrome.tabs.update(slot.tabId, { active: true });
-    return await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: true }, 2);
+    let discovered = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: true }, 2);
+    const hasDepths = (result) => result?.models?.some((model) => model.webThinkingDepths?.length);
+    if (!hasDepths(discovered) && slot.depthRecoveryDocument !== page.documentToken) {
+      const fresh = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: false }, 2);
+      if (
+        !activeJobs.size &&
+        slot.state === "idle" &&
+        fresh?.authenticated &&
+        !fresh.failureCode &&
+        fresh.diagnostics?.freshConversation &&
+        fresh.documentToken === page.documentToken
+      ) {
+        // A restored background document can remain only partially hydrated.
+        // Refresh only our empty, authenticated system page, never a draft/login.
+        const previousDocument = await navigateToFreshChat(slot, true, true);
+        const ready = await waitForReadyPage(slot.tabId, 80, previousDocument);
+        slot.depthRecoveryDocument = ready.documentToken;
+        await patchSlot(slot, { documentToken: ready.documentToken });
+        discovered = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: true }, 2);
+      }
+    }
+    return discovered;
   } finally {
-    slot.depthDiscoveryBusy = false;
     // Never steal focus from a task or from a tab the administrator chose meanwhile.
     if (previous?.id && previous.id !== slot.tabId && !activeJobs.size && slot.state === "idle") {
-      const [current] = await chrome.tabs.query({ active: true, windowId });
+      const [current] = await chrome.tabs.query({ active: true, windowId }).catch(() => []);
       if (current?.id === slot.tabId)
         await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
     }
+    slot.depthDiscoveryBusy = false;
+    finishDiscovery();
+    slot.depthDiscoveryFinished = null;
   }
 }
 
@@ -412,6 +439,7 @@ async function invoke(invocation) {
   }
   let pageBound = false;
   try {
+    if (slot.depthDiscoveryFinished) await slot.depthDiscoveryFinished;
     const boundInvocation = await prepareSlot(slot, invocation);
     // Publish the non-idle slot before accepting browser work so the next
     // caller cannot act on the previous idle snapshot.
