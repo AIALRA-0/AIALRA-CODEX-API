@@ -192,10 +192,7 @@ describe("visible thinking depth menu", () => {
     const { api, control, native } = harness();
     await api.configureThinkingDepth({ thinkingDepth: "Heavy", jobId: "test" }, Date.now() + 5_000);
     expect(control.innerText).toBe("Heavy");
-    expect(native.mock.calls.map((call) => call[2])).toEqual([
-      "thinking_depth_menu",
-      "thinking_depth_option",
-    ]);
+    expect(native.mock.calls.map((call) => call[2])).toEqual(["thinking_depth_option"]);
   });
 
   it("rejects an absent depth without selecting a fallback", async () => {
@@ -204,7 +201,7 @@ describe("visible thinking depth menu", () => {
       api.configureThinkingDepth({ thinkingDepth: "Missing", jobId: "test" }, Date.now() + 5_000),
     ).rejects.toThrow("chatgpt_thinking_depth_unavailable");
     expect(control.innerText).toBe("Standard");
-    expect(native).toHaveBeenCalledTimes(1);
+    expect(native).not.toHaveBeenCalled();
   });
 
   it("keeps old requests unchanged and refuses an unconfirmed selection", async () => {
@@ -271,7 +268,7 @@ describe("accessible thinking effort slider", () => {
     expect(delayLabel).toBe(true);
     expect(h.value()).toBe(2);
     expect(pendingLabel).toBe("High");
-    expect(h.native).toHaveBeenCalledTimes(1);
+    expect(h.native).not.toHaveBeenCalled();
   });
 
   it("retains a Pro badge rendered on a separate line of the slider label", async () => {
@@ -360,7 +357,7 @@ describe("accessible thinking effort slider", () => {
         Date.now() + 5_000,
       );
       expect(h.control.innerText).toBe(label);
-      expect(h.native.mock.calls.map((call) => call[2])).toEqual(["thinking_depth_menu"]);
+      expect(h.native).not.toHaveBeenCalled();
       expect(h.menu.visible).toBe(false);
     },
   );

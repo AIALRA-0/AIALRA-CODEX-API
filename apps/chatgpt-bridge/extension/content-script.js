@@ -533,6 +533,8 @@ async function readThinkingDepthChoices(menu, deadline) {
   } finally {
     // Discovery must leave the user's original selection intact, including when
     // reading a later position fails. Restoration has its own bounded budget.
+    if (thinkingDepthDiscoveryDiagnostics?.phase === "reading_choices")
+      thinkingDepthDiscoveryDiagnostics.phase = "restoring_selection";
     restored = await moveThinkingDepthSlider(menu, initial.value, Date.now() + 2_000);
     if (!restored) throw new Error("chatgpt_thinking_depth_unverified");
   }
@@ -649,27 +651,31 @@ async function configureThinkingDepth(invocation, deadline) {
   if (!control) throw new Error("chatgpt_thinking_depth_unavailable");
   let menu = null;
   try {
-    menu = await openThinkingDepthMenu(
-      control,
-      (element) => nativeClick(element, invocation.jobId, "thinking_depth_menu"),
-      deadline,
-    );
+    // Use the same verified opener as discovery. Moving the real pointer onto
+    // the popover can activate its nested model menu while reading the slider.
+    thinkingDepthDiscoveryDiagnostics = { phase: "configuring_menu" };
+    menu = await openThinkingDepthMenu(control, clickThinkingDepthControl, deadline);
+    thinkingDepthDiscoveryDiagnostics.phase = "reading_choices";
     const option = (
       await readThinkingDepthChoices(menu, Math.min(deadline, Date.now() + 5_000))
     ).find((entry) => entry.label === requested);
     if (!option) throw new Error("chatgpt_thinking_depth_unavailable");
     if (option.sliderValue !== undefined) {
+      thinkingDepthDiscoveryDiagnostics.phase = "moving_selection";
       const moved = await moveThinkingDepthSlider(menu, option.sliderValue, deadline);
       // React can update aria-valuenow before the visible label. Require both
       // to agree, but allow the label to render within the existing deadline.
       const end = Math.min(deadline, Date.now() + 1_500);
+      thinkingDepthDiscoveryDiagnostics.phase = "verifying_selection";
       while (moved && Date.now() < end) {
         const slider = thinkingDepthSlider(menu);
         if (
           slider?.value === option.sliderValue &&
           thinkingDepthSliderLabel(menu, slider) === requested
-        )
+        ) {
+          thinkingDepthDiscoveryDiagnostics.phase = "selection_verified";
           return;
+        }
         await waitForMutation(50);
       }
       throw new Error("chatgpt_thinking_depth_unverified");
@@ -1574,14 +1580,9 @@ async function invoke(invocation) {
       ok: false,
       code: code === "cancelled" ? "chatgpt_output_incomplete" : code,
       message: "page_execution_failed",
-      diagnostics: invocation.diagnostic
-        ? controlDiagnostics(
-            objectiveWithCompletionMarker(
-              invocation.objective,
-              completionMarkerFor(invocation.jobId),
-            ),
-          )
-        : undefined,
+      diagnostics: controlDiagnostics(
+        objectiveWithCompletionMarker(invocation.objective, completionMarkerFor(invocation.jobId)),
+      ),
       documentToken: DOCUMENT_TOKEN,
     };
   } finally {
