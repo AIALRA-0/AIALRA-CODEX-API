@@ -68,12 +68,14 @@ const SELECTORS = {
 const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快速|思考(?:强度)?)$/i;
 
 let activeJobId = null;
+let verifiedNonPersonalizedDocumentToken = null;
 let cancelled = false;
 let depthDiscovery = null;
 let depthCatalog = [];
 let depthCatalogAt = 0;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
 const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000;
+const TERMINAL_RESULT_CONFIRM_MS = 15_000;
 const TERMINAL_BLANK_CONFIRM_MS = 15_000;
 
 async function sendRuntimeMessage(message, timeoutMs = 5_000) {
@@ -1234,6 +1236,16 @@ function assistantElementDiagnostics(element) {
   };
 }
 
+function diagnosticPersonalization() {
+  const observed = temporaryChatPersonalized();
+  if (observed !== null) return observed;
+  return activeJobId &&
+    verifiedNonPersonalizedDocumentToken === DOCUMENT_TOKEN &&
+    temporaryChatEnabled()
+    ? false
+    : null;
+}
+
 function controlDiagnostics(expectedObjective = null) {
   const composer = first(SELECTORS.composer);
   const modelControl = modelControlForComposer();
@@ -1256,7 +1268,7 @@ function controlDiagnostics(expectedObjective = null) {
     composerRect: rectangleDiagnostics(composer),
     windowMetrics: windowMetrics(),
     temporaryChatEnabled: temporaryChatEnabled(),
-    temporaryChatPersonalized: temporaryChatPersonalized(),
+    temporaryChatPersonalized: diagnosticPersonalization(),
     modelControlFound: Boolean(modelControl),
     modelControl: describeControl(modelControl),
     modelControlText,
@@ -1397,6 +1409,7 @@ async function waitForStableResult(
   let stableReads = 0;
   let stableSince = 0;
   let blankSince = 0;
+  let terminalSince = 0;
   let assistantObserved = false;
   let lastDiagnosticAt = 0;
   while (Date.now() < deadline) {
@@ -1424,6 +1437,7 @@ async function waitForStableResult(
       const sample = channels.extracted;
       const generating = Boolean(first(SELECTORS.stop));
       if (generating) {
+        terminalSince = 0;
         if (sample && sample === lastText) {
           stableReads += 1;
         } else {
@@ -1444,6 +1458,8 @@ async function waitForStableResult(
         blankSince = 0;
       } else if (sample) {
         blankSince = 0;
+        if (hasTerminalCopyAction(newest)) terminalSince ||= Date.now();
+        else terminalSince = 0;
         if (sample === lastText) {
           stableReads += 1;
         } else {
@@ -1452,9 +1468,10 @@ async function waitForStableResult(
           stableSince = Date.now();
         }
         if (
-          sample.includes(completionMarker) &&
           stableReads >= 2 &&
-          Date.now() - stableSince >= 1_000
+          ((sample.includes(completionMarker) && Date.now() - stableSince >= 1_000) ||
+            (terminalSince &&
+              Date.now() - Math.max(stableSince, terminalSince) >= TERMINAL_RESULT_CONFIRM_MS))
         ) {
           if (hasForeignCompletionMarker(sample, completionMarker)) {
             throw new Error("chatgpt_delivery_uncertain");
@@ -1465,6 +1482,7 @@ async function waitForStableResult(
           throw new Error("chatgpt_output_incomplete");
         }
       } else {
+        terminalSince = 0;
         blankSince ||= Date.now();
         if (terminalActionsFor(newest).some((control) => visibleErrorKind(control) === "retry")) {
           throw new Error("chatgpt_page_generation_blank");
@@ -1534,6 +1552,7 @@ async function invoke(invocation) {
     if (!temporaryChatEnabled() || temporaryChatPersonalized() !== false) {
       throw new Error("chatgpt_ui_changed");
     }
+    verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN;
     await reportProgress(invocation.jobId, "temporary_chat_verified");
     await configureMode(invocation.mode, invocation.jobId, deadline);
     await reportProgress(invocation.jobId, "mode_selected");
@@ -1594,6 +1613,7 @@ async function invoke(invocation) {
     };
   } finally {
     activeJobId = null;
+    verifiedNonPersonalizedDocumentToken = null;
     cancelled = false;
   }
 }
