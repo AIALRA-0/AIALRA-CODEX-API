@@ -61,6 +61,18 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
     visibleText: (target: typeof control | null) => target?.innerText ?? "",
     waitForMutation: () => Promise.resolve(),
     nativeClick: native,
+    PointerEvent: class {
+      constructor(
+        public type: string,
+        public options: unknown,
+      ) {}
+    },
+    MouseEvent: class {
+      constructor(
+        public type: string,
+        public options: unknown,
+      ) {}
+    },
     KeyboardEvent: class {
       constructor(
         public type: string,
@@ -81,6 +93,21 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
 }
 
 describe("visible thinking depth menu", () => {
+  it("opens pointer-down triggers with one complete gesture and no message submission", async () => {
+    const h = harness();
+    const open = h.control.click;
+    h.control.click = () => undefined;
+    h.control.dispatchEvent.mockImplementation((event) => {
+      if ((event as { type: string }).type === "pointerdown") open();
+    });
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+    expect(
+      h.control.dispatchEvent.mock.calls.map(([event]) => (event as { type: string }).type),
+    ).toEqual(["pointerdown", "mousedown", "pointerup", "mouseup"]);
+    expect(h.native).not.toHaveBeenCalled();
+    expect(h.menu.visible).toBe(false);
+  });
+
   it("activates a keyboard menu when click alone does not open the real trigger", async () => {
     const h = harness();
     const open = h.control.click;

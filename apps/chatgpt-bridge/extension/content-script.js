@@ -501,6 +501,40 @@ async function readThinkingDepthChoices(menu, deadline) {
   return choices;
 }
 
+function clickThinkingDepthControl(control) {
+  const rectangle = control.getBoundingClientRect();
+  const point = {
+    clientX: (rectangle.left ?? 0) + rectangle.width / 2,
+    clientY: (rectangle.top ?? 0) + rectangle.height / 2,
+    button: 0,
+    bubbles: true,
+    cancelable: true,
+  };
+  // Match the browser's input sequence. Pointer-down menu triggers do not
+  // react to HTMLElement.click() or an untrusted Enter default action alone.
+  control.dispatchEvent(
+    new PointerEvent("pointerdown", {
+      ...point,
+      buttons: 1,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+    }),
+  );
+  control.dispatchEvent(new MouseEvent("mousedown", { ...point, buttons: 1 }));
+  control.dispatchEvent(
+    new PointerEvent("pointerup", {
+      ...point,
+      buttons: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+    }),
+  );
+  control.dispatchEvent(new MouseEvent("mouseup", { ...point, buttons: 0 }));
+  control.click();
+}
+
 async function discoverThinkingDepths() {
   thinkingDepthDiscoveryDiagnostics = { phase: "preflight" };
   if (activeJobId || !authenticated() || userMessages().length || first(SELECTORS.stop)) return [];
@@ -516,7 +550,7 @@ async function discoverThinkingDepths() {
           "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog']",
         ),
       ].some(isDepthControlVisible);
-    menu = await openThinkingDepthMenu(control, (element) => element.click(), Date.now() + 1_500);
+    menu = await openThinkingDepthMenu(control, clickThinkingDepthControl, Date.now() + 1_500);
     const slider = thinkingDepthSlider(menu);
     thinkingDepthDiscoveryDiagnostics = {
       phase: menu ? "menu_opened" : "menu_missing",
