@@ -450,12 +450,19 @@ function thinkingDepthSlider(menu) {
 
 function thinkingDepthSliderLabel(menu, slider, control = thinkingDepthControl()) {
   const accessible = slider.element.getAttribute("aria-valuetext")?.trim();
+  const depthOptions = thinkingDepthOptions(menu).filter(
+    ({ label }) => !/^(?:latest|gpt[-\s]|chatgpt\b)/i.test(label),
+  );
+  const controlLabel = visibleText(control).trim();
   const buttons = [...menu.querySelectorAll("button")].filter(
     (element) => isDepthControlVisible(element) && !depthControlDisabled(element),
   );
   const label =
     accessible ||
-    visibleText(control).trim() ||
+    (depthOptions.length === 1 ? depthOptions[0].label : "") ||
+    (!/thinking (?:time|effort|depth)|reasoning (?:effort|depth)/i.test(controlLabel)
+      ? controlLabel
+      : "") ||
     (buttons.length === 1 ? visibleText(buttons[0]).trim() : "");
   return label && label.length <= 64 && !/[\r\n@]|https?:|\//i.test(label) ? label : null;
 }
@@ -480,6 +487,9 @@ async function moveThinkingDepthSlider(menu, target, deadline) {
 }
 
 async function readThinkingDepthChoices(menu, deadline) {
+  // The popover shell can become visible before its animated slider mounts.
+  // Read after layout settles, not the transient model submenu alone.
+  if (menu) await new Promise((resolve) => setTimeout(resolve, 250));
   const initial = thinkingDepthSlider(menu);
   if (!initial) {
     if (menu && [...menu.querySelectorAll("[role='slider']")].some(isDepthControlVisible))

@@ -60,6 +60,7 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
     getComputedStyle: () => ({ visibility: "visible" }),
     visibleText: (target: typeof control | null) => target?.innerText ?? "",
     waitForMutation: () => Promise.resolve(),
+    setTimeout,
     nativeClick: native,
     PointerEvent: class {
       constructor(
@@ -215,6 +216,38 @@ function sliderHarness() {
 }
 
 describe("accessible thinking effort slider", () => {
+  it("waits for the animated slider and reads its menu label when the trigger is generic", async () => {
+    const h = sliderHarness();
+    const attribute = h.slider.getAttribute;
+    h.slider.getAttribute = (key) => (key === "aria-valuetext" ? null : attribute(key));
+    const renderedAt = Date.now();
+    const menuLabel = {
+      get innerText() {
+        return h.labels[h.value()];
+      },
+      getBoundingClientRect: () => ({ width: 100, height: 30 }),
+      getAttribute: () => null,
+      hasAttribute: () => false,
+    };
+    const dispatch = h.slider.dispatchEvent.getMockImplementation()!;
+    h.slider.dispatchEvent.mockImplementation((event) => {
+      dispatch(event);
+      h.control.innerText = "Thinking effort";
+    });
+    h.control.innerText = "Thinking effort";
+    h.menu.querySelectorAll = (selector) =>
+      selector === "[role='slider']"
+        ? Date.now() - renderedAt >= 100
+          ? [h.slider]
+          : []
+        : selector === "button"
+          ? []
+          : [menuLabel];
+    const models = await h.api.discoverThinkingDepths();
+    expect(models[0].webThinkingDepths).toEqual(h.labels);
+    expect(h.value()).toBe(1);
+  });
+
   it("prefers the slider over nested model options and reads the updated composer label", async () => {
     const h = sliderHarness();
     const attribute = h.slider.getAttribute;
