@@ -329,7 +329,9 @@ function thinkingDepthControl() {
   return (
     [...root.querySelectorAll("button, [role='combobox']")].find((element) => {
       if (!isDepthControlVisible(element) || depthControlDisabled(element)) return false;
-      const label = `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`.trim();
+      const label = `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`
+        .replace(/\s+/g, " ")
+        .trim();
       return (
         /thinking (?:time|effort|depth)|reasoning (?:effort|depth)|思考(?:时间|强度|深度)/i.test(
           label,

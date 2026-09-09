@@ -93,6 +93,17 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
   return { api, context, control, menu, options, native };
 }
 
+it.each(["6\nPro", "6\u00a0Pro", "Extra\nHigh", "Extra\u00a0High"])(
+  "rediscovers a selected multi-part depth without an aria label: %s",
+  async (label) => {
+    const { api, control } = harness();
+    const original = control.getAttribute;
+    control.getAttribute = (key: string) => (key === "aria-label" ? null : original(key));
+    control.innerText = label;
+    expect((await api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+  },
+);
+
 describe("visible thinking depth menu", () => {
   it("closes both its nested menu and the parent popover without reopening either", async () => {
     const h = harness();
