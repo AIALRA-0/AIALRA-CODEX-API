@@ -44,7 +44,7 @@ Top-level unsupported compatibility fields are rejected. Nested structures must 
 
 Codex and web work use separate durable queue names and separate execution permits. The legacy queue remains a drain-only compatibility path for pre-upgrade jobs. Neither queue enables automatic pg-boss job retries.
 
-Codex retries require an explicit Runner pre-acceptance rejection plus a transient error. Unknown transport failures and accepted/submitted failures are not retried. Web tasks never switch accounts after submission uncertainty; the affected account is quarantined pending verification.
+Codex retries require an explicit Runner pre-acceptance rejection plus a transient error. A `runner_busy` response is also explicitly pre-acceptance: the same Worker invocation waits within the task's existing deadline and repeats only the internal Runner request, not the external Codex submission. Unknown transport failures and accepted/submitted failures are not retried. Client disconnects and Worker deadlines abort the matching Runner invocation so a stale Codex child cannot hold the single execution slot. Web tasks never switch accounts after submission uncertainty; the affected account is quarantined pending verification.
 
 Health, model-catalog and quota reads have bounded timeouts. One unready web account does not mark another qualified healthy account unavailable. Pool cooldown reporting counts down to the recorded cooldown deadline rather than continually extending it.
 

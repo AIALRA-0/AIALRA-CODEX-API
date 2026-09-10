@@ -127,6 +127,8 @@ Codex 的 `restricted`、`confirm` 和 `full` 是另一层执行权限，不能�
 
 受信 Worker 只负责调度，Codex 任务进入隔离 Runner，网页任务进入指定账号的独立浏览器
 
+Worker 重启后若旧 Codex 调用仍在退出，后续任务会在原 deadline 内等待 Runner 释放；客户端断开或任务到期会取消对应 Runner 调用，不会留下长期占用，也不会把等待算成第二次上游提交
+
 任务结果返回前会经过结构、归属和验收检查，随后写入任务历史、事件和审计记录
 
 组件关系、状态转换和会话策略见[架构说明](ARCHITECTURE.md)

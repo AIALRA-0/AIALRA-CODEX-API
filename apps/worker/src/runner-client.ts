@@ -63,6 +63,36 @@ function submissionStateForError(
   return "uncertain";
 }
 
+function retryAfterSeconds(response: Response, payloadValue?: number): number {
+  const header = response.headers.get("retry-after");
+  const headerValue = header === null ? Number.NaN : Number(header);
+  if (Number.isFinite(payloadValue) && payloadValue! >= 0) return payloadValue!;
+  if (Number.isFinite(headerValue) && headerValue >= 0) return headerValue;
+  return 1;
+}
+
+async function waitForRunner(retryAfter: number, signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason ?? new Error("runner_wait_aborted"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("runner_wait_aborted"));
+    };
+    const timer = setTimeout(
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      },
+      Math.max(0, retryAfter) * 1_000,
+    );
+    timer.unref();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export class RunnerProviderError extends Error {
   constructor(
     readonly code: string,
@@ -93,24 +123,53 @@ export class RunnerClientProvider implements ModelProvider {
   async invoke(invocation: ProviderInvocation): Promise<ProviderResult> {
     if (!invocation.jobId) throw new Error("runner_job_id_required");
     let response: Response;
-    try {
-      response = await fetch(new URL("/invoke", this.baseUrl), {
-        method: "POST",
-        headers: this.headers({ "content-type": "application/json" }),
-        body: JSON.stringify({
-          jobId: invocation.jobId,
-          attempt: invocation.attempt ?? 1,
-          task: invocation.task,
-          route: invocation.route,
-        }),
-        signal: invocation.signal,
-      });
-    } catch (error) {
-      throw new RunnerProviderError(
-        "runner_transport_error",
-        error instanceof Error ? error.message : String(error),
-        "uncertain",
-      );
+    while (true) {
+      try {
+        response = await fetch(new URL("/invoke", this.baseUrl), {
+          method: "POST",
+          headers: this.headers({ "content-type": "application/json" }),
+          body: JSON.stringify({
+            jobId: invocation.jobId,
+            attempt: invocation.attempt ?? 1,
+            task: invocation.task,
+            route: invocation.route,
+          }),
+          signal: invocation.signal,
+        });
+      } catch (error) {
+        throw new RunnerProviderError(
+          "runner_transport_error",
+          error instanceof Error ? error.message : String(error),
+          "uncertain",
+        );
+      }
+      if (response.status !== 503) break;
+      const payload = (await response.json().catch(() => null)) as {
+        error?: { code?: string; message?: string; retryAfter?: number };
+      } | null;
+      if (payload?.error?.code !== "runner_busy" || !invocation.signal) {
+        throw new RunnerProviderError(
+          payload?.error?.code ?? "runner_unavailable:503",
+          payload?.error?.message ?? payload?.error?.code ?? "runner_unavailable:503",
+          "not_submitted",
+          null,
+          null,
+          retryAfterSeconds(response, payload?.error?.retryAfter),
+        );
+      }
+      const retryAfter = retryAfterSeconds(response, payload.error.retryAfter);
+      try {
+        await waitForRunner(retryAfter, invocation.signal);
+      } catch {
+        throw new RunnerProviderError(
+          "runner_busy",
+          "The Runner remained busy until this task stopped waiting.",
+          "not_submitted",
+          null,
+          null,
+          retryAfter,
+        );
+      }
     }
     if (!response.ok || !response.body) {
       const payload = (await response.json().catch(() => null)) as {

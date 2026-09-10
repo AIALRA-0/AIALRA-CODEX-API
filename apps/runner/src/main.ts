@@ -20,6 +20,7 @@ import {
   runnerPublicMessage,
   type RunnerExecutionError,
 } from "./public-error.js";
+import { abortInvocationOnDisconnect } from "./invocation-lifecycle.js";
 
 const InvocationSchema = z
   .object({
@@ -111,12 +112,12 @@ function writeLine(response: ServerResponse, value: unknown): void {
 async function invoke(request: IncomingMessage, response: ServerResponse): Promise<void> {
   if (activeInvocations >= maxConcurrency) {
     response.writeHead(503, { "content-type": "application/json", "retry-after": "1" });
-    response.end(JSON.stringify({ error: { code: "runner_busy" } }));
+    response.end(JSON.stringify({ error: { code: "runner_busy", retryAfter: 1 } }));
     return;
   }
   activeInvocations += 1;
   const abortController = new AbortController();
-  request.once("aborted", () => abortController.abort());
+  abortInvocationOnDisconnect(request, response, abortController);
   let workspace: string | null = null;
   try {
     const input = InvocationSchema.parse(await readJson(request));

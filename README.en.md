@@ -128,6 +128,8 @@ Requests pass browser authentication or scoped-key verification before entering 
 
 The trusted worker schedules only: Codex jobs go to an isolated runner, while web jobs go to the selected account's independent browser
 
+If an older Codex invocation is still exiting after a Worker restart, later jobs wait within their original deadline for the Runner to become free. A client disconnect or task deadline cancels the corresponding Runner invocation, preventing a stale slot without counting the wait as another upstream submission
+
 Structure, ownership, and acceptance checks run before results are written to job history, events, and audit records
 
 See [architecture](ARCHITECTURE.md) for component relationships, state transitions, and session behavior
