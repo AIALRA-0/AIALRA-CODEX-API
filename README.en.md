@@ -140,10 +140,14 @@ See [architecture](ARCHITECTURE.md) for component relationships, state transitio
 - Every account has an independent browser profile, concurrency limit of `1`, pacing, lease, cooldown, and quarantine state
 - Plans are operator metadata limited to `plus`, `pro`, or `unknown`; the service never guesses a plan from cookies, page text, or response time
 - Failover is permitted only before submission is definitively attempted; once the page accepts a task or delivery is uncertain, the service does not switch accounts or resend
+- A healthy browser process does not mean that an account can accept work; the page must also be recognizable, authenticated, qualified, and free of a blocking lease or cooldown
+- An isolated profile preserves local browser data but cannot prevent ChatGPT from expiring a server-side session; the pool removes that account and reports that sign-in is required
 
 The web channel is disabled by default
 
 An administrator must complete a no-message readiness check and one real single probe before an account can join the production pool
+
+An account with a prior successful probe can recover after it returns to an authenticated, idle state with no pending task. A changed page protocol, verification screen, or expired login still requires a fresh check
 
 See the [ChatGPT web channel guide](docs/chatgpt-web-experiment.en.md) for login, probes, data risk, and failure handling
 

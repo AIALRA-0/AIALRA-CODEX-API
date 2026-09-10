@@ -144,6 +144,11 @@ describe("shared visual tokens", () => {
     const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
     expect(source).toContain('chatgpt_login_required: "登录已过期，请在对应浏览器中重新登录"');
     expect(source).toContain('chatgpt_delivery_uncertain: "发送状态无法确认，系统不会自动重发"');
+    expect(source).toContain('chatgpt_client_disconnected: "调用方连接已断开，页面正在安全重置"');
+    expect(source).toContain('runner_transport_error: "任务连接中断，系统没有重复发送"');
     expect(source).toContain("chatGptErrorLabel(account.lastFailureCode)");
+    expect(source).toContain("进程正常不代表账号仍然登录");
+    expect(source).toContain("只有已登录且已验证的账号会接收任务");
+    expect(source).toContain("account.extensionConnected && account.sandboxVerified");
   });
 });

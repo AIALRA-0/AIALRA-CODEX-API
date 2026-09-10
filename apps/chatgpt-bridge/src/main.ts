@@ -459,6 +459,21 @@ async function main(): Promise<void> {
   let lastSubmissionAt: string | null = null;
   let temporaryChatVerified = false;
 
+  const finishActiveInvocation = (
+    jobId: string,
+    nextPhase: typeof phase,
+    failureCode: string | null,
+    diagnostics: BrowserControlDiagnostics | null,
+  ) => {
+    if (activeJobId !== jobId) return;
+    phase = nextPhase;
+    activeJobId = null;
+    activeAttempt = null;
+    lastFailureCode = failureCode;
+    lastFailureDiagnostics = diagnostics;
+    lastHeartbeatAt = new Date().toISOString();
+  };
+
   const failPending = (
     jobId: string,
     code: string,
@@ -482,14 +497,7 @@ async function main(): Promise<void> {
     });
     entry.response.end();
     pending.delete(jobId);
-    if (activeJobId === jobId) {
-      phase = "failed";
-      activeJobId = null;
-      activeAttempt = null;
-      lastFailureCode = code;
-      lastFailureDiagnostics = failureDiagnostics;
-      lastHeartbeatAt = new Date().toISOString();
-    }
+    finishActiveInvocation(jobId, "failed", code, failureDiagnostics);
   };
 
   const enqueueNativeAction = (jobId: string, operation: () => Promise<void>) => {
@@ -528,6 +536,16 @@ async function main(): Promise<void> {
     clearInterval(entry.heartbeat);
     extension?.send(JSON.stringify({ type: "cancel", jobId } satisfies ControllerMessage));
     pending.delete(jobId);
+    // The HTTP caller owns the result stream, not the browser slot. If that
+    // stream closes, release the controller's task identity immediately while
+    // the extension resets the page. A late event for this job is ignored
+    // because its pending entry no longer exists.
+    finishActiveInvocation(
+      jobId,
+      "resetting",
+      "chatgpt_client_disconnected",
+      entry.lastDiagnostics,
+    );
   };
 
   const server = createServer(async (request, response) => {
@@ -1064,11 +1082,7 @@ async function main(): Promise<void> {
         });
         entry.response.end();
         pending.delete(message.jobId);
-        phase = "completed";
-        activeJobId = null;
-        activeAttempt = null;
-        lastFailureCode = null;
-        lastHeartbeatAt = new Date().toISOString();
+        finishActiveInvocation(message.jobId, "completed", null, null);
       }
     });
     websocket.once("close", () => {

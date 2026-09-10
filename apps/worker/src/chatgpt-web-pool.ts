@@ -135,6 +135,18 @@ function accountEligibleForLease(account: ChatGptWebAccount, nowMs: number): boo
   return accountEligibleForAdmission(account, nowMs) && !accountHasActiveLease(account, nowMs);
 }
 
+function bridgeRecoveredToIdle(health: Record<string, unknown>): boolean {
+  const slots = healthSlots(health);
+  const slotsAreIdle =
+    slots.length === 0 || slots.every((slot) => slot.state === "idle" && !slot.submitted);
+  return (
+    Number(health.pending ?? 0) === 0 &&
+    (health.activeJobId === null || health.activeJobId === undefined) &&
+    healthString(health, "phase") === "idle" &&
+    slotsAreIdle
+  );
+}
+
 function accountPublicPatch(
   current: ChatGptWebAccount,
   health: Record<string, unknown> | null,
@@ -163,6 +175,15 @@ function accountPublicPatch(
   const hardFailure = failureCode ? HARD_FAILURE_CODES.has(failureCode) : false;
   const rateLimited = failureCode === "chatgpt_rate_limited";
   const cooldownActive = accountCooldownActive(current, now.getTime());
+  const safelyRecovered =
+    current.lastProbePassed === true &&
+    authenticated &&
+    extensionConnected &&
+    pageReady &&
+    sandboxVerified &&
+    !heartbeatStale &&
+    !failureCode &&
+    bridgeRecoveredToIdle(health);
   let state: ChatGptWebAccount["state"];
   let qualified = current.qualified;
   let rateLimitState = current.rateLimitState;
@@ -185,7 +206,10 @@ function accountPublicPatch(
       lastRateLimitAt = now.toISOString();
     }
   } else if (cooldownActive) state = "cooldown";
-  else if (current.state === "quarantined" && !current.qualified) state = "quarantined";
+  else if (safelyRecovered) {
+    qualified = true;
+    state = "ready";
+  } else if (current.state === "quarantined" && !current.qualified) state = "quarantined";
   else if (hardFailure) {
     qualified = false;
     state = failureCode === "chatgpt_login_required" ? "login_required" : "quarantined";

@@ -484,4 +484,73 @@ describe("ChatGptWebPoolProvider", () => {
       lastProbePassed: true,
     });
   });
+
+  it("restores an idle authenticated account after a post-submission quarantine", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", {
+      qualified: false,
+      state: "quarantined",
+      lastProbePassed: true,
+      lastFailureCode: "runner_transport_error",
+      failurePhase: "generating",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const accountId = String(input).includes("account-b") ? "account-b" : "account-a";
+        return Response.json({
+          ...health(accountId),
+          pending: 0,
+          slots: [
+            {
+              slotId: randomUUID(),
+              state: "idle",
+              submitted: false,
+              quarantinedUntil: null,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        });
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+
+    await pool.syncAccounts();
+
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      qualified: true,
+      state: "ready",
+      lastProbePassed: true,
+      activeJobId: null,
+    });
+  });
+
+  it("does not restore a quarantined account while the bridge still owns an old task", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", {
+      qualified: false,
+      state: "quarantined",
+      lastProbePassed: true,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const accountId = String(input).includes("account-b") ? "account-b" : "account-a";
+        return Response.json({
+          ...health(accountId),
+          phase: accountId === "account-a" ? "generating" : "idle",
+          activeJobId: accountId === "account-a" ? "0190abcd-0000-7000-8000-000000000099" : null,
+          pending: accountId === "account-a" ? 1 : 0,
+        });
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+
+    await pool.syncAccounts();
+
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      qualified: false,
+      state: "quarantined",
+    });
+  });
 });

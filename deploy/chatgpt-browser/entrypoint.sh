@@ -105,6 +105,7 @@ novnc_pid=$!
 chromium \
   --user-data-dir="$profile_dir" \
   --disable-default-apps \
+  --disable-session-crashed-bubble \
   --disable-features=Translate \
   $chromium_sandbox_flag \
   --proxy-server=http://chatgpt-egress-proxy:3128 \
@@ -119,7 +120,18 @@ node /app/apps/chatgpt-bridge/dist/main.js &
 bridge_pid=$!
 
 cleanup() {
-  kill "$bridge_pid" "$chrome_pid" "$novnc_pid" "$vnc_pid" "$openbox_pid" "$xvfb_pid" 2>/dev/null || true
+  trap - INT TERM EXIT
+  kill -TERM "$bridge_pid" 2>/dev/null || true
+  kill -TERM "$chrome_pid" 2>/dev/null || true
+  attempt=0
+  while kill -0 "$chrome_pid" 2>/dev/null && [ "$attempt" -lt 150 ]; do
+    attempt=$((attempt + 1))
+    sleep 0.1
+  done
+  if kill -0 "$chrome_pid" 2>/dev/null; then
+    kill -KILL "$chrome_pid" 2>/dev/null || true
+  fi
+  kill -TERM "$novnc_pid" "$vnc_pid" "$openbox_pid" "$xvfb_pid" 2>/dev/null || true
   wait 2>/dev/null || true
 }
 trap cleanup INT TERM EXIT

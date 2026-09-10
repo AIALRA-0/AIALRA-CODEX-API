@@ -456,4 +456,140 @@ describe("ChatGPT web bridge server", () => {
       extension.close();
     },
   );
+
+  it("releases controller task state when the result stream closes", async () => {
+    const port = 24_000 + Math.floor(Math.random() * 2_000);
+    const tsxCli = fileURLToPath(
+      new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url),
+    );
+    const source = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+    const child = spawn(process.execPath, [tsxCli, source], {
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        CHATGPT_WEB_ADAPTER_ENABLED: "true",
+        CHATGPT_BRIDGE_PORT: String(port),
+        CHATGPT_BRIDGE_API_TOKEN: "synthetic-api-token",
+        CHATGPT_EXTENSION_TOKEN: "synthetic-extension-token",
+      },
+      stdio: "ignore",
+    });
+    children.push(child);
+    await waitUntilReady(`http://127.0.0.1:${port}/healthz`);
+
+    const extension = new WebSocket(
+      `ws://127.0.0.1:${port}/extension?token=synthetic-extension-token`,
+      { origin: "chrome-extension://synthetic-test" },
+    );
+    await new Promise<void>((resolve, reject) => {
+      extension.once("open", resolve);
+      extension.once("error", reject);
+    });
+    extension.send(
+      JSON.stringify({
+        type: "hello",
+        protocolVersion: 1,
+        pageReady: true,
+        authenticated: true,
+        models: [],
+        activeTabs: 0,
+        slots: [
+          {
+            slotId: "0190abcd-0000-7000-8000-000000000090",
+            state: "idle",
+            documentToken: "0190abcd-0000-7000-8000-000000000091",
+            submitted: false,
+            quarantinedUntil: null,
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+        quarantinedTabs: 0,
+        adapterVersion: "single-page-v1",
+      }),
+    );
+
+    const jobId = "0190abcd-0000-7000-8000-000000000004";
+    const task = TaskContractSchema.parse({
+      objective: "Return SYNTHETIC_DISCONNECT_OK",
+      executionChannel: "chatgpt_web",
+      model: "chatgpt-web.auto",
+      chatgptWeb: { mode: "chat", temporaryChat: true, requireSources: false },
+      deadlineMs: 10_000,
+      budget: { maxOutputTokens: 1_000, maxAttempts: 1 },
+    });
+    const responsePromise = fetch(`http://127.0.0.1:${port}/invoke`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer synthetic-api-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jobId,
+        task,
+        route: {
+          provider: "chatgpt_web",
+          model: "chatgpt-web.auto",
+          effort: "low",
+          policyVersion: "test",
+          reasonCode: "explicit_chatgpt_web_channel",
+          sticky: true,
+        },
+      }),
+    });
+    let controllerMessage = await nextMessage(extension);
+    if (controllerMessage.type === "configure") controllerMessage = await nextMessage(extension);
+    expect(controllerMessage.type).toBe("invoke");
+
+    extension.send(
+      JSON.stringify({
+        type: "progress",
+        jobId,
+        phase: "generating",
+      }),
+    );
+    const response = await responsePromise;
+    const cancelMessagePromise = nextMessage(extension);
+    await response.body?.cancel();
+
+    const cancelMessage = await cancelMessagePromise;
+    expect(cancelMessage).toMatchObject({ type: "cancel", jobId });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const resetting = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(await resetting.json()).toMatchObject({
+      pending: 0,
+      activeJobId: null,
+      activeAttempt: null,
+      phase: "resetting",
+      lastFailureCode: "chatgpt_client_disconnected",
+    });
+
+    extension.send(
+      JSON.stringify({
+        type: "models",
+        pageReady: true,
+        authenticated: true,
+        models: [],
+        activeTabs: 0,
+        slots: [
+          {
+            slotId: "0190abcd-0000-7000-8000-000000000090",
+            state: "idle",
+            documentToken: "0190abcd-0000-7000-8000-000000000092",
+            submitted: false,
+            quarantinedUntil: null,
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+        quarantinedTabs: 0,
+        adapterVersion: "single-page-v1",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const recovered = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(await recovered.json()).toMatchObject({
+      activeJobId: null,
+      phase: "idle",
+    });
+    extension.close();
+  });
 });

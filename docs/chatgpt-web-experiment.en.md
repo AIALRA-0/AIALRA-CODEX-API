@@ -90,11 +90,19 @@ bash deploy/scripts/enable-chatgpt-web.sh
 
 ### 4.1 Current VPS qualification result
 
-As of 2026-09-09, independent browser accounts A and B have both passed readiness and a real single probe, and production web admission is enabled. A is the primary account; B participates as secondary capacity when available. Per-account concurrency remains one.
+The point-in-time validation on 2026-09-09 showed that independent browser accounts A and B had both passed readiness and a real single probe. A was the primary account, B was secondary capacity when available, and per-account concurrency was one.
+
+That dated result is historical evidence, not proof that either account is currently signed in or dispatchable. Use `GET /api/v1/chatgpt-web/status` and the account-pool console for live state.
 
 The current release has completed a real Search call with verifiable sources and a real streaming Chat call. Earlier blank-assistant and timeout records remain regression history and do not describe current production health.
 
 Sign-out, verification, account warnings, UI drift, and rate limits automatically remove the affected account. An uncertain post-submission task never moves to another account and is never resent. A recovered account must pass a fresh readiness check and single probe.
+
+The console reports four separate layers. Process health means that the container, browser, extension, and sandbox are running. Authentication means that ChatGPT still accepts the stored browser session. Qualification means that the account passed a real probe under the current web policy. Dispatch eligibility additionally requires an idle account with no blocking lease, pacing interval, or cooldown.
+
+The profile volume preserves local browser data but cannot prevent server-side session expiry. An expired account leaves dispatch immediately and reports `chatgpt_login_required` while the browser process remains healthy.
+
+After a caller disconnect or task deadline, the Bridge cancels page activity, clears the old task identity, and waits for a fresh idle page. An account with a previous successful probe recovers only after the Bridge reports no pending request, no active job, an idle unsubmitted slot, valid authentication, and no current failure.
 
 The 2026-08-31 convergence contract keeps chat and search at `conversationMode="temporary_per_request"`, `temporaryChat=true`, and `personalized=false`. Following explicit operator approval on 2026-09-09, Deep Research uses `persistent_per_request`, creates a fresh ordinary conversation, and requires an explicit retention acknowledgement. Every web mode still rejects `sessionKey` continuation.
 

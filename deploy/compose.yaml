@@ -255,6 +255,7 @@ services:
       dockerfile: deploy/Containerfile
       target: chatgpt-browser
     restart: unless-stopped
+    stop_grace_period: 30s
     group_add:
       - "${ROUTER_GID:-1000}"
     environment: &chatgpt-browser-environment

@@ -77,6 +77,8 @@ describe("single-page browser agent policy", () => {
     expect(serviceWorker).toContain("navigateToFreshChat");
     expect(serviceWorker).toContain("resetSlot(slot)");
     expect(serviceWorker).toContain("async function resetSlotUntilReady");
+    expect(serviceWorker).toContain("async function closeRedundantPristineTabs");
+    expect(serviceWorker).toContain("diagnostics?.freshConversation === true");
     expect(serviceWorker).toContain("await resetSlotUntilReady(slot)");
     expect(serviceWorker).toContain("const READY_STABILITY_MS = 2_000");
     expect(serviceWorker).toContain("page?.diagnostics?.freshConversation === true");
@@ -138,9 +140,13 @@ describe("single-page browser agent policy", () => {
     expect(entrypoint).toContain("CHATGPT_BROWSER_EXTENSION_ENABLED:-true");
     expect(entrypoint).toContain('if [ "$extension_enabled" = "true" ]');
     expect(entrypoint).toContain('elif [ "$extension_enabled" != "false" ]');
+    expect(entrypoint).toContain("--disable-session-crashed-bubble");
+    expect(entrypoint).toContain('kill -TERM "$chrome_pid"');
+    expect(entrypoint).toContain('[ "$attempt" -lt 150 ]');
     expect(compose).toContain(
       "CHATGPT_BROWSER_EXTENSION_ENABLED: ${CHATGPT_BROWSER_EXTENSION_ENABLED:-true}",
     );
+    expect(compose).toContain("stop_grace_period: 30s");
     expect(diagnosticCompose).toContain(
       "CHATGPT_BROWSER_EXTENSION_ENABLED: ${CHATGPT_BROWSER_EXTENSION_ENABLED:-false}",
     );

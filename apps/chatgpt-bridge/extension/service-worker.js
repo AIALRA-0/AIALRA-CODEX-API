@@ -214,6 +214,28 @@ async function restoreSlots() {
   await persistSlots();
 }
 
+async function closeRedundantPristineTabs() {
+  if (activeJobs.size) return;
+  const managedTabIds = new Set([...slots.values()].map((slot) => slot.tabId));
+  const tabs = await chrome.tabs.query({ url: `${CHATGPT_URL}*` });
+  for (const tab of tabs) {
+    if (!tab.id || tab.active || managedTabIds.has(tab.id) || activeJobs.size) continue;
+    const page = await sendToTab(tab.id, { type: "aialra.probe", discoverModels: false }, 2).catch(
+      () => null,
+    );
+    const diagnostics = page?.diagnostics;
+    const pristine =
+      page?.authenticated &&
+      !page.failureCode &&
+      diagnostics?.freshConversation === true &&
+      diagnostics.userTurnCount === 0 &&
+      diagnostics.assistantTurnCount === 0 &&
+      diagnostics.composerTextLength === 0 &&
+      !diagnostics.generationActive;
+    if (pristine) await chrome.tabs.remove(tab.id).catch(() => undefined);
+  }
+}
+
 async function resetSlot(slot) {
   await patchSlot(slot, {
     state: "starting",
@@ -288,6 +310,7 @@ async function ensurePool() {
           await resetSlot(slot).catch(() => undefined);
         }
       }
+      await closeRedundantPristineTabs();
     });
   return poolMutation;
 }
@@ -355,6 +378,31 @@ async function probeSlot(slot, discoverModels) {
   }
 }
 
+function pageFailurePriority(code) {
+  return (
+    {
+      chatgpt_verification_required: 0,
+      chatgpt_login_required: 1,
+      chatgpt_rate_limited: 2,
+    }[code] ?? 100
+  );
+}
+
+function selectControlPage(readyPages) {
+  const results = readyPages.map(({ result }) => result).filter(Boolean);
+  const healthy = results.find(
+    (result) => result.pageReady && result.authenticated && !result.failureCode,
+  );
+  if (healthy) return healthy;
+  const failed = results
+    .filter((result) => result.failureCode)
+    .sort(
+      (left, right) =>
+        pageFailurePriority(left.failureCode) - pageFailurePriority(right.failureCode),
+    )[0];
+  return failed ?? results[0];
+}
+
 async function probe(discoverModels = false) {
   await ensurePool();
   const readyPages = [];
@@ -366,7 +414,7 @@ async function probe(discoverModels = false) {
       // A loading or quarantined tab is represented by its slot state
     }
   }
-  const first = readyPages.find(({ result }) => result.pageReady && result.authenticated)?.result;
+  const first = selectControlPage(readyPages);
   if (first?.models) discoveredModels = first.models;
   controlDiagnostics = first?.diagnostics ?? null;
   pageFailureCode = first?.failureCode ?? null;

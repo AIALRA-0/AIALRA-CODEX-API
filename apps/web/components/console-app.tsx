@@ -1924,6 +1924,8 @@ const CHATGPT_ERROR_LABELS: Record<string, string> = {
   chatgpt_browser_busy: "浏览器正在执行其他任务",
   chatgpt_web_pacing_required: "距离上次发送不足 90 秒",
   chatgpt_delivery_uncertain: "发送状态无法确认，系统不会自动重发",
+  chatgpt_client_disconnected: "调用方连接已断开，页面正在安全重置",
+  runner_transport_error: "任务连接中断，系统没有重复发送",
   chatgpt_page_not_ready: "页面尚未准备好",
   chatgpt_page_generation_blank: "助手没有生成可读取的正文",
   chatgpt_page_rendering_failed: "页面明确显示生成失败",
@@ -2099,6 +2101,14 @@ function ChatGptWebChannel() {
   const recoveryMessage = status?.lastRecoveryProbeAt
     ? `最近恢复探针 ${status.lastRecoveryProbePassed ? "通过" : "未通过"} · ${formatDate(status.lastRecoveryProbeAt)}`
     : "尚未运行恢复探针";
+  const enabledAccounts = status.accounts.filter((account) => account.enabled);
+  const runningAccounts = enabledAccounts.filter(
+    (account) => account.extensionConnected && account.sandboxVerified,
+  );
+  const authenticatedAccounts = enabledAccounts.filter((account) => account.authenticated);
+  const dispatchableAccounts = enabledAccounts.filter(
+    (account) => account.qualified && ["ready", "busy"].includes(account.state),
+  );
 
   return (
     <>
@@ -2134,14 +2144,25 @@ function ChatGptWebChannel() {
           <span className="muted">{status?.circuitReason ?? "没有熔断原因"}</span>
         </article>
         <article className="metric">
-          <small>浏览器登录</small>
-          <strong>{status ? (status.authenticated ? "正常" : "需要处理") : "正在加载"}</strong>
-          <span className="muted">页面 {status?.pageReady ? "可识别" : "未就绪"}</span>
+          <small>可接单账号</small>
+          <strong>
+            {dispatchableAccounts.length}/{enabledAccounts.length}
+          </strong>
+          <span className="muted">只有已登录且已验证的账号会接收任务</span>
         </article>
         <article className="metric">
-          <small>运行隔离</small>
-          <strong>{status?.sandboxVerified ? "沙箱正常" : "尚未验证"}</strong>
-          <span className="muted">扩展 {status?.extensionConnected ? "已连接" : "未连接"}</span>
+          <small>浏览器进程</small>
+          <strong>
+            {runningAccounts.length}/{enabledAccounts.length} 正常
+          </strong>
+          <span className="muted">进程正常不代表账号仍然登录</span>
+        </article>
+        <article className="metric">
+          <small>有效登录</small>
+          <strong>
+            {authenticatedAccounts.length}/{enabledAccounts.length}
+          </strong>
+          <span className="muted">会话过期时需要在对应登录窗口处理</span>
         </article>
         <article className="metric">
           <small>当前并发</small>
@@ -2203,7 +2224,7 @@ function ChatGptWebChannel() {
                 <th>槽位</th>
                 <th>套餐</th>
                 <th>状态</th>
-                <th>登录/隔离</th>
+                <th>运行/登录</th>
                 <th>探针</th>
                 <th>入口</th>
                 <th>操作</th>
@@ -2260,9 +2281,15 @@ function ChatGptWebChannel() {
                       <br />
                       <span className="muted">{account.enabled ? "已加入池" : "未加入池"}</span>
                     </td>
-                    <td data-label="登录与隔离">
-                      {account.authenticated ? "已登录" : "未登录"} ·{" "}
-                      {account.sandboxVerified ? "沙箱正常" : "待验证"}
+                    <td data-label="运行与登录">
+                      {account.extensionConnected && account.sandboxVerified
+                        ? "进程正常"
+                        : "进程异常"}
+                      <br />
+                      <span className="muted">
+                        页面 {account.pageReady ? "可识别" : "未就绪"} ·{" "}
+                        {account.authenticated ? "已登录" : "需要登录"}
+                      </span>
                     </td>
                     <td data-label="探针">
                       {account.lastProbePassed === true
@@ -2331,6 +2358,9 @@ function ChatGptWebChannel() {
           <p className="muted">
             系统不会从页面、Cookie、额度或响应速度推断
             Plus/Pro；只记录匿名槽位标签，登录请在对应受保护 VNC 页面手动完成。
+          </p>
+          <p className="muted">
+            浏览器进程健康只说明容器、扩展和沙箱仍在运行；账号可接单还要求页面可识别、登录有效、探针通过且没有租约或冷却阻塞。
           </p>
         </Disclosure>
       </section>
