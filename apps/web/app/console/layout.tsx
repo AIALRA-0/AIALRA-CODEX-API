@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ConsoleNav } from "../../components/console-nav";
+import { ThemeToggle } from "../../components/theme-toggle";
 
 export default function ConsoleLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -11,6 +12,7 @@ export default function ConsoleLayout({ children }: Readonly<{ children: React.R
             <span>AIALRA Model Router</span>
           </Link>
           <div className="row console-account">
+            <ThemeToggle />
             <span className="status-chip">
               <span className="status-dot" />
               <span className="status-text">
