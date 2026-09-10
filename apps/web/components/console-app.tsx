@@ -560,9 +560,8 @@ function formatDate(value: string | null): string {
 
 function statusClass(status: JobStatus): string {
   if (status === "succeeded") return "success";
-  if (status === "awaiting_approval") return "warning";
-  if (["failed", "expired"].includes(status)) return "danger";
-  return "muted";
+  if (["failed", "cancelled", "expired"].includes(status)) return "danger";
+  return "warning";
 }
 
 function formatCredits(value: number | null): string {
@@ -694,8 +693,10 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
                       </Link>
                     )}
                   </td>
-                  <td className={statusClass(job.status)}>
-                    {resultSummary?.label ?? JOB_STATUS_LABEL[job.status]}
+                  <td>
+                    <span className={`status-indicator ${statusClass(job.status)}`}>
+                      {resultSummary?.label ?? JOB_STATUS_LABEL[job.status]}
+                    </span>
                   </td>
                   <td>
                     {job.task.executionChannel === "chatgpt_web" ? (
@@ -1259,7 +1260,7 @@ function Playground() {
         <section className="card result-panel" aria-live="polite">
           <div className="row">
             <h3>执行结果</h3>
-            <span className={`pill ${job ? statusClass(job.status) : "muted"}`}>
+            <span className={`pill status-indicator ${job ? statusClass(job.status) : "neutral"}`}>
               {job ? JOB_STATUS_LABEL[job.status] : "等待提交"}
             </span>
           </div>
@@ -2388,11 +2389,21 @@ function ChatGptWebChannel() {
                   <tr key={run.id}>
                     <td>{QUALIFICATION_LABELS[run.suite]}</td>
                     <td>
-                      {run.status === "succeeded"
-                        ? "通过"
-                        : run.status === "failed"
-                          ? "未通过"
-                          : "运行中"}
+                      <span
+                        className={`status-indicator ${
+                          run.status === "succeeded"
+                            ? "success"
+                            : run.status === "failed"
+                              ? "danger"
+                              : "warning"
+                        }`}
+                      >
+                        {run.status === "succeeded"
+                          ? "通过"
+                          : run.status === "failed"
+                            ? "未通过"
+                            : "运行中"}
+                      </span>
                     </td>
                     <td>
                       {run.completed}/{run.total}

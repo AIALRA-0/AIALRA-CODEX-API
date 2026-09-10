@@ -97,9 +97,9 @@ describe("shared visual tokens", () => {
   });
 
   it("uses only achromatic color tokens in both themes", () => {
-    const colorTokens = [...css.matchAll(/--[a-z-]+:\s*(#[a-f0-9]{6})/gi)].map(
-      ([, value]) => value!,
-    );
+    const colorTokens = [...css.matchAll(/--([a-z-]+):\s*(#[a-f0-9]{6})/gi)]
+      .filter(([, name]) => !name!.startsWith("status-"))
+      .map(([, , value]) => value!);
     expect(colorTokens.length).toBeGreaterThan(20);
     for (const hex of colorTokens) {
       const channels = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)];
@@ -107,6 +107,20 @@ describe("shared visual tokens", () => {
     }
     expect(css).toContain(':root[data-theme="light"]');
     expect(css).toContain(':root[data-theme="dark"]');
+  });
+
+  it("reserves traffic-light colors for visible status indicators", () => {
+    const consoleSource = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(css).toMatch(/--status-success:\s*#[a-f0-9]{6}/i);
+    expect(css).toMatch(/--status-warning:\s*#[a-f0-9]{6}/i);
+    expect(css).toMatch(/--status-danger:\s*#[a-f0-9]{6}/i);
+    expect(css).toContain(".status-indicator.success::before");
+    expect(css).toContain(".status-indicator.warning::before");
+    expect(css).toContain(".status-indicator.danger::before");
+    expect(css).toMatch(/\.status-dot\s*\{[\s\S]*?background:\s*var\(--status-success\)/);
+    expect(consoleSource).toContain('if (status === "succeeded") return "success";');
+    expect(consoleSource).toContain('["failed", "cancelled", "expired"]');
+    expect(consoleSource).toMatch(/return "warning";\s*\}/);
   });
 
   it("shows API key channels separately from Codex workspace permissions", () => {

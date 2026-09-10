@@ -15,6 +15,10 @@
   --success: #eeeeee;
   --danger: #ffffff;
   --warning: #d6d6d6;
+  --status-success: #22c55e;
+  --status-warning: #f59e0b;
+  --status-danger: #ef4444;
+  --status-neutral: #a3a3a3;
   --topbar: rgba(5, 5, 5, 0.96);
   --focus-ring: rgba(255, 255, 255, 0.22);
   --soft-shadow: rgba(0, 0, 0, 0.38);
@@ -41,6 +45,10 @@
   --success: #202020;
   --danger: #111111;
   --warning: #3f3f3f;
+  --status-success: #15803d;
+  --status-warning: #b45309;
+  --status-danger: #dc2626;
+  --status-neutral: #737373;
   --topbar: rgba(250, 250, 250, 0.96);
   --focus-ring: rgba(0, 0, 0, 0.18);
   --soft-shadow: rgba(0, 0, 0, 0.14);
@@ -330,7 +338,36 @@ h3 {
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 50%;
-  background: var(--success);
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-success) 18%, transparent);
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+}
+.status-indicator::before {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--status-neutral);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-neutral) 18%, transparent);
+  content: "";
+}
+.status-indicator.success::before {
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-success) 18%, transparent);
+}
+.status-indicator.warning::before {
+  background: var(--status-warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-warning) 18%, transparent);
+}
+.status-indicator.danger::before {
+  background: var(--status-danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-danger) 18%, transparent);
 }
 
 .panel,
@@ -1086,11 +1123,6 @@ td[colspan] {
 }
 .danger {
   color: var(--danger);
-}
-.warning::before,
-.danger::before {
-  content: "· ";
-  color: var(--muted);
 }
 .secret-once {
   margin-top: 1.5rem;
