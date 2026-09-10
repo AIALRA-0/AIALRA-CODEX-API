@@ -162,6 +162,7 @@ describe("single-page browser agent policy", () => {
     expect(enableScript).toContain(
       "CHATGPT_WEB_ADAPTER_ENABLED=true CHATGPT_WEB_DIAGNOSTIC_ENABLED=true",
     );
+    expect(enableScript).not.toContain('"${compose[@]}" build');
     expect(enableScript).toContain("process.exit(b.enabled&&b.sandboxVerified");
     expect(enableScript).toContain('"${compose[@]}" up --detach --force-recreate api worker');
     expect(enableScript).not.toContain(

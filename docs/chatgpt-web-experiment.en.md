@@ -74,6 +74,8 @@ Real ChatGPT page tests never run in GitHub Actions. Each account entering the p
 
 `ACTION=start` prepares the browser-side Bridge for production requests while API and Worker admission remains closed. `ACTION=enable` then reloads only API and Worker, not Chromium, so opening admission does not invalidate the account session that just passed its probe. The Bridge remains reachable only on the internal control network, and diagnostic calls still require the dedicated token.
 
+Diagnostic startup reuses the immutable images already pinned by the production release and never runs an ad-hoc Docker build. New images are built and verified only as part of a release.
+
 The account must report `succeeded`, `submittedCount=1`, `temporaryChatVerified=true`, `ownershipMatched=true`, a result length and SHA-256 digest, and a final idle page. Any duplicate send, result misattribution, rate limit, verification screen, or sign-in failure rejects qualification. One successful account can enter production at per-account concurrency one. `full_10` is optional strengthening evidence, not an enablement prerequisite.
 
 Only after the gate passes:

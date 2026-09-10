@@ -49,7 +49,6 @@ case "$ACTION" in
   start)
     set_flag false
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED true
-    "${compose[@]}" build chatgpt-browser chatgpt-egress-proxy
     # Keep the bridge ready for production requests while the API and Worker remain closed.
     # This lets ACTION=enable open admission without restarting Chromium and invalidating
     # an account session that just passed its real probe.

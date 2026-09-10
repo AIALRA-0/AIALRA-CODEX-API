@@ -153,6 +153,8 @@ node deploy/scripts/probe-chatgpt-web-readiness.mjs
 
 `ACTION=start` 会让浏览器内部 Bridge 预先具备接单能力，但 API 和 Worker 仍保持网页任务关闭；`ACTION=enable` 只重载 API 和 Worker，不重启 Chromium，因此不会因为开关切换而丢失刚刚通过探针的登录态。Bridge 只能从内部控制网络访问，诊断调用仍要求专用令牌
 
+诊断启动只复用生产环境已绑定的不可变镜像，不会临时执行 Docker build；新镜像统一在发布阶段构建和验证
+
 页面即使仍渲染编辑框，只要出现“会话已过期 / 请重新登录”模态框，也会立即判定为 `chatgpt_login_required`。该账号不会进入输入或发送阶段，控制台会显示可执行的中文原因
 
 - `readiness`：只读检查，不发送消息

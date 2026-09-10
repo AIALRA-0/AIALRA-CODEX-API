@@ -145,7 +145,7 @@ sudo RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 该步骤不会改变 Codex SDK 通道；网页通道默认关闭，真实网页探针通过前只能启动可见浏览器用于登录和诊断
 
 ```bash
-# 构建桥接服务、可见 Chromium 和受控出口代理，但保持网页任务接单关闭
+# 启动当前发布中已验证的可见 Chromium 和受控出口代理，但保持网页任务接单关闭
 sudo ACTION=start \
   RELEASE_DIR=/srv/example/model-router/releases/<commit> \
   PRODUCTION_ENV=/var/lib/aialra-model-router/production.env \
@@ -161,6 +161,8 @@ sudo ACTION=start \
 控制台只会在诊断模式开启时允许创建 readiness 或真实探针。生产接单模式下按钮会锁定，API 明确返回 `chatgpt_web_diagnostic_disabled`；先运行上面的 `ACTION=start` 进入诊断模式，不要把诊断入口关闭误判成账号失效
 
 `ACTION=start` 会预先启用浏览器内部 Bridge，但 API 和 Worker 仍拒绝网页任务；探针通过后的 `ACTION=enable` 只重载 API 和 Worker，不再重启 Chromium，避免开关切换使刚验证的登录态失效
+
+`ACTION=start` 不执行镜像构建；镜像只应在正式发布阶段构建一次并以不可变摘要写入生产环境，避免每次重新登录或诊断都制造大体积构建缓存
 
 ```bash
 # 真实网页探针通过后才把 CHATGPT_WEB_ADAPTER_ENABLED 切换为 true
