@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { connection } from "next/server";
 
 import "./globals.css";
@@ -18,12 +19,20 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   await connection();
 
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" data-theme="dark" suppressHydrationWarning>
       <body>
         <a className="skip-link" href="#main">
           跳到正文
         </a>
         {children}
+        <Script
+          id="aialra-theme-bootstrap"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html:
+              '(function(){try{var key="aialra-theme";var saved=localStorage.getItem(key);var theme=saved==="light"||saved==="dark"?saved:(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.dataset.theme=theme;document.documentElement.style.colorScheme=theme}catch(_){document.documentElement.dataset.theme="dark"}})();',
+          }}
+        />
       </body>
     </html>
   );

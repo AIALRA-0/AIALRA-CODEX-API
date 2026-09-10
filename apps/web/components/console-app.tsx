@@ -737,21 +737,30 @@ function Overview() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [error, setError] = useState("");
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const [jobResult, quotaResult] = await Promise.all([
-        routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12", { signal }),
-        routerFetch<Quota>("/api/v1/quota", { signal }),
-      ]);
-      if (signal?.aborted) return;
-      setJobs(jobResult.data);
-      setQuota(quotaResult);
-      setError("");
-    } catch (cause) {
-      if (signal?.aborted) return;
-      setError(cause instanceof Error ? cause.message : "控制面读取失败");
-    }
-  }, []);
+  const refresh = useCallback(
+    async (signal?: AbortSignal) => {
+      if (syntheticDemo) {
+        setJobs([]);
+        setQuota(null);
+        setError("");
+        return;
+      }
+      try {
+        const [jobResult, quotaResult] = await Promise.all([
+          routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12", { signal }),
+          routerFetch<Quota>("/api/v1/quota", { signal }),
+        ]);
+        if (signal?.aborted) return;
+        setJobs(jobResult.data);
+        setQuota(quotaResult);
+        setError("");
+      } catch (cause) {
+        if (signal?.aborted) return;
+        setError(cause instanceof Error ? cause.message : "控制面读取失败");
+      }
+    },
+    [syntheticDemo],
+  );
   useVisiblePolling(refresh, 5_000);
   const active = jobs.filter((job) => !TERMINAL.has(job.status)).length;
   const succeeded = jobs.filter((job) => job.status === "succeeded").length;

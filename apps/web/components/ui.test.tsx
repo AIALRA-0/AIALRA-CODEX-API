@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { Disclosure, EmptyState } from "./ui";
+import { ThemeToggle } from "./theme-toggle";
 
 describe("shared presentation", () => {
   it("does not call temporary unavailability a closed or unqualified web channel", () => {
@@ -11,6 +12,13 @@ describe("shared presentation", () => {
     expect(source).not.toContain(
       "ChatGPT 网页实验通道尚未通过真实调用门禁；当前只能使用 Codex 通道",
     );
+  });
+
+  it("keeps the synthetic overview disconnected from runtime APIs", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain("if (syntheticDemo) {");
+    expect(source).toMatch(/if \(syntheticDemo\) \{[\s\S]*?setJobs\(\[\]\);[\s\S]*?return;/);
+    expect(source).toMatch(/\},\s*\[syntheticDemo\],\s*\);/);
   });
   it("keeps advanced content accessible in a native, initially collapsed disclosure", () => {
     const html = renderToStaticMarkup(
@@ -40,6 +48,16 @@ describe("shared presentation", () => {
     const html = renderToStaticMarkup(<EmptyState title="等待结果">提交后查看结果</EmptyState>);
     expect(html).toContain("<strong>等待结果</strong>");
     expect(html).toContain("<p>提交后查看结果</p>");
+  });
+
+  it("renders a persistent and accessible black-and-white theme control", () => {
+    const html = renderToStaticMarkup(<ThemeToggle />);
+    const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
+    expect(html).toContain('class="theme-toggle"');
+    expect(html).toContain('aria-label="切换为白色主题"');
+    expect(html).toContain("黑 / 白");
+    expect(layout).toContain("localStorage.getItem(key)");
+    expect(layout).toContain('strategy="beforeInteractive"');
   });
 });
 
@@ -76,6 +94,19 @@ describe("shared visual tokens", () => {
     expect(css).toMatch(/\.action-row\s*\{[^}]*flex-wrap:\s*wrap/);
     expect(css).toMatch(/\.check-row\s*\{/);
     expect(css).toMatch(/input\[type="checkbox"\]/);
+  });
+
+  it("uses only achromatic color tokens in both themes", () => {
+    const colorTokens = [...css.matchAll(/--[a-z-]+:\s*(#[a-f0-9]{6})/gi)].map(
+      ([, value]) => value!,
+    );
+    expect(colorTokens.length).toBeGreaterThan(20);
+    for (const hex of colorTokens) {
+      const channels = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)];
+      expect(new Set(channels).size, hex).toBe(1);
+    }
+    expect(css).toContain(':root[data-theme="light"]');
+    expect(css).toContain(':root[data-theme="dark"]');
   });
 
   it("shows API key channels separately from Codex workspace permissions", () => {

@@ -1,272 +1,191 @@
-<h1 align="center">AIALRA Model Router</h1>
+<div align="center">
+<h1>AIALRA Model Router</h1>
+<p>A private, auditable, and recoverable gateway for personal Codex execution and controlled ChatGPT web sessions</p>
+<p><code>0.1.0 prerelease</code> · <code>Apache-2.0</code> · <code>Chinese console</code> · <code>scoped keys</code></p>
+<p><a href="README.md">中文</a> · <a href="docs/usage.md">Usage</a> · <a href="docs/api-capabilities.md">API capabilities</a> · <a href="docs/deployment.md">Deployment</a> · <a href="SECURITY.md">Security</a></p>
+</div>
 
-<p align="center">A private subscription-capacity router for an account owner's devices and internal agents</p>
+<div align="center">
+<img src="docs/assets/console-synthetic.png" width="1440" alt="Black-and-white AIALRA Model Router console with navigation on the left and quota and job status on the right">
+<p><em>Figure 1.1 — Black-and-white console rendered with synthetic data and no real accounts, jobs, addresses, or internal identifiers</em></p>
+</div>
 
-<p align="center"><code>Codex stable channel</code> · <code>ChatGPT web experiment</code> · <code>durable Jobs</code> · <code>MCP</code> · <code>Chinese console</code></p>
+## 1 Project scope
 
-<p align="center">Status: <code>0.1.0 prerelease</code>　License: <code>Apache-2.0</code>　Scope: owner devices and internal automation</p>
+AIALRA Model Router is a self-hosted service for an account owner's personal devices and internal automation
 
-<p align="center"><a href="README.md">中文</a> · <a href="README.en.md">English</a> · <a href="docs/usage.md">Usage</a> · <a href="docs/deployment.md">Deployment</a> · <a href="SECURITY.md">Security</a></p>
+It puts request handling, durable queuing, execution, validation, history, and permissions behind one control plane for Codex coding work and controlled ChatGPT web tasks
 
-<p align="center">The deployed root goes directly to Authentik sign-in; examples use <code>https://router.example.com</code></p>
+- The Codex channel uses the official Codex CLI, TypeScript SDK, and App Server, with ephemeral tasks and resumable threads
+- The ChatGPT web channel uses visible isolated browsers, a least-privilege extension, and restricted egress; normal chat and search use a fresh Temporary Chat per task
+- Deep Research uses a fresh persistent conversation per task, and callers must explicitly acknowledge ChatGPT history retention
+- Durable jobs preserve status, events, results, and audit records so clients can recover after a disconnected request
+- Scoped keys can allow Codex only, ChatGPT only, or both channels, while separately limiting Codex execution permissions
 
-![Synthetic screenshot of the Chinese AIALRA Model Router console](docs/assets/console-synthetic.png)
+This is not an official OpenAI project, an OpenAI API service, a subscription resale service, or a shared-account service
 
-<p align="center"><em>Figure 1. Chinese console rendered with synthetic jobs and quota only.</em></p>
+The web channel depends on the live page and can pause for authentication, CAPTCHA, rate limits, or interface changes; it never resubmits when delivery is uncertain
 
-## 1. Project scope
+## 2 First successful request
 
-AIALRA Model Router connects a logged-in Codex executor to a private control plane. Browsers, scripts, and internal agents submit work through one interface and pin each task to one execution channel and model. Automatic Codex routing remains limited to the calibrated Luna, Terra, and Sol set.
+### 2.1 Prerequisites
 
-The default stable channel uses only the official Codex CLI, TypeScript SDK, and App Server.
+- Node.js 22 or newer
+- pnpm 10.33.4
+- Docker 29 with Compose 2.40, or compatible versions
+- A Codex login directory dedicated to this service
 
-The repository also contains an administrator-enabled, clean-room “ChatGPT Pro web experimental channel.” A dedicated visible Chromium instance uses a minimum-permission extension and semantic DOM operations. An administrator signs in and handles verification through noVNC. The implementation does not request cookie access, call private `backend-api` endpoints, intercept site SSE, expose remote debugging, or bypass verification.
+### 2.2 Start the local control plane
 
-The web experiment includes a warm tab pool, DOM location and observation, container-local native keyboard and pointer input, ten-minute failure quarantine, a restart-safe submission journal, a dedicated Chromium sandbox, persisted circuit state, and adaptive concurrency from one to four. `GET /api/v1/chatgpt-web/status` exposes only secret-free sandbox, sign-in, slot, queue, concurrency, circuit, and qualification fields; admission remains closed until the real-page gate passes.
-
-The experiment is not an official API, depends on the ChatGPT UI, and can stop working without notice. Personal or non-profit use does not automatically remove terms risk. Read the [experimental channel guide](docs/chatgpt-web-experiment.en.md) before enabling it.
-
-The first release includes a Responses subset, an OpenAI Chat Completions compatibility endpoint, resumable multi-turn conversation threads, durable Jobs, deterministic model routing, quota guards, a CLI, MCP tools, a TypeScript client, Authentik browser login, scoped API keys, PostgreSQL queueing, encrypted payloads, audit, and deletion receipts.
-
-This is not an official OpenAI project, an OpenAI API service, a subscription resale service, or a multi-account sharing service. OpenAI, ChatGPT, Codex, and related marks belong to their respective owners.
-
-## 2. User entry points
-
-| Entry           | Address or command           | Purpose                              | Authentication      |
-| --------------- | ---------------------------- | ------------------------------------ | ------------------- |
-| Sign-in         | `/`                          | Go directly to the private console   | Authentik           |
-| Internal docs   | `/docs`                      | Quickstart, contracts, errors        | Authentik           |
-| Console         | `/console`                   | Invoke, jobs, quota, keys, audit     | Authentik           |
-| Responses       | `POST /v1/responses`         | Model-style text calls               | API key             |
-| Chat            | `POST /v1/chat/completions`  | OpenAI-compatible chat calls         | API key             |
-| Threads         | `GET /api/v1/threads`        | Resumable conversation threads       | API key             |
-| Jobs            | `POST /api/v1/jobs`          | Long work, batches, events           | API key             |
-| OpenAPI         | `/openapi`, `/openapi.json`  | HTTP contract                        | Tailnet             |
-| CLI             | `node apps/cli/dist/main.js` | Shell and pipelines                  | API key             |
-| MCP             | `node apps/mcp/dist/main.js` | Agent delegation                     | API key             |
-| Visible browser | `/chatgpt-browser/`          | Manual ChatGPT sign-in and diagnosis | Tailnet + Authentik |
-
-Nginx and Authentik protect browser access. Next.js uses a separate internal proof when it calls NestJS. External agents use scoped, rate-limited, expiring, revocable API keys.
-
-## 3. Local run
-
-Install Node.js 22, pnpm 10, Docker Compose, and prepare a dedicated Codex login directory.
+1. Install the locked workspace dependencies from the repository root
 
 ```powershell
-pnpm install
-codex login status
-pwsh ./deploy/scripts/prepare-local.ps1
-docker compose --env-file ./deploy/local.env -f ./deploy/compose.yaml --profile codex up --build -d
-docker compose --env-file ./deploy/local.env -f ./deploy/compose.yaml --profile codex ps
+# Install every workspace dependency from the current lockfile
+pnpm install --frozen-lockfile
 ```
 
-Open `http://localhost:13211/setup`, register a passkey with the one-time local bootstrap token, then use `/console/playground`. Local mode uses a passkey so Authentik is not required; VPS production uses the existing Authentik service.
-
-## 4. API examples
-
-### 4.1. Responses request
+2. Generate local secrets and start the Codex profile
 
 ```powershell
-$RouterUrl = "https://router.example.com"
+# Prepare the local environment, then start the database, API, web app, worker, and isolated runner
+pwsh ./deploy/scripts/prepare-local.ps1
+docker compose --env-file ./deploy/local.env -f ./deploy/compose.yaml --profile codex up --build -d
+```
+
+3. Open `http://localhost:13211/setup`, register the first passkey, and save the one-time recovery codes offline
+
+4. Open `http://localhost:13211/console/playground`, submit a minimal job, and inspect its result in job history
+
+A successful job moves through accepted, queued, running, and validating states before showing either a result or a specific failure
+
+See the [deployment guide](docs/deployment.md) for production networking, authentication, backup, and rollback requirements
+
+## 3 APIs and permissions
+
+An idempotency key is a unique value supplied with one write request to prevent a network retry from creating another job. The server binds it to the request body: the same key and body return the original job, while the same key with different content returns a conflict. Use it for job creation and other repeatable writes. It does not replace the job ID and cannot make an already submitted external task safe to resend
+
+<div align="center">
+<p><strong>Table 3.1 — Public entry points and observable results</strong></p>
+<table>
+<thead><tr><th>Entry point</th><th>Use</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>POST /v1/responses</code></td><td>Text, structured output, and unified model calls</td><td>Synchronous result or server-sent events</td></tr>
+<tr><td><code>POST /v1/chat/completions</code></td><td>Compatibility for existing chat clients</td><td>Chat result or server-sent events</td></tr>
+<tr><td><code>POST /api/v1/jobs</code></td><td>Long-running, batched, and asynchronous work</td><td>Job ID, status, events, and result</td></tr>
+<tr><td><code>GET /api/v1/quota</code></td><td>Inspect the Codex quota snapshot</td><td>Source, timestamp, and available levels</td></tr>
+<tr><td><code>GET /api/v1/chatgpt-web/status</code></td><td>Inspect the web account pool</td><td>Redacted health, lease, and cooldown state</td></tr>
+</tbody>
+</table>
+</div>
+
+The API accepts only parameters explicitly implemented by the current repository
+
+Unsupported OpenAI parameters return `400 unsupported_parameter` instead of being silently ignored
+
+Streaming calls use server-sent events for status and the final complete output; they do not fabricate token-by-token streaming
+
+See [API capabilities](docs/api-capabilities.md) for parameters, events, errors, and compatibility boundaries, and [usage](docs/usage.md) for copyable examples
+
+### 3.1 Minimal Responses request
+
+```powershell
+# Submit a minimal text task with a scoped key that was shown once
 $Headers = @{
   Authorization = "Bearer $env:MODEL_ROUTER_API_KEY"
   "Idempotency-Key" = [guid]::NewGuid().ToString()
 }
 $Body = @{
   model = "luna"
-  input = "Summarize this synthetic alert in three points"
+  input = "Reply with OK only"
   reasoning = @{ effort = "low" }
 } | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers -ContentType "application/json" -Body $Body
+Invoke-RestMethod -Method Post -Uri "https://router.example.com/v1/responses" -Headers $Headers -ContentType "application/json" -Body $Body
 ```
 
-The result includes the effective model, output, state, job ID, and Codex Credits. Unsupported fields return `400 unsupported_parameter`.
+Replace the example address with your protected deployment and set the key in the current process
 
-### 4.2. JSON Schema request
+Reuse the original idempotency key when retrying the same request after a network failure, and generate a new value for a new task
 
-Set `text.format.type` to `json_schema`, provide `name`, `schema`, and `strict`, then send the same `/v1/responses` request. A validation mismatch returns `failed` with `validation_failed` and never changes models automatically.
+### 3.2 Permission choices
 
-### 4.3. Durable Jobs request
+<div align="center">
+<p><strong>Table 3.2 — Key channels and Codex execution permissions</strong></p>
+<table>
+<thead><tr><th>Selection</th><th>Allowed</th><th>Not allowed</th></tr></thead>
+<tbody>
+<tr><td>Codex only</td><td>Codex models and durable jobs</td><td>ChatGPT web tasks</td></tr>
+<tr><td>ChatGPT only</td><td>Enabled web chat, search, or Deep Research</td><td>Codex execution</td></tr>
+<tr><td>Codex + ChatGPT</td><td>Both channels</td><td>Operations beyond the key lifetime, rate, or execution scope</td></tr>
+</tbody>
+</table>
+</div>
+
+Codex `restricted`, `confirm`, and `full` presets are a separate execution boundary and cannot widen a channel denied by the key
+
+## 4 Runtime design
+
+Requests pass browser authentication or scoped-key verification before entering the PostgreSQL durable queue
+
+The trusted worker schedules only: Codex jobs go to an isolated runner, while web jobs go to the selected account's independent browser
+
+Structure, ownership, and acceptance checks run before results are written to job history, events, and audit records
+
+See [architecture](ARCHITECTURE.md) for component relationships, state transitions, and session behavior
+
+## 5 ChatGPT web channel
+
+- Normal chat and search always use a fresh Temporary Chat with zero prior messages, personalization disabled, and at most one submission
+- Deep Research uses a fresh persistent conversation, does not reuse older conversations, and does not support web `sessionKey` continuation
+- `chatgpt-web.auto` selects the page's automatic model and is not a reasoning depth; `thinking_depth` requests a depth currently exposed by the page
+- Every account has an independent browser profile, concurrency limit of `1`, pacing, lease, cooldown, and quarantine state
+- Plans are operator metadata limited to `plus`, `pro`, or `unknown`; the service never guesses a plan from cookies, page text, or response time
+- Failover is permitted only before submission is definitively attempted; once the page accepts a task or delivery is uncertain, the service does not switch accounts or resend
+
+The web channel is disabled by default
+
+An administrator must complete a no-message readiness check and one real single probe before an account can join the production pool
+
+See the [ChatGPT web channel guide](docs/chatgpt-web-experiment.en.md) for login, probes, data risk, and failure handling
+
+## 6 Security boundaries
+
+- Browser access is protected by Authentik, while machine calls use expiring, revocable, rate-limited scoped keys
+- API keys retain only a fixed prefix and an authentication-code digest; plaintext is displayed once at creation
+- Job bodies and events use per-record encryption, with 24-hour body retention and 90-day redacted metadata retention by default
+- Runners receive no database credentials, content master key, container socket, or other job workspace
+- Web browsers receive no Codex login, database access, host directory, or control-plane secret
+- Browser profile volumes are credentials: they are excluded from ordinary backups and must not be copied between accounts
+- Repository examples use `.example.com`, synthetic tasks, and placeholder keys only
+
+Read the [threat model](docs/threat-model.md) and [security policy](SECURITY.md) before processing real data, allowing external writes, or enabling browser automation
+
+## 7 Verification and support boundary
+
+The repository's unified check runs formatting, static analysis, type checking, unit tests, and production builds in sequence
 
 ```powershell
-$Body = @{
-  task = @{
-    objective = "Review synthetic TypeScript and report only provable issues"
-    taskKind = "review"
-    model = "auto"
-    effort = "medium"
-    permissions = @{ preset = "restricted" }
-  }
-} | ConvertTo-Json -Depth 8
-$Job = Invoke-RestMethod -Method Post -Uri "$RouterUrl/api/v1/jobs" -Headers $Headers -ContentType "application/json" -Body $Body
-Invoke-RestMethod -Method Get -Uri "$RouterUrl/api/v1/jobs/$($Job.id)" -Headers @{ Authorization = $Headers.Authorization }
-```
-
-Normal calls advance through `accepted → queued → running → validating`; terminal states are `succeeded | failed | cancelled | expired`. Only `confirm` calls enter `awaiting_approval` before queueing.
-
-### 4.4. Multi-turn conversations
-
-Calls are one-shot by default and the session file is deleted right after execution. Set `session_mode: "persistent"` in the `aialra` namespace on the first turn; the success response carries `metadata.session_key`. Later turns pass `aialra.session_key` to resume the same Codex thread, pinned to the first turn's model and effort. Threads expire after 24 hours by default (`SESSION_THREAD_TTL_MS`), unknown or expired threads return `409 session_expired`, and another caller's thread returns `403 session_access_denied`. Session files stay in the Runner's Codex home and are reaped on a schedule (`CODEX_SESSION_TTL_MS`); they never enter the database or backups. The native Jobs contract exposes the same capability as `sessionMode` and `sessionKey`.
-
-### 4.5. Chat Completions compatibility
-
-`POST /v1/chat/completions` accepts the standard OpenAI request body, so any official SDK works by only changing `base_url` and the key. Supported fields: `messages`, `stream`, `stream_options.include_usage`, `max_tokens`, `max_completion_tokens`, `response_format` (`text`, `json_object`, `json_schema`), `reasoning_effort`, `metadata`, and the `aialra` extension namespace. The Idempotency-Key header is optional here. Unsupported fields return `400 unsupported_parameter`; if the call is still running when the wait budget ends, the endpoint returns `504 gateway_timeout` with the job id for polling via the Jobs API.
-
-### 4.6. ChatGPT Pro web experimental channel
-
-After an administrator signs in through the protected visible browser and enables a discovered web model, callers must select the experimental channel explicitly:
-
-```powershell
-$WebBody = @{
-  model = "chatgpt-web.auto"
-  input = "Research a synthetic topic and list public sources"
-  aialra = @{
-    execution_channel = "chatgpt_web"
-    chatgpt_mode = "search"
-    require_sources = $true
-  }
-} | ConvertTo-Json -Depth 8
-Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers -ContentType "application/json" -Body $WebBody
-```
-
-Non-streaming requests wait for the final body. Streaming requests emit state and one final complete body rather than fabricated token deltas. The page does not expose reliable tokens, Credits, quota deltas, or API-equivalent prices, so the response uses `measurementStatus: "unavailable"` and the console never presents zero as a measurement.
-
-Search defaults to ten minutes and deep research to sixty minutes. Use Jobs for long work. See the [experimental channel guide](docs/chatgpt-web-experiment.en.md) for enablement, sign-in, errors, security boundaries, and probe gates.
-
-The protected “ChatGPT web channel” console page provides a no-message readiness check and one real `single_probe` per account. `full_10` remains optional strengthening evidence. The corresponding API endpoints are `POST /api/v1/chatgpt-web/qualification-runs` and `GET /api/v1/chatgpt-web/qualification-runs/{id}`. Records contain only stage, duration, length, digest, source count, and error class; prompts, answers, accounts, and conversation URLs are excluded.
-
-`chatgpt-web.auto` is the web model entry, not a thinking depth. Callers may set `thinking_depth` to an option actually discovered from the page. When omitted, the bridge reads and records the current page default. The console shows requested and resolved depth separately.
-
-A Search request with `require_sources = $true` fails with `chatgpt_sources_missing` if the completed answer has no verifiable public URL. That task failure does not quarantine a healthy account and never causes a post-submit retry.
-
-## 5. Programmatic access
-
-```powershell
-$env:MODEL_ROUTER_URL = "https://router.example.com"
-$env:MODEL_ROUTER_API_KEY = "<set in a secure terminal>"
-pnpm build
-node apps/cli/dist/main.js call --task "Return only OK" --kind bounded --model luna --effort low --permission restricted
-node apps/cli/dist/main.js chat --message "Return only OK" --model luna
-node apps/cli/dist/main.js research --task "Research a synthetic topic" --mode search --model chatgpt-web.auto
-node apps/cli/dist/main.js call --task "Remember the number 42" --session persistent
-node apps/cli/dist/main.js chat --message "What was the number?" --session-key <thread>
-node apps/cli/dist/main.js threads
-node apps/cli/dist/main.js jobs --limit 20
-node apps/cli/dist/main.js quota
-```
-
-MCP exposes `delegate_codex`, `delegate_chatgpt`, `preview_route`, `job_status`, `cancel_job`, and `quota_snapshot`. Delegation depth is one and web jobs cannot delegate again.
-
-```typescript
-import { ModelRouterClient } from "@aialra/model-router-client";
-
-const client = new ModelRouterClient({
-  baseUrl: process.env.MODEL_ROUTER_URL!,
-  apiKey: process.env.MODEL_ROUTER_API_KEY!,
-});
-const result = await client.createResponse({ model: "luna", input: "Return only OK" });
-```
-
-## 6. Architecture
-
-```mermaid
-flowchart TD
-    D[Owner browser on Tailnet] --> B[Nginx bound to Tailscale]
-    B --> E[Authentik]
-    E --> F[Chinese console]
-    G[Internal agent] -->|Scoped API key| H[NestJS API]
-    F -->|Internal proof| H
-    H --> I[PostgreSQL and pg-boss]
-    I --> J[Trusted scheduler Worker]
-    J -->|Single task contract| K[Isolated Runner]
-    K --> L[Official Codex TypeScript SDK]
-    L --> M[An enabled Codex model]
-    J -->|Explicit chatgpt_web job| P[Local web bridge]
-    P --> Q[Minimum-permission Chrome extension]
-    Q -->|DOM location and state observation| R[Visible ChatGPT page]
-    P -->|Native X11 keyboard, pointer, and temporary clipboard| R
-    R --> Q
-    R -->|Allowed public domains only| S[Controlled egress proxy]
-    J --> N[Validation, usage, and audit]
-```
-
-Admission pins one model and reasoning effort for the task lifetime.
-
-| Task shape                                      | Default model | Typical work                                            |
-| ----------------------------------------------- | ------------- | ------------------------------------------------------- |
-| Bounded, structured, automatically verifiable   | Luna          | Classification, extraction, conversion, short summaries |
-| Everyday coding, debugging, integration, review | Terra         | Fixes, reviews, and integration work                    |
-| Ambiguous, high-risk, or disputed               | Sol           | Architecture, threat analysis, complex planning         |
-
-## 7. Security boundaries
-
-- The trusted scheduling Worker owns database and payload-key access but never executes Codex tasks.
-- The isolated Runner receives one contract, an ephemeral workspace, and the Codex identity mount; it receives no database or payload key.
-- Sandbox policy denies the root filesystem, `/run/secrets`, process environments, and the Codex identity directory.
-- `restricted` disables networking. `full` permits public Internet access while host egress rules block loopback, private, Tailnet, cloud-metadata, and other Docker destinations.
-- Secure-cleanup mode rejects `sessionKey` and removes Codex session files after each job.
-- Defaults are read-only, offline, and 120 seconds; writes need an explicit contract and approval.
-- API keys store only a fixed prefix and HMAC-SHA-256 digest; defaults are 30 days and 60 requests/minute, with idempotent confirmed create and revoke operations.
-- API keys configure execution channels separately from Codex workspace permissions. A key can allow Codex only, ChatGPT only, or both, and the API enforces that choice for every task.
-- A ChatGPT-only key cannot create Codex work, while a Codex-only key cannot create browser work. Existing keys retain their scope-derived channel access.
-- Per-record AES-256-GCM binds the Job ID, field, and version as AAD; payloads expire after 24 hours and metadata after 90 days.
-- A Router-specific Authentik group plus independent Nginx→Web and Web→API proofs protect browser identity.
-- The web experiment uses a separate browser account and persistent profile volume. Treat that volume as a login credential and exclude it from ordinary backups.
-- The browser receives no database, payload key, Codex login, container socket, or host directory. A domain allowlist proxy is its only public egress path.
-- The extension requests no cookie, clipboard, download, or all-sites permission, exposes no CDP port, and pauses for manual handling when verification appears.
-- Prompt text exists briefly only in the isolated browser container's X11 clipboard. The DOM verifies the editor character-for-character and then clears the clipboard; the text is not written to extension storage, logs, or qualification records.
-- Extension storage keeps only a job-id digest, slot id, document id, stage, and submitted flag. After a browser restart, an already-submitted job without a terminal result fails rather than being sent again.
-
-See the [threat model](docs/threat-model.md).
-
-## 8. VPS deployment
-
-Production reuses Docker Compose, Tailscale, Nginx, Authentik, and Cloudflare DNS:
-
-1. Prepare the dedicated account and root-only secrets.
-2. Build and start PostgreSQL, API, and Web with job admission disabled.
-3. Create a DNS-only AAAA record for the Tailscale IPv6 address, obtain the certificate with DNS-01, register the Authentik application, render a Tailscale-bound Nginx server, and run `nginx -t`.
-4. Complete a fresh dedicated Codex login and Linux isolation canary.
-5. Start the isolated Runner and trusted Worker, then open admission only after attack probes and health checks succeed.
-6. Optionally run `enable-chatgpt-web.sh` with `ACTION=start`, sign in through protected noVNC, complete readiness and one successful `single_probe`, then run it with `ACTION=enable`.
-
-See the [deployment guide](docs/deployment.md). Templates use `router.example.com`; real infrastructure values do not enter the public repository.
-
-## 9. Repository map
-
-```text
-apps/api        # NestJS control plane, Responses, Jobs
-apps/web        # Next.js Chinese site and console
-apps/worker     # Trusted scheduler with database and payload-key access
-apps/runner     # Isolated Codex executor without database credentials
-apps/cli        # Command-line client
-apps/mcp        # MCP tools
-apps/chatgpt-bridge # Disabled-by-default bridge and minimum-permission extension
-packages        # Contracts, routing, persistence, security, provider, client
-openapi         # Sole HTTP contract
-deploy          # Compose, Nginx, DNS, backup, deployment scripts
-skill           # Reusable router skill
-evals           # Anonymous evaluation fixtures
-```
-
-## 10. Verification
-
-```powershell
+# Run the complete automated check currently defined by the repository
 pnpm check
 ```
 
-Automated checks cover routing, quota parsing, caller authorization, key idempotency, Authentik groups and proofs, AAD encryption, retention, Responses errors, Runner environment filtering, Worker output scanning, bridge protocol, thinking-depth discovery, source extraction, and account-pool failure isolation.
+After an API contract change, also run `pnpm generate:openapi` and confirm that generation leaves no uncommitted difference
 
-Passing repository tests does not prove that a specific deployment has completed real-account qualification. Operators must also verify `/healthz`, `/readyz`, one minimal Codex job, web-account readiness, and one `single_probe`. See [implementation status](docs/implementation-status.md).
+Container configuration, isolation, real Codex execution, and real web execution are deployment checks and cannot be replaced by local unit tests
 
-## 11. Reuse
+Version `0.1.0` is a prerelease. Compatibility is limited to the repository contracts and tests, not unimplemented OpenAI parameters or unspecified web behavior
 
-OpenAPI is the sole HTTP contract and generates the client. Hostnames, credentials, certificates, and Authentik inventory are injected at deployment and never committed.
+## 8 Documentation and collaboration
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+- [Usage](docs/usage.md) covers calls, jobs, sessions, errors, and commands
+- [API capabilities](docs/api-capabilities.md) lists supported parameters, streaming behavior, and compatibility limits
+- [Deployment](docs/deployment.md) covers production networking, authentication, backup, rollout, and rollback
+- [Implementation status](docs/implementation-status.md) separates implemented, conditional, and unsupported behavior
+- [Evaluation](docs/evaluation.md) explains routing and quality validation
+- [Contributing](CONTRIBUTING.md) defines the development environment and pre-commit checks
+- [Security](SECURITY.md) provides the private vulnerability-reporting path and disclosure boundary
 
-## 12. License record
+## 9 License
 
-The repository uses [Apache-2.0](LICENSE). Third-party and clean-room records are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The owner approved the license record for publication; that is not legal advice on trademarks, subscription terms, or patents.
+Code is available under the [Apache License 2.0](LICENSE), with third-party records in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)
 
-A bounded prior-art review found the differentiated combination to be a shared task contract, deterministic Codex routing, a disabled-by-default visible-web experiment, two-hop Authentik proof, result validation, and reproducible evaluation. No “first” or “only” claim is made.
+OpenAI, ChatGPT, Codex, and related marks belong to their respective owners
