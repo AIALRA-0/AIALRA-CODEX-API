@@ -123,6 +123,15 @@ function failureState() {
   ) {
     return "chatgpt_rate_limited";
   }
+  // ChatGPT can leave the composer mounted behind an expired-session modal.
+  // A covered editor is not proof that the account is usable.
+  if (
+    /your session has expired|session (?:has )?expired|please log in again|会话.*过期|登录.*过期/.test(
+      text,
+    )
+  ) {
+    return "chatgpt_login_required";
+  }
   if (!first(SELECTORS.composer) && /log in|sign up|登录|注册/.test(text)) {
     return "chatgpt_login_required";
   }

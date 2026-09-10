@@ -94,4 +94,11 @@ describe("shared visual tokens", () => {
     expect(source).toContain("!status.diagnosticEnabled");
     expect(source).toContain("生产接单，检查按钮已锁定");
   });
+
+  it("explains common ChatGPT account failures in user-facing language", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain('chatgpt_login_required: "登录已过期，请在对应浏览器中重新登录"');
+    expect(source).toContain('chatgpt_delivery_uncertain: "发送状态无法确认，系统不会自动重发"');
+    expect(source).toContain("chatGptErrorLabel(account.lastFailureCode)");
+  });
 });

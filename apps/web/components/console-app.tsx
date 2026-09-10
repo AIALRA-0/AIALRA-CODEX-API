@@ -1907,6 +1907,28 @@ const ACCOUNT_PLAN_LABELS: Record<ChatGptWebAccount["plan"], string> = {
   unknown: "未标注",
 };
 
+const CHATGPT_ERROR_LABELS: Record<string, string> = {
+  chatgpt_login_required: "登录已过期，请在对应浏览器中重新登录",
+  chatgpt_verification_required: "需要人工完成验证码或安全验证",
+  chatgpt_rate_limited: "账号正在限流冷却",
+  chatgpt_browser_busy: "浏览器正在执行其他任务",
+  chatgpt_web_pacing_required: "距离上次发送不足 90 秒",
+  chatgpt_delivery_uncertain: "发送状态无法确认，系统不会自动重发",
+  chatgpt_page_not_ready: "页面尚未准备好",
+  chatgpt_page_generation_blank: "助手没有生成可读取的正文",
+  chatgpt_page_rendering_failed: "页面明确显示生成失败",
+  chatgpt_output_incomplete: "回答尚未稳定完成",
+  chatgpt_output_selector_changed: "页面结构已变化，暂时无法读取回答",
+  chatgpt_mode_unavailable: "所选聊天模式当前不可用",
+  chatgpt_thinking_depth_unavailable: "所选思考深度当前不可用",
+  chatgpt_thinking_depth_unverified: "无法确认思考深度已经正确切换",
+};
+
+function chatGptErrorLabel(code: string | null | undefined) {
+  if (!code) return "未知错误";
+  return CHATGPT_ERROR_LABELS[code] ?? code;
+}
+
 const SLOT_LABELS: Record<ChatGptWebStatus["slots"][number]["state"], string> = {
   starting: "正在启动",
   idle: "空闲",
@@ -1951,8 +1973,8 @@ function qualificationFailureDetail(run: ChatGptWebQualificationRun): string {
   if (!item) return "—";
   const phase = item.failurePhase ? FAILURE_PHASE_LABELS[item.failurePhase] : "阶段未知";
   const diagnostic = item.diagnosticSummary;
-  if (!diagnostic) return `${phase} · ${item.errorCode ?? "未知错误"}`;
-  return `${phase} · 用户 ${diagnostic.userTurnCount} / 助手 ${diagnostic.assistantTurnCount} · ${item.errorCode ?? "未知错误"}`;
+  if (!diagnostic) return `${phase} · ${chatGptErrorLabel(item.errorCode)}`;
+  return `${phase} · 用户 ${diagnostic.userTurnCount} / 助手 ${diagnostic.assistantTurnCount} · ${chatGptErrorLabel(item.errorCode)}`;
 }
 
 function ChatGptWebChannel() {
@@ -2280,7 +2302,7 @@ function ChatGptWebChannel() {
                         </button>
                       </div>
                       {account.lastFailureCode ? (
-                        <span className="muted">{account.lastFailureCode}</span>
+                        <span className="muted">{chatGptErrorLabel(account.lastFailureCode)}</span>
                       ) : null}
                     </td>
                   </tr>

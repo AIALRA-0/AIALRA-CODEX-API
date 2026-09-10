@@ -151,6 +151,8 @@ node deploy/scripts/probe-chatgpt-web-readiness.mjs
 
 只有 `CHATGPT_WEB_DIAGNOSTIC_ENABLED=true` 时才能创建这些验收运行。生产接单模式会在控制台锁定检查按钮，API 返回 `chatgpt_web_diagnostic_disabled`，避免把关闭的诊断入口误报成账号或页面故障。使用 `ACTION=start` 进入诊断模式会先暂停新的网页任务，不影响 Codex 通道
 
+页面即使仍渲染编辑框，只要出现“会话已过期 / 请重新登录”模态框，也会立即判定为 `chatgpt_login_required`。该账号不会进入输入或发送阶段，控制台会显示可执行的中文原因
+
 - `readiness`：只读检查，不发送消息
 - `single_probe`：一次普通聊天，是启用网页通道的最低门槛
 - `chat_3`：连续 3 次普通聊天
