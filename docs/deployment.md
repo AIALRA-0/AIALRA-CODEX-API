@@ -160,6 +160,8 @@ sudo ACTION=start \
 
 控制台只会在诊断模式开启时允许创建 readiness 或真实探针。生产接单模式下按钮会锁定，API 明确返回 `chatgpt_web_diagnostic_disabled`；先运行上面的 `ACTION=start` 进入诊断模式，不要把诊断入口关闭误判成账号失效
 
+`ACTION=start` 会预先启用浏览器内部 Bridge，但 API 和 Worker 仍拒绝网页任务；探针通过后的 `ACTION=enable` 只重载 API 和 Worker，不再重启 Chromium，避免开关切换使刚验证的登录态失效
+
 ```bash
 # 真实网页探针通过后才把 CHATGPT_WEB_ADAPTER_ENABLED 切换为 true
 sudo ACTION=enable \

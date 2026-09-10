@@ -152,4 +152,20 @@ describe("single-page browser agent policy", () => {
     );
     expect(qualificationScript).toContain("async function waitForReadyHealth");
   });
+
+  it("opens production admission without restarting a freshly verified browser session", () => {
+    const enableScript = readFileSync(
+      new URL("../../../deploy/scripts/enable-chatgpt-web.sh", import.meta.url),
+      "utf8",
+    );
+
+    expect(enableScript).toContain(
+      "CHATGPT_WEB_ADAPTER_ENABLED=true CHATGPT_WEB_DIAGNOSTIC_ENABLED=true",
+    );
+    expect(enableScript).toContain("process.exit(b.enabled&&b.sandboxVerified");
+    expect(enableScript).toContain('"${compose[@]}" up --detach --force-recreate api worker');
+    expect(enableScript).not.toContain(
+      "up --detach --force-recreate api worker chatgpt-browser chatgpt-browser-b",
+    );
+  });
 });

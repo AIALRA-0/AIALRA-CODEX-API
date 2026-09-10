@@ -50,7 +50,12 @@ case "$ACTION" in
     set_flag false
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED true
     "${compose[@]}" build chatgpt-browser chatgpt-egress-proxy
-    "${compose[@]}" up --detach chatgpt-egress-proxy chatgpt-browser chatgpt-browser-b
+    # Keep the bridge ready for production requests while the API and Worker remain closed.
+    # This lets ACTION=enable open admission without restarting Chromium and invalidating
+    # an account session that just passed its real probe.
+    CHATGPT_WEB_ADAPTER_ENABLED=true CHATGPT_WEB_DIAGNOSTIC_ENABLED=true \
+      "${compose[@]}" up --detach --force-recreate \
+      chatgpt-egress-proxy chatgpt-browser chatgpt-browser-b
     wait_for_bridge chatgpt-browser
     wait_for_bridge chatgpt-browser-b
     echo "Visible browser pool started with the experiment disabled"
@@ -105,7 +110,7 @@ SQL
       *) echo "Qualification record has an invalid account slot" >&2; exit 1 ;;
     esac
     "${compose[@]}" exec -T "$bridge_service" node -e \
-      "fetch('http://127.0.0.1:13216/healthz').then(async r=>{const b=await r.json();process.exit(b.sandboxVerified&&b.extensionConnected&&b.pageReady&&b.authenticated?0:1)}).catch(()=>process.exit(1))"
+      "fetch('http://127.0.0.1:13216/healthz').then(async r=>{const b=await r.json();process.exit(b.enabled&&b.sandboxVerified&&b.extensionConnected&&b.pageReady&&b.authenticated?0:1)}).catch(()=>process.exit(1))"
     qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     succeeded="$("${compose[@]}" exec -T postgres psql -At -U router -d router \
       -v run_id="$QUALIFICATION_RUN_ID" <<'SQL'
@@ -197,7 +202,9 @@ SQL
     set_flag true
     set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
     set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$effective_concurrency"
-    "${compose[@]}" up --detach --force-recreate api worker chatgpt-browser chatgpt-browser-b
+    # Browsers were deliberately started with their internal bridge enabled by ACTION=start.
+    # Do not recreate them here: a Chromium restart can invalidate a freshly verified login.
+    "${compose[@]}" up --detach --force-recreate api worker
     echo "ChatGPT web account pool enabled at concurrency $effective_concurrency"
     ;;
   disable)
