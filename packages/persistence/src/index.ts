@@ -31,6 +31,7 @@ const { Pool } = pg;
 export function defaultChatGptWebStatus(now = new Date()): ChatGptWebStatus {
   return {
     configuredEnabled: false,
+    diagnosticEnabled: false,
     effectiveConcurrency: 0,
     maximumConcurrency: 1,
     activeTabs: 0,

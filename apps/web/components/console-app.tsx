@@ -116,6 +116,7 @@ interface ModelRecord {
 
 interface ChatGptWebStatus {
   configuredEnabled: boolean;
+  diagnosticEnabled: boolean;
   effectiveConcurrency: number;
   maximumConcurrency: number;
   activeTabs: number;
@@ -2085,6 +2086,15 @@ function ChatGptWebChannel() {
         }
       />
       <ErrorNotice message={error} />
+      {!status.diagnosticEnabled ? (
+        <section className="notice warning console-section" role="status">
+          <strong>真实网页检查当前已锁定</strong>
+          <p>
+            生产接单模式不会运行 readiness 或单探针。需要重新验证账号时，先由运维脚本进入诊断模式；
+            诊断模式会暂停新的网页任务，但不会影响 Codex 通道
+          </p>
+        </section>
+      ) : null}
       <section className="metrics console-section" aria-label="网页通道状态">
         <article className="metric">
           <small>生产状态</small>
@@ -2243,7 +2253,7 @@ function ChatGptWebChannel() {
                       <div className="action-row">
                         <button
                           className="button compact"
-                          disabled={Boolean(activeRun) || busy}
+                          disabled={!status.diagnosticEnabled || Boolean(activeRun) || busy}
                           onClick={() => {
                             setConfirmAccountId(account.accountId);
                             setConfirmSuite("readiness");
@@ -2253,7 +2263,7 @@ function ChatGptWebChannel() {
                         </button>
                         <button
                           className="button compact"
-                          disabled={Boolean(activeRun) || busy}
+                          disabled={!status.diagnosticEnabled || Boolean(activeRun) || busy}
                           onClick={() => {
                             setConfirmAccountId(account.accountId);
                             setConfirmSuite("single_probe");
@@ -2304,7 +2314,7 @@ function ChatGptWebChannel() {
             <button
               className={suite === "single_probe" ? "button primary" : "button"}
               key={suite}
-              disabled={Boolean(activeRun)}
+              disabled={!status.diagnosticEnabled || Boolean(activeRun)}
               onClick={() => setConfirmSuite(suite)}
             >
               {QUALIFICATION_LABELS[suite]}
@@ -2318,6 +2328,10 @@ function ChatGptWebChannel() {
           </p>
         ) : null}
         <p className="muted">单次真实探针是启用网页通道的最低门槛；其余套件用于可选强化观察。</p>
+        <p className="muted">
+          当前模式：
+          {status.diagnosticEnabled ? "诊断已开启，可以运行检查" : "生产接单，检查按钮已锁定"}
+        </p>
       </Disclosure>
 
       <section className="console-section">

@@ -293,6 +293,7 @@ export class GovernanceController {
       : 90;
     return {
       ...status,
+      diagnosticEnabled: process.env.CHATGPT_WEB_DIAGNOSTIC_ENABLED === "true",
       accounts,
       retryAfter:
         status.rateLimitState === "cooldown"
@@ -388,6 +389,14 @@ export class GovernanceController {
     if (!idempotencyKey) {
       throw new BadRequestException({
         error: { code: "idempotency_key_required", message: "Idempotency-Key is required." },
+      });
+    }
+    if (process.env.CHATGPT_WEB_DIAGNOSTIC_ENABLED !== "true") {
+      throw new ConflictException({
+        error: {
+          code: "chatgpt_web_diagnostic_disabled",
+          message: "当前处于生产接单模式，真实网页检查已锁定。请先通过部署脚本进入诊断模式。",
+        },
       });
     }
     const parsed = z

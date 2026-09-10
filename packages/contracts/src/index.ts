@@ -485,6 +485,7 @@ export type ChatGptWebAccount = z.infer<typeof ChatGptWebAccountSchema>;
 
 export const ChatGptWebStatusSchema = z.object({
   configuredEnabled: z.boolean(),
+  diagnosticEnabled: z.boolean().default(false),
   effectiveConcurrency: z.number().int().min(0).max(4),
   maximumConcurrency: z.number().int().min(1).max(4),
   activeTabs: z.number().int().nonnegative(),

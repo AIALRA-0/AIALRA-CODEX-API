@@ -875,6 +875,7 @@ export interface components {
     };
     ChatGptWebStatus: {
       configuredEnabled: boolean;
+      diagnosticEnabled: boolean;
       effectiveConcurrency: number;
       maximumConcurrency: number;
       activeTabs: number;

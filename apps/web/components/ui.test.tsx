@@ -87,4 +87,11 @@ describe("shared visual tokens", () => {
     expect(source).toContain("executionChannels");
     expect(css).toMatch(/\.choice-card:has\(input:checked\)/);
   });
+
+  it("explains and locks real web probes while diagnostic mode is disabled", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain("真实网页检查当前已锁定");
+    expect(source).toContain("!status.diagnosticEnabled");
+    expect(source).toContain("生产接单，检查按钮已锁定");
+  });
 });

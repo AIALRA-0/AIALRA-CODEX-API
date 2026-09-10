@@ -24,6 +24,7 @@ describe("AIALRA Model Router API", () => {
     process.env.API_KEY_PEPPER = "synthetic-api-key-pepper-with-more-than-32-bytes";
     process.env.BOOTSTRAP_ADMIN_TOKEN = "synthetic-bootstrap-token";
     process.env.WEBAUTHN_ORIGIN = "https://router.example.com";
+    process.env.CHATGPT_WEB_DIAGNOSTIC_ENABLED = "true";
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication();
     await app.init();
@@ -233,9 +234,25 @@ describe("AIALRA Model Router API", () => {
       .set("Authorization", `Bearer ${bootstrapKey}`)
       .expect(200);
     expect(response.body.configuredEnabled).toBe(false);
+    expect(response.body.diagnosticEnabled).toBe(true);
     expect(response.body.effectiveConcurrency).toBe(0);
     expect(response.body.circuitState).toBe("qualification_required");
     expect(JSON.stringify(response.body)).not.toMatch(/cookie|token|conversationUrl|profilePath/i);
+  });
+
+  it("rejects qualification before queuing when diagnostic mode is disabled", async () => {
+    process.env.CHATGPT_WEB_DIAGNOSTIC_ENABLED = "false";
+    try {
+      const response = await request(app.getHttpServer())
+        .post("/api/v1/chatgpt-web/qualification-runs")
+        .set("Authorization", `Bearer ${bootstrapKey}`)
+        .set("Idempotency-Key", "diagnostic-disabled")
+        .send({ suite: "readiness", accountId: "account-a" })
+        .expect(409);
+      expect(response.body.error.code).toBe("chatgpt_web_diagnostic_disabled");
+    } finally {
+      process.env.CHATGPT_WEB_DIAGNOSTIC_ENABLED = "true";
+    }
   });
 
   it("lists pool slots without bridge addresses and reactivates a qualified account", async () => {

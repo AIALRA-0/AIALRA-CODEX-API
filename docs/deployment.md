@@ -158,6 +158,8 @@ sudo ACTION=start \
 
 每个账号至少完成一次成功的 `single_probe` 真实任务后，才允许该账号加入网页池；每账号并发固定为 1，`full_10` 仍可用于强化观察，任何超时、限流、验证码、登录失效或不确定结果都不自动重试
 
+控制台只会在诊断模式开启时允许创建 readiness 或真实探针。生产接单模式下按钮会锁定，API 明确返回 `chatgpt_web_diagnostic_disabled`；先运行上面的 `ACTION=start` 进入诊断模式，不要把诊断入口关闭误判成账号失效
+
 ```bash
 # 真实网页探针通过后才把 CHATGPT_WEB_ADAPTER_ENABLED 切换为 true
 sudo ACTION=enable \

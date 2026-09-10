@@ -219,7 +219,12 @@ export class ChatGptWebDiagnosticClient {
       const payload = (await response.json().catch(() => null)) as {
         error?: { code?: string };
       } | null;
-      throw new Error(payload?.error?.code ?? `chatgpt_browser_unavailable:${response.status}`);
+      const code = payload?.error?.code;
+      throw new Error(
+        response.status === 404 && code === "not_found"
+          ? "chatgpt_web_diagnostic_disabled"
+          : (code ?? `chatgpt_browser_unavailable:${response.status}`),
+      );
     }
     this.lastInvocationAt = Date.now();
     let outputText = "";

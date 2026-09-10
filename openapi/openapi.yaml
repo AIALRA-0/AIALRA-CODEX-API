@@ -1478,6 +1478,7 @@ components:
       required:
         [
           configuredEnabled,
+          diagnosticEnabled,
           effectiveConcurrency,
           maximumConcurrency,
           activeTabs,
@@ -1519,6 +1520,7 @@ components:
         ]
       properties:
         configuredEnabled: { type: boolean }
+        diagnosticEnabled: { type: boolean }
         effectiveConcurrency: { type: integer, minimum: 0, maximum: 4 }
         maximumConcurrency: { type: integer, minimum: 1, maximum: 4 }
         activeTabs: { type: integer, minimum: 0 }
