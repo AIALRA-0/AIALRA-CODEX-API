@@ -11,6 +11,7 @@ import {
 
 import {
   configuredChatGptWebAccountConfigs,
+  DATABASE_MIGRATION_SQL,
   InMemoryJobRepository,
   PostgresJobRepository,
   reconstructHistoricalJobEventData,
@@ -237,6 +238,7 @@ describe("InMemoryJobRepository", () => {
       prefix: "amr_000000000000",
       digest: "synthetic-digest",
       scopes: ["jobs:read"],
+      executionChannels: ["codex" as const],
       executionPolicy: {
         defaultPreset: "restricted" as const,
         allowedPresets: ["restricted" as const],
@@ -388,6 +390,15 @@ describe("InMemoryJobRepository", () => {
 });
 
 describe("PostgresJobRepository", () => {
+  it("migrates existing API keys to explicit channel permissions without escalation", () => {
+    expect(DATABASE_MIGRATION_SQL).toContain("ADD COLUMN IF NOT EXISTS execution_channels");
+    expect(DATABASE_MIGRATION_SQL).toContain(
+      "WHEN 'admin' = ANY(scopes) OR 'chatgpt:web' = ANY(scopes)",
+    );
+    expect(DATABASE_MIGRATION_SQL).toContain("ELSE ARRAY['codex']::TEXT[]");
+    expect(DATABASE_MIGRATION_SQL).toContain("ALTER COLUMN execution_channels SET NOT NULL");
+  });
+
   it("types the web-account pacing cutoff as a timestamp", async () => {
     const repository = new PostgresJobRepository(
       "postgresql://unused:unused@127.0.0.1:1/unused",

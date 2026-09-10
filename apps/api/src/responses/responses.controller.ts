@@ -101,6 +101,7 @@ export class ResponsesController {
       idempotencyKey,
       request.executionPolicy,
       request.scopes ?? [],
+      request.executionChannels,
     );
     response.setHeader(
       "X-AIALRA-Data-Retention",

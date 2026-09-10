@@ -52,6 +52,7 @@ describe("AIALRA Model Router API", () => {
       defaultPreset: "full",
       allowedPresets: ["restricted", "confirm", "full"],
     });
+    expect(created.body.executionChannels).toEqual(["codex", "chatgpt_web"]);
   });
 
   it("creates idempotent jobs", async () => {
@@ -337,10 +338,93 @@ describe("AIALRA Model Router API", () => {
           },
         })
         .expect(403);
-      expect(response.body.error.code).toBe("chatgpt_web_scope_required");
+      expect(response.body.error.code).toBe("execution_channel_not_allowed");
     } finally {
       process.env.CHATGPT_WEB_ADAPTER_ENABLED = "false";
     }
+  });
+
+  it("enforces Codex-only, ChatGPT-only, and dual-channel API keys", async () => {
+    const codexOnly = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "codex-only-channel-key")
+      .send({
+        name: "Codex only",
+        scopes: ["jobs:read", "jobs:write", "quota:read"],
+        executionChannels: ["codex"],
+      })
+      .expect(201);
+    expect(codexOnly.body.executionChannels).toEqual(["codex"]);
+
+    const chatOnly = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "chat-only-channel-key")
+      .send({
+        name: "Chat only",
+        scopes: ["jobs:read", "jobs:write", "quota:read", "chatgpt:web"],
+        executionChannels: ["chatgpt_web"],
+      })
+      .expect(201);
+    expect(chatOnly.body.executionChannels).toEqual(["chatgpt_web"]);
+
+    const deniedCodex = await request(app.getHttpServer())
+      .post("/api/v1/jobs")
+      .set("Authorization", `Bearer ${chatOnly.body.key}`)
+      .set("Idempotency-Key", "chat-only-codex-denied")
+      .send({ task: { objective: "This Codex task must be denied" } })
+      .expect(403);
+    expect(deniedCodex.body.error.code).toBe("execution_channel_not_allowed");
+
+    const dual = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "dual-channel-key")
+      .send({
+        name: "Both channels",
+        scopes: ["jobs:read", "jobs:write", "quota:read", "chatgpt:web"],
+        executionChannels: ["codex", "chatgpt_web"],
+      })
+      .expect(201);
+    expect(dual.body.executionChannels).toEqual(["codex", "chatgpt_web"]);
+
+    const legacy = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "legacy-dual-channel-key")
+      .send({
+        name: "Legacy both channels",
+        scopes: ["jobs:read", "jobs:write", "chatgpt:web"],
+      })
+      .expect(201);
+    expect(legacy.body.executionChannels).toEqual(["codex", "chatgpt_web"]);
+  });
+
+  it("rejects contradictory ChatGPT channel and scope settings", async () => {
+    const response = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "channel-scope-mismatch")
+      .send({
+        name: "Invalid chat key",
+        scopes: ["jobs:read", "jobs:write"],
+        executionChannels: ["chatgpt_web"],
+      })
+      .expect(400);
+    expect(response.body.error.code).toBe("execution_channel_scope_mismatch");
+
+    const irrelevantCodexPermission = await request(app.getHttpServer())
+      .post("/api/v1/keys")
+      .set("Idempotency-Key", "chat-only-with-codex-permission")
+      .send({
+        name: "Invalid Chat permission mix",
+        scopes: ["jobs:read", "jobs:write", "chatgpt:web"],
+        executionChannels: ["chatgpt_web"],
+        executionPolicy: {
+          defaultPreset: "full",
+          allowedPresets: ["restricted", "confirm", "full"],
+        },
+      })
+      .expect(400);
+    expect(irrelevantCodexPermission.body.error.code).toBe(
+      "codex_permission_without_codex_channel",
+    );
   });
 
   it("rejects invalid legacy validation rules before creating a job", async () => {

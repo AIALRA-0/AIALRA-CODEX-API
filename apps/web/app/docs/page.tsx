@@ -31,6 +31,7 @@ export default function DocsPage() {
         <div className="doc-layout">
           <nav className="doc-nav" aria-label="文档章节">
             <a href="#quickstart">快速开始</a>
+            <a href="#keys">密钥权限</a>
             <a href="#choose">选择调用方式</a>
             <a href="#contract">任务合同</a>
             <a href="#events">事件流</a>
@@ -52,6 +53,23 @@ export default function DocsPage() {
               <pre className="code-panel">{requestExample}</pre>
               <p>
                 本页只使用合成示例。真实任务、额度和密钥需要通过 Authentik 控制台或 API Key 访问
+              </p>
+            </section>
+            <section id="keys">
+              <h2>密钥权限</h2>
+              <p>
+                创建密钥时先选择可调用通道：仅 Codex、仅 ChatGPT，或两者皆可。服务端会检查每个任务的
+                <code>executionChannel</code>，因此“仅 ChatGPT”密钥不能创建 Codex 任务，“仅
+                Codex”密钥也不能创建网页任务
+              </p>
+              <p>
+                Codex
+                执行权限是另一项独立设置：受限模式只读且无网络，执行前确认模式需要管理员批准，完全访问模式可写本次隔离工作区并访问网络。该设置不改变
+                ChatGPT 网页任务的能力
+              </p>
+              <p>
+                聊天和搜索默认使用独立临时对话；Deep Research
+                使用非临时对话，并会在调用响应中明确返回数据保留方式
               </p>
             </section>
             <section id="choose">

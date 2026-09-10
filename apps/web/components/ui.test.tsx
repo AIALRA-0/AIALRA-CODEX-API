@@ -77,4 +77,14 @@ describe("shared visual tokens", () => {
     expect(css).toMatch(/\.check-row\s*\{/);
     expect(css).toMatch(/input\[type="checkbox"\]/);
   });
+
+  it("shows API key channels separately from Codex workspace permissions", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain("仅 Codex");
+    expect(source).toContain("仅 ChatGPT");
+    expect(source).toContain("Codex + ChatGPT");
+    expect(source).toContain("Codex 执行权限不适用");
+    expect(source).toContain("executionChannels");
+    expect(css).toMatch(/\.choice-card:has\(input:checked\)/);
+  });
 });

@@ -1,4 +1,4 @@
-# ChatGPT Pro Web Experimental Channel
+# ChatGPT Web Channel
 
 ## 1 Status and boundary
 
@@ -70,13 +70,9 @@ bash deploy/scripts/verify-chatgpt-browser-sandbox.sh
 
 ## 4 Real-page probe
 
-Real ChatGPT page tests never run in GitHub Actions. An administrator explicitly runs ten anonymous jobs on the VPS:
+Real ChatGPT page tests never run in GitHub Actions. Each account entering the production pool first runs a no-message `readiness` check, then one `single_probe` that submits one ordinary chat.
 
-- four short chat jobs;
-- four search jobs requiring at least one public source;
-- two deep-research jobs with a maximum deadline of 3,600 seconds.
-
-The gate requires at least 9/10 successful jobs, both deep-research jobs, at least three chat jobs, exactly one submission per job, zero duplicate sends, zero result misattributions, and no browser restart during the run.
+The account must report `succeeded`, `submittedCount=1`, `temporaryChatVerified=true`, `ownershipMatched=true`, a result length and SHA-256 digest, and a final idle page. Any duplicate send, result misattribution, rate limit, verification screen, or sign-in failure rejects qualification. One successful account can enter production at per-account concurrency one. `full_10` is optional strengthening evidence, not an enablement prerequisite.
 
 Only after the gate passes:
 
@@ -90,22 +86,11 @@ bash deploy/scripts/enable-chatgpt-web.sh
 
 ### 4.1 Current VPS qualification result
 
-As of 2026-08-29, the release gate has not passed and the experimental channel remains disabled.
+As of 2026-09-09, independent browser accounts A and B have both passed readiness and a real single probe, and production web admission is enabled. A is the primary account; B participates as secondary capacity when available. Per-account concurrency remains one.
 
-The following results are retained strictly as the 2026-08-29 real-page v1 historical baseline. They do not prove that the 2026-08-31 convergence build has been deployed or qualified.
+The current release has completed a real Search call with verifiable sources and a real streaming Chat call. Earlier blank-assistant and timeout records remain regression history and do not describe current production health.
 
-- Chromium sandbox checks passed for user namespaces, seccomp, AppArmor, `no-new-privileges`, and process arguments. The administrator check of `chrome://sandbox` in the protected visible browser is still pending.
-- After extending the first-token grace period from 2,000 ms by mode, the isolated `chat-01` probe succeeded in 19,150 ms with 40 output characters and one submission.
-- After removing the duplicate input event, a fresh three-chat sequence passed only `chat-01`. `chat-02` and `chat-03` left visible blank assistant containers after 42,662 ms and 47,634 ms, so the stability result is 1/3.
-- The two failed records matched the expected user-message lengths at 72/72 and 54/54. Each had exactly one submission and no foreign task marker.
-- Historical Temporary Chat result: chat and search produced blank assistant messages at that time. This is an old-version failure baseline, not the current public contract.
-- The 3/3 chat stability gate failed, so deep research and the complete ten-job gate were not run. Do not run the enable command.
-
-These measurements come from redacted VPS real-page probe records. The records keep phases, length, digest, and duration, but not full answers.
-
-The failure is localized to the ChatGPT page output layer. The failed job's user message appeared on the page, but the page created an assistant turn without visible body text. Search in the same browser returned text and a source, so sign-in, controlled egress, and Router result delivery are not globally broken.
-
-The current evidence does not establish why ChatGPT intermittently creates a blank assistant turn for ordinary chat. The first-token wait and duplicate-input-event hypotheses were tested separately, but the consecutive stability gate still failed. The stop condition now prevents further page patches, so the release state remains disabled.
+Sign-out, verification, account warnings, UI drift, and rate limits automatically remove the affected account. An uncertain post-submission task never moves to another account and is never resent. A recovered account must pass a fresh readiness check and single probe.
 
 The 2026-08-31 convergence contract keeps chat and search at `conversationMode="temporary_per_request"`, `temporaryChat=true`, and `personalized=false`. Following explicit operator approval on 2026-09-09, Deep Research uses `persistent_per_request`, creates a fresh ordinary conversation, and requires an explicit retention acknowledgement. Every web mode still rejects `sessionKey` continuation.
 

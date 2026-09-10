@@ -16,7 +16,12 @@ import {
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-import { ExecutionPolicySchema, type ExecutionPolicy } from "@aialra/contracts";
+import {
+  ApiExecutionChannelsSchema,
+  ExecutionPolicySchema,
+  type ExecutionChannel,
+  type ExecutionPolicy,
+} from "@aialra/contracts";
 import type { JobRepository, StoredApiKey } from "@aialra/persistence";
 import { generateApiKey, hashApiKey, requestHash } from "@aialra/security";
 
@@ -43,6 +48,7 @@ const CreateKeySchema = z
       .min(1),
     rateLimitPerMinute: z.number().int().min(1).max(10_000).default(60),
     expiresAt: z.string().datetime().nullable().optional(),
+    executionChannels: ApiExecutionChannelsSchema.optional(),
     executionPolicy: ExecutionPolicySchema.default({
       defaultPreset: "restricted",
       allowedPresets: ["restricted"],
@@ -74,6 +80,7 @@ export class KeysController {
     options: {
       idempotencyKey?: string;
       actorScopes: string[];
+      actorExecutionChannels: ExecutionChannel[];
       actorExecutionPolicy: ExecutionPolicy;
       isAdmin: boolean;
       recentAuthentication: boolean;
@@ -90,6 +97,42 @@ export class KeysController {
       });
     }
     const input = parsed.data;
+    const executionChannels =
+      input.executionChannels ??
+      (input.scopes.includes("admin") || input.scopes.includes("chatgpt:web")
+        ? (["codex", "chatgpt_web"] as const)
+        : (["codex"] as const));
+    const hasWebScope = input.scopes.includes("admin") || input.scopes.includes("chatgpt:web");
+    if (executionChannels.includes("chatgpt_web") !== hasWebScope) {
+      throw new BadRequestException({
+        error: {
+          code: "execution_channel_scope_mismatch",
+          message:
+            "ChatGPT 网页通道必须同时出现在 executionChannels，并具有 chatgpt:web 或 admin 作用域。",
+        },
+      });
+    }
+    if (input.scopes.includes("admin") && executionChannels.length !== 2) {
+      throw new BadRequestException({
+        error: {
+          code: "admin_channel_restriction_unsupported",
+          message: "管理员密钥固定允许 Codex 与 ChatGPT 两个通道，不能标记为单通道密钥。",
+        },
+      });
+    }
+    if (
+      !executionChannels.includes("codex") &&
+      (input.executionPolicy.defaultPreset !== "restricted" ||
+        input.executionPolicy.allowedPresets.length !== 1 ||
+        input.executionPolicy.allowedPresets[0] !== "restricted")
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: "codex_permission_without_codex_channel",
+          message: "仅 ChatGPT 密钥不能配置 Codex 工作区权限。",
+        },
+      });
+    }
     if (input.scopes.includes("admin") && !options.isAdmin) {
       throw new ForbiddenException({
         error: {
@@ -103,6 +146,17 @@ export class KeysController {
         error: {
           code: "scope_escalation_denied",
           message: "A key cannot grant scopes its creator lacks.",
+        },
+      });
+    }
+    if (
+      !options.isAdmin &&
+      executionChannels.some((channel) => !options.actorExecutionChannels.includes(channel))
+    ) {
+      throw new ForbiddenException({
+        error: {
+          code: "execution_channel_escalation_denied",
+          message: "新密钥不能获得创建者自己没有的调用通道。",
         },
       });
     }
@@ -151,6 +205,7 @@ export class KeysController {
       prefix: generated.prefix,
       digest: hashApiKey(generated.plaintext, pepper),
       scopes: input.scopes,
+      executionChannels: [...executionChannels],
       executionPolicy: input.executionPolicy,
       rateLimitPerMinute: input.rateLimitPerMinute,
       expiresAt:
@@ -194,6 +249,7 @@ export class KeysController {
       metadata: {
         prefix: saved.record.prefix,
         scopes: saved.record.scopes,
+        executionChannels: saved.record.executionChannels,
         executionPolicy: saved.record.executionPolicy,
         replayed: saved.replayed,
       },
@@ -204,6 +260,7 @@ export class KeysController {
       name: saved.record.name,
       prefix: saved.record.prefix,
       scopes: saved.record.scopes,
+      executionChannels: saved.record.executionChannels,
       executionPolicy: saved.record.executionPolicy,
       rateLimitPerMinute: saved.record.rateLimitPerMinute,
       expiresAt: saved.record.expiresAt,
@@ -229,6 +286,7 @@ export class KeysController {
         ...((body ?? {}) as object),
         name: "Bootstrap administrator",
         scopes: ["admin"],
+        executionChannels: ["codex", "chatgpt_web"],
         executionPolicy: {
           defaultPreset: "full",
           allowedPresets: ["restricted", "confirm", "full"],
@@ -237,6 +295,7 @@ export class KeysController {
       "bootstrap",
       {
         actorScopes: ["admin"],
+        actorExecutionChannels: ["codex", "chatgpt_web"],
         actorExecutionPolicy: {
           defaultPreset: "full",
           allowedPresets: ["restricted", "confirm", "full"],
@@ -277,6 +336,7 @@ export class KeysController {
     return this.createRecord(body, request.callerId ?? "unknown", {
       idempotencyKey,
       actorScopes: request.scopes ?? [],
+      actorExecutionChannels: request.executionChannels ?? ["codex"],
       actorExecutionPolicy: request.executionPolicy ?? {
         defaultPreset: "restricted",
         allowedPresets: ["restricted"],

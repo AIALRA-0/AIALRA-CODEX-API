@@ -4,6 +4,8 @@ This is a task-backed compatibility gateway, not a complete implementation of ev
 
 ## Authentication and account selection
 
+API keys carry two independent controls. `executionChannels` allows `codex`, `chatgpt_web`, or both and is enforced on every new task. `executionPolicy` controls only the Codex workspace preset (`restricted`, `confirm`, or `full`); it does not grant a missing channel. Web access additionally requires the `chatgpt:web` scope. Existing keys without `executionChannels` preserve their old behavior: keys with `admin` or `chatgpt:web` retain both channels, while other keys retain Codex only.
+
 Codex uses the Runner's configured Codex credential directory. The `chatgpt_web` account pool uses separate browser profiles. Changing a browser account does **not** change Codex credentials. Multiple web accounts do not constitute a multi-account Codex pool.
 
 Web administrators can PATCH an account's `priority` (integer 0–100, default 0). Higher priority is preferred **only among eligible accounts**. Busy, unqualified, disabled, cooling-down, or pacing-blocked accounts are excluded. Equal-priority accounts retain oldest-submission-first scheduling. Set the primary to 100 and overflow accounts to 0. Priority is not a subscription label and never bypasses cooldown or qualification.

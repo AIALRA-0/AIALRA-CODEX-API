@@ -14,6 +14,7 @@ import Ajv from "ajv";
 
 import {
   type CreateJobRequestInput,
+  type ExecutionChannel,
   type ExecutionPolicy,
   type Job,
   type JobEvent,
@@ -76,6 +77,10 @@ export class JobsService {
     idempotencyKey: string | null,
     executionPolicy: ExecutionPolicy = RESTRICTED_EXECUTION_POLICY,
     callerScopes: string[] = [],
+    allowedExecutionChannels: ExecutionChannel[] = callerScopes.includes("admin") ||
+    callerScopes.includes("chatgpt:web")
+      ? ["codex", "chatgpt_web"]
+      : ["codex"],
   ): Promise<Job> {
     if (process.env.JOB_SUBMISSION_ENABLED === "false") {
       throw new BadRequestException({
@@ -86,17 +91,31 @@ export class JobsService {
       });
     }
     const parsedTask = TaskContractSchema.parse(input.task);
+    if (
+      !callerScopes.includes("admin") &&
+      !allowedExecutionChannels.includes(parsedTask.executionChannel)
+    ) {
+      throw new ForbiddenException({
+        error: {
+          code: "execution_channel_not_allowed",
+          message:
+            parsedTask.executionChannel === "codex"
+              ? "当前 API 密钥只允许调用聊天通道，不能创建 Codex 任务。"
+              : "当前 API 密钥只允许调用 Codex 通道，不能创建 ChatGPT 网页任务。",
+        },
+      });
+    }
     if (parsedTask.executionChannel === "chatgpt_web") {
       if (process.env.CHATGPT_WEB_ADAPTER_ENABLED !== "true") {
         throw new ConflictException({
-          error: { code: "chatgpt_web_disabled", message: "ChatGPT 网页实验通道尚未启用。" },
+          error: { code: "chatgpt_web_disabled", message: "ChatGPT 网页通道尚未启用。" },
         });
       }
       if (!callerScopes.includes("admin") && !callerScopes.includes("chatgpt:web")) {
         throw new ForbiddenException({
           error: {
             code: "chatgpt_web_scope_required",
-            message: "当前 API 密钥没有 ChatGPT 网页实验通道权限。",
+            message: "当前 API 密钥没有 ChatGPT 网页通道权限。",
           },
         });
       }
@@ -348,6 +367,7 @@ export class JobsService {
     batchKey: string | null,
     executionPolicy: ExecutionPolicy = RESTRICTED_EXECUTION_POLICY,
     callerScopes: string[] = [],
+    allowedExecutionChannels?: ExecutionChannel[],
   ): Promise<Job[]> {
     return Promise.all(
       requests.map((request, index) =>
@@ -357,6 +377,7 @@ export class JobsService {
           batchKey ? `${batchKey}:${index}` : null,
           executionPolicy,
           callerScopes,
+          allowedExecutionChannels,
         ),
       ),
     );

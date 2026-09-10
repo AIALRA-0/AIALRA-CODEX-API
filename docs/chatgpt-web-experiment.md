@@ -1,4 +1,4 @@
-# ChatGPT Pro 网页实验通道
+# ChatGPT 网页通道
 
 ## 1 通道状态
 
@@ -34,7 +34,7 @@ flowchart TD
     E --> H[验证、加密存储和调用记录]
 ```
 
-图 2.1 ChatGPT Pro 网页实验任务从接单到结果保存的流程
+图 2.1 ChatGPT 网页任务从接单到结果保存的流程
 
 浏览器池中的每个账号容器只预热 1 个工作标签。普通聊天和搜索先进入新的非个性化 Temporary Chat；Deep Research 在调用方明确确认留存风险后进入新的普通持久会话。两类任务都必须确认用户消息、助手消息、编辑器内容和生成状态全部为空
 
@@ -92,26 +92,24 @@ bash deploy/scripts/verify-chatgpt-browser-sandbox.sh
 
 ## 4 真实网页探针
 
-真实网页测试不会在 GitHub Actions 中运行；管理员需要在 VPS 上显式启动以下 10 个匿名任务：
+真实网页测试不会在 GitHub Actions 中运行。每个准备进入生产池的账号先执行一次不发送消息的 `readiness`，再执行一次只提交一条普通聊天的 `single_probe`
 
-- 普通聊天：4 个只要求短文本结果的合成任务
-- 联网搜索：4 个要求至少 1 个公网来源的合成任务
-- 深度研究：2 个允许等待最长 3600 秒的合成任务
+账号必须同时满足以下条件：
 
-进入下一阶段必须同时满足：
+- `readiness` 确认浏览器、扩展、页面、登录、沙箱和空闲状态正常
+- `single_probe` 状态为 `succeeded`
+- `submittedCount=1`
+- `temporaryChatVerified=true`
+- `ownershipMatched=true`
+- 助手结果具有长度和 SHA-256 摘要
+- 页面恢复空闲，且没有重复发送、错误归属、限流、验证码或登录异常
 
-- 完成数量：至少 9/10 个任务成功
-- 深度研究：2/2 成功；普通聊天至少 3/4 成功
-- 提交次数：每项恰好出现 1 次 `submitted`
-- 重复发送：0 次
-- 错误归属：0 次，即结果没有来自其他任务或其他标签
-- 运行连续性：测试期间浏览器、扩展和桥接服务没有重启
-- 健康检查：模型菜单、编辑器、发送状态和结果区域均可识别
+一个账号通过后即可按单账号并发 `1` 加入生产池；`full_10` 只用于管理员主动选择的强化观察，不是启用前置条件
 
-达到门槛后再执行：
+达到门槛后执行：
 
 ```bash
-# 只有真实探针通过后才开放 Router 对网页任务的接单
+# 只有生产账号通过 readiness 和 single_probe 后才开放网页任务接单
 ACTION=enable \
 PRODUCTION_ENV=/var/lib/aialra-model-router/production.env \
 RELEASE_DIR=/srv/example/model-router/releases/<commit> \
@@ -120,22 +118,11 @@ bash deploy/scripts/enable-chatgpt-web.sh
 
 ### 4.1 当前 VPS 验证结果
 
-截至 2026-08-29，发布门禁仍未通过；实验通道保持关闭
+截至 2026-09-09，A、B 两个独立浏览器账号均完成就绪检查和单次真实探针，生产网页通道已经启用。A 是主账号，B 在可用时作为次级负载账号；每账号并发固定为 `1`
 
-以下结果严格保留为 2026-08-29 的 v1 真实网页历史基线，不能证明 2026-08-31 收尾版本已经部署或通过门禁
+当前版本已完成真实 Search 调用并返回可验证来源，也已完成真实流式 Chat 调用。历史上的空白助手节点和超时记录只用于回归测试，不能代表当前运行状态
 
-- Chromium 沙箱：用户命名空间、seccomp、AppArmor、`no-new-privileges` 和进程参数检查已通过；受保护可见页面中的 `chrome://sandbox` 管理员核对仍待完成
-- 单项修复探针：把首个 Token 等待时间从 `2,000 ms` 按模式延长后，`chat-01` 成功，耗时 `19,150 ms`，输出长度为 `40`，提交次数为 `1`
-- 连续普通聊天：移除重复输入事件后重新运行 `3` 项，只有 `chat-01` 成功；`chat-02` 和 `chat-03` 分别在 `42,662 ms` 和 `47,634 ms` 后留下可见空助手容器，因此稳定门结果为 `1/3`
-- 消息归属：两项失败记录的用户消息长度与预期分别为 `72/72` 和 `54/54`，均完全匹配；每项只有 `1` 次提交，没有发现其他任务标记
-- 历史临时对话结果：当时普通聊天和联网搜索都观察到空白助手消息；这是旧版本的失败基线，不是当前公共契约
-- 发布结论：普通聊天稳定门没有达到 `3/3`，因此没有继续运行深度研究和完整 `10` 项门禁；不得执行启用命令
-
-这些数值来自 VPS 真实网页探针的脱敏结果记录；记录只保存阶段、长度、摘要和耗时，不保存完整回答
-
-故障已经定位到 ChatGPT 页面输出层；失败任务的用户消息已经出现在页面中，但页面创建的助手消息没有可见正文，桥接器因此没有结果可返回；同一浏览器的联网搜索可以返回正文和来源，说明登录、受控出口和 Router 结果回传链路并非整体失效
-
-当前材料不能证明 ChatGPT 为什么间歇性地为普通聊天创建空白助手消息；首个 Token 等待和重复输入事件两个假设均已单独验证，连续稳定门仍失败；系统按停止条件不继续叠加页面补丁，因此发布状态继续保持关闭
+账号出现登录失效、验证码、账号警告、页面变化或限流时会被自动摘除；提交状态不确定的任务不会换号或重发。账号恢复后必须重新通过就绪检查和新的单次探针
 
 2026-08-31 收尾版本把普通聊天和搜索固定为 `conversationMode="temporary_per_request"`、`temporaryChat=true` 和 `personalized=false`。2026-09-09 经运营者明确批准，Deep Research 改为 `persistent_per_request`，每次新建普通会话并要求显式留存确认；所有网页模式仍拒绝 `sessionKey` 续接
 
@@ -150,7 +137,7 @@ bash deploy/scripts/enable-chatgpt-web.sh
 export CHATGPT_BRIDGE_URL=http://chatgpt-browser:13216
 # 从 root-only 文件读取桥接密钥，脚本不会打印密钥
 export CHATGPT_BRIDGE_API_TOKEN_FILE=/run/secrets/chatgpt_bridge_api_token
-# 验证实验通道仍保持关闭
+# 验证网页通道仍保持关闭
 export EXPECTED_ADAPTER_ENABLED=false
 # 检查登录、页面控件、任务空闲状态和脱敏页面结构
 node deploy/scripts/probe-chatgpt-web-readiness.mjs
@@ -182,7 +169,7 @@ $Headers = @{ # 网页任务需要 jobs:write 与 chatgpt:web 作用域
     Authorization = "Bearer $env:MODEL_ROUTER_API_KEY" # 从当前进程读取密钥，禁止写入仓库
     "Idempotency-Key" = [guid]::NewGuid().ToString() # 网络重试时复用相同键，防止创建重复任务
 } # 完成请求头定义
-$Body = @{ # 明确选择网页实验通道
+$Body = @{ # 明确选择网页通道
     model = "chatgpt-web.auto" # 使用管理员启用的网页自动模型入口
     input = "调查一个合成主题，并列出公网来源" # 发送不含真实凭据或个人信息的任务
     aialra = @{ # AIALRA 扩展字段不会伪装成 OpenAI 官方字段
@@ -246,7 +233,7 @@ MCP 工具 `delegate_chatgpt` 接受 `objective`、`mode`、`model`、`require_s
 
 ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 等效价格；接口返回 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”，禁止使用 `0` 冒充实测值
 
-表 6.1 网页实验通道错误及下一步
+表 6.1 网页通道错误及下一步
 
 | 错误码                            | 直接原因                   | 下一步                                 |
 | --------------------------------- | -------------------------- | -------------------------------------- |

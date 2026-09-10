@@ -2,7 +2,7 @@
 
 <p align="center">面向账户所有者个人设备与内部 Agent 的私有订阅容量路由器</p>
 
-<p align="center"><code>Codex 稳定通道</code> · <code>ChatGPT 网页实验通道</code> · <code>持久 Jobs</code> · <code>MCP</code> · <code>中文控制台</code></p>
+<p align="center"><code>Codex 通道</code> · <code>ChatGPT 网页通道</code> · <code>持久 Jobs</code> · <code>MCP</code> · <code>中文控制台</code></p>
 
 <p align="center">状态：<code>0.1.0 预发布</code>　许可：<code>Apache-2.0</code>　范围：本人设备与内部自动化</p>
 
@@ -20,7 +20,7 @@ AIALRA Model Router 把已经登录的 Codex 执行器接到一个私有控制�
 
 默认稳定通道只使用官方 Codex CLI、TypeScript SDK 和 App Server
 
-仓库另含需要管理员显式启用的“ChatGPT Pro 网页实验通道” clean-room 实现
+仓库另含需要管理员显式启用的 ChatGPT 网页通道 clean-room 实现
 
 - 专用可见 Chromium 通过最小权限扩展操作语义化 DOM
 - 管理员在 noVNC 中手动登录和处理验证页面
@@ -29,7 +29,7 @@ AIALRA Model Router 把已经登录的 Codex 执行器接到一个私有控制�
 - 系统不拦截站点 SSE
 - 系统不开放远程调试端口，也不绕过验证码
 
-网页实验通道不是官方 API，依赖 ChatGPT 页面结构并可能随时失效，个人或非盈利使用不会自动消除服务条款风险，启用前请先阅读[实验通道说明](docs/chatgpt-web-experiment.md)
+网页通道不是官方 API，依赖 ChatGPT 页面结构并可能随时失效，个人或非盈利使用不会自动消除服务条款风险，启用前请先阅读[网页通道说明](docs/chatgpt-web-experiment.md)
 
 首版提供以下能力
 
@@ -40,7 +40,7 @@ AIALRA Model Router 把已经登录的 Codex 执行器接到一个私有控制�
 - 持久 Jobs、批次、状态事件、取消、验证和幂等
 - 确定性的 Luna、Terra、Sol 路由与 Codex 额度水位保护
 - CLI、MCP 和 TypeScript 客户端
-- 默认关闭的 ChatGPT Pro 可见网页实验通道、预热标签池和受控域名出口
+- 默认关闭的 ChatGPT 可见网页通道、账号池和受控域名出口
 - DOM 定位与观察、容器内原生键鼠输入、十分钟失败隔离和防重复提交日志
 - 网页通道专用 Chromium 沙箱、脱敏验收记录、账号池熔断状态、每账号并发 `1` 和独立 90 秒最短提交间隔
 - Authentik 浏览器登录与作用域 API 密钥
@@ -186,9 +186,9 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/chat/completions" -Headers @{
 
 支持 `messages`、`stream`、`stream_options.include_usage`、`max_tokens`、`max_completion_tokens`、`response_format`（text、json_object、json_schema）、`reasoning_effort` 和 `aialra` 扩展命名空间；多轮对话由客户端携带完整消息历史，或用 `aialra.session_key` 续接 Codex 线程；未支持字段返回 `400 unsupported_parameter`；调用仍在执行时返回 `504` 并附带任务编号，可转到 Jobs 接口查询
 
-### 4.6. ChatGPT Pro 网页实验通道
+### 4.6. ChatGPT 网页通道
 
-管理员完成专用可见浏览器登录并启用网页模型后，可以通过同一个 Responses 地址显式选择实验通道
+管理员完成专用可见浏览器登录并启用网页模型后，可以通过同一个 Responses 地址显式选择网页通道
 
 ```powershell
 $WebBody = @{
@@ -230,7 +230,7 @@ Search 在 `require_sources = $true` 时必须返回可验证的公网链接，�
 
 搜索默认期限为 10 分钟，深度研究默认期限为 60 分钟，长任务建议使用 Jobs API
 
-启用、登录、错误码、安全边界和探针门槛见[实验通道说明](docs/chatgpt-web-experiment.md)
+启用、登录、错误码、安全边界和探针门槛见[网页通道说明](docs/chatgpt-web-experiment.md)
 
 ## 5. 程序化调用
 
@@ -307,12 +307,14 @@ flowchart TD
 - `restricted` 只读且无网络；`confirm` 在执行前等待授权；`full` 可写本次一次性工作区并访问公开互联网
 - `full` 不等于 Codex 的 `danger-full-access`，仍禁止读取 `/run/secrets`、进程环境、Codex 身份目录、宿主机和其他调用工作区
 - Authentik 管理员网页会话默认使用 `full`；可信 Agent 密钥可以使用 `full`；普通 API 密钥的上限是 `restricted`
+- API 密钥的调用通道与 Codex 执行权限分开配置；调用通道可选仅 Codex、仅 ChatGPT 或两者皆可，服务端按每项任务强制校验
+- 仅 ChatGPT 密钥不能创建 Codex 任务；仅 Codex 密钥不能创建 ChatGPT 网页任务；旧密钥按照原作用域自动保持原有能力
 - 安全清理模式不支持 `sessionKey`，并在调用结束后删除 Codex 会话文件
 - API 密钥只保存固定前缀与 HMAC-SHA-256 摘要；默认 30 天、60 次/分钟，创建和吊销都要求幂等键与确认
 - 任务正文和事件采用带 Job ID、字段名与版本 AAD 的每记录 AES-256-GCM 信封加密；正文与事件 24 小时后删除，脱敏元数据 90 天后删除
 - Authentik 身份必须属于 Router 专用组，并同时通过 Nginx→Web 与 Web→API 两份独立证明
 - 仓库截图只能使用合成数据，生产根路径直接进入 Authentik
-- ChatGPT 网页实验通道使用独立浏览器账户与持久配置卷，配置卷视同登录凭据，不进入普通备份
+- ChatGPT 网页通道使用独立浏览器账户与持久配置卷，配置卷视同登录凭据，不进入普通备份
 - 浏览器没有数据库、正文主密钥、Codex 登录、容器套接字或宿主目录，只能通过域名允许清单访问 ChatGPT 所需公网服务
 - 扩展不申请 Cookie、剪贴板、下载或全部网站权限，不开放 CDP，出现验证页面时只暂停并等待人工处理
 - 提示词只在隔离浏览器容器的 X11 剪贴板中短暂存在；DOM 逐字核对编辑器后立即清空，内容不写入扩展存储、日志或数据库
@@ -333,7 +335,7 @@ flowchart TD
 7. `render-nginx.sh` 生成只绑定 Tailscale 接口的 Nginx 配置，`nginx -t` 通过后再重载
 8. 专用 `aialra-router` 账户完成 Codex 登录和身份目录隔离探针
 9. `enable-codex-worker.sh` 启动隔离 Runner 与唯一受信 Worker，并在攻击探针和健康检查通过后开放接单
-10. 可选执行 `ACTION=start enable-chatgpt-web.sh` 启动仍处于关闭状态的可见浏览器，管理员通过受保护 noVNC 登录并完成 10 项探针后，再用 `ACTION=enable` 开放实验通道
+10. 可选执行 `ACTION=start enable-chatgpt-web.sh` 启动仍处于关闭状态的可见浏览器，管理员通过受保护 noVNC 登录；每个账号完成无消息就绪检查和一次成功的 `single_probe` 后，再用 `ACTION=enable` 开放网页通道
 
 完整命令、回滚点和验收清单见[部署指南](docs/deployment.md)；仓库模板使用 `router.example.com`；真实域名和服务器路径不会写进公开仓库
 

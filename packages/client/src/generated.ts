@@ -527,8 +527,16 @@ export interface components {
     CreateApiKeyRequest: {
       name: string;
       scopes: (
-        "admin" | "jobs:read" | "jobs:write" | "quota:read" | "keys:write" | "approvals:write"
+        | "admin"
+        | "jobs:read"
+        | "jobs:write"
+        | "quota:read"
+        | "keys:write"
+        | "approvals:write"
+        | "chatgpt:web"
       )[];
+      /** @description Explicit execution channels allowed for this key; omitted requests preserve the legacy scope-derived behavior */
+      executionChannels?: ("codex" | "chatgpt_web")[];
       /** @default 60 */
       rateLimitPerMinute: number;
       /**
@@ -547,6 +555,8 @@ export interface components {
       name: string;
       prefix: string;
       scopes: string[];
+      /** @description Execution channels enforced by the API for this key */
+      executionChannels: ("codex" | "chatgpt_web")[];
       executionPolicy: components["schemas"]["ExecutionPolicy"];
       rateLimitPerMinute: number;
       /** Format: date-time */

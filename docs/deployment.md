@@ -140,9 +140,9 @@ sudo RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 
 脚本先启动 `codex` profile 中的隔离 Runner 与唯一受信 Worker；两者健康检查和攻击探针通过后，才把接单开关改为 true 并重启 API
 
-### 第十步：按需启动 ChatGPT Pro 网页实验通道
+### 第十步：按需启动 ChatGPT 网页通道
 
-该步骤不会改变 Codex SDK 稳定通道；实验通道默认关闭，真实网页探针通过前只能启动可见浏览器用于登录和诊断
+该步骤不会改变 Codex SDK 通道；网页通道默认关闭，真实网页探针通过前只能启动可见浏览器用于登录和诊断
 
 ```bash
 # 构建桥接服务、可见 Chromium 和受控出口代理，但保持网页任务接单关闭
@@ -166,11 +166,11 @@ sudo ACTION=enable \
   bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
-实验浏览器默认使用独立的 `/28` 控制、代理和出口子网，避免共享宿主已有的 Docker 地址池；Nginx 通过控制网中的固定地址 `CHATGPT_BROWSER_CONTROL_IP`、`_B`、`_C`、`_D` 访问各账号 noVNC，浏览器没有宿主端口；如果部署主机已经使用这些网段，请同时覆盖固定地址和三个子网，并先确认它们不与宿主路由、Tailnet 路由或其他容器网络重叠
+网页浏览器默认使用独立的 `/28` 控制、代理和出口子网，避免共享宿主已有的 Docker 地址池；Nginx 通过控制网中的固定地址 `CHATGPT_BROWSER_CONTROL_IP`、`_B`、`_C`、`_D` 访问各账号 noVNC，浏览器没有宿主端口；如果部署主机已经使用这些网段，请同时覆盖固定地址和三个子网，并先确认它们不与宿主路由、Tailnet 路由或其他容器网络重叠
 
-默认保留 Chromium 自身沙箱；如果宿主明确阻止非特权用户命名空间，日志会出现 `No usable sandbox`，可以只在实验通道保持关闭时临时设置 `CHATGPT_CHROMIUM_NO_SANDBOX=true` 完成可见登录探针；该降级会削弱浏览器内部隔离，不应作为公开模板的默认值，也不能替代只读根文件系统、非 root 用户、零额外权限和受控出口
+默认保留 Chromium 自身沙箱；如果宿主明确阻止非特权用户命名空间，日志会出现 `No usable sandbox`，可以只在网页通道保持关闭时临时设置 `CHATGPT_CHROMIUM_NO_SANDBOX=true` 完成可见登录探针；该降级会削弱浏览器内部隔离，不应作为公开模板的默认值，也不能替代只读根文件系统、非 root 用户、零额外权限和受控出口
 
-完整边界、调用案例、错误和停用方法见[ChatGPT Pro 网页实验通道](chatgpt-web-experiment.md)
+完整边界、调用案例、错误和停用方法见[ChatGPT 网页通道](chatgpt-web-experiment.md)
 
 ## 1.3 上线验收
 
@@ -183,8 +183,8 @@ sudo ACTION=enable \
 - Nginx 下无 CSP 错误，控制台可以创建密钥和提交任务
 - 现有 Authentik 站点在变更前后都能正常登录
 - 重启后任务不丢失；24 小时后正文与事件已删除
-- 实验通道关闭时，网页请求被拒绝且 Codex 调用不受影响
-- 实验通道开启前，10 个真实网页探针达到 9/10 成功、0 次重复发送和 0 次错误归属
+- 网页通道关闭时，网页请求被拒绝且 Codex 调用不受影响
+- 网页通道开启前，每个生产账号完成无消息就绪检查和一次成功的 `single_probe`，并保持 0 次重复发送和 0 次错误归属
 - 浏览器无法访问回环、私网、Tailnet、云元数据、数据库和 Codex 身份目录
 - ChatGPT 网页显示验证或账号警告时，系统停止网页接单并等待管理员处理
 

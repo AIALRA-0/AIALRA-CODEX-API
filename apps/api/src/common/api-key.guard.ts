@@ -11,7 +11,7 @@ import {
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 
-import type { ExecutionPolicy } from "@aialra/contracts";
+import type { ExecutionChannel, ExecutionPolicy } from "@aialra/contracts";
 import type { JobRepository } from "@aialra/persistence";
 import { apiKeyPrefix, hashApiKey, verifyApiKey, verifySharedSecret } from "@aialra/security";
 
@@ -24,6 +24,7 @@ export interface AuthenticatedRequest extends Request {
   scopes?: string[];
   isAdmin?: boolean;
   authenticatedAt?: string;
+  executionChannels?: ExecutionChannel[];
   executionPolicy?: ExecutionPolicy;
 }
 
@@ -78,6 +79,7 @@ export class ApiKeyGuard implements CanActivate {
       request.scopes = ["admin"];
       request.isAdmin = true;
       request.authenticatedAt = authentikAuthTime;
+      request.executionChannels = ["codex", "chatgpt_web"];
       request.executionPolicy = {
         defaultPreset: "full",
         allowedPresets: ["restricted", "confirm", "full"],
@@ -104,6 +106,7 @@ export class ApiKeyGuard implements CanActivate {
         request.scopes = ["admin"];
         request.isAdmin = true;
         request.authenticatedAt = session.createdAt;
+        request.executionChannels = ["codex", "chatgpt_web"];
         request.executionPolicy = {
           defaultPreset: "full",
           allowedPresets: ["restricted", "confirm", "full"],
@@ -117,6 +120,7 @@ export class ApiKeyGuard implements CanActivate {
       request.scopes = ["admin", "jobs:read", "jobs:write", "quota:read"];
       request.isAdmin = true;
       request.authenticatedAt = new Date().toISOString();
+      request.executionChannels = ["codex", "chatgpt_web"];
       request.executionPolicy = {
         defaultPreset: "full",
         allowedPresets: ["restricted", "confirm", "full"],
@@ -184,6 +188,7 @@ export class ApiKeyGuard implements CanActivate {
     request.callerId = record.id;
     request.scopes = record.scopes;
     request.isAdmin = record.scopes.includes("admin");
+    request.executionChannels = record.executionChannels;
     request.executionPolicy = record.executionPolicy;
     void this.repository.touchApiKey(record.id);
     return true;

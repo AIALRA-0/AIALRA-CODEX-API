@@ -34,6 +34,20 @@ export type SessionMode = z.infer<typeof SessionModeSchema>;
 export const ExecutionChannelSchema = z.enum(["codex", "chatgpt_web"]);
 export type ExecutionChannel = z.infer<typeof ExecutionChannelSchema>;
 
+export const ApiExecutionChannelsSchema = z
+  .array(ExecutionChannelSchema)
+  .min(1)
+  .max(2)
+  .superRefine((channels, context) => {
+    if (new Set(channels).size !== channels.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Execution channels must be unique.",
+      });
+    }
+  });
+export type ApiExecutionChannels = z.infer<typeof ApiExecutionChannelsSchema>;
+
 export const ChatGptWebModeSchema = z.enum(["chat", "search", "deep_research"]);
 export type ChatGptWebMode = z.infer<typeof ChatGptWebModeSchema>;
 

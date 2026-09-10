@@ -47,6 +47,7 @@ export class JobsController {
       idempotencyKey ?? null,
       request.executionPolicy,
       request.scopes ?? [],
+      request.executionChannels,
     );
   }
 
@@ -199,6 +200,7 @@ export class BatchesController {
         idempotencyKey ?? null,
         request.executionPolicy,
         request.scopes ?? [],
+        request.executionChannels,
       ),
     };
   }

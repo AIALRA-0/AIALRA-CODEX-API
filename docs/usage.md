@@ -158,14 +158,14 @@ $Response | Select-Object status, model, output, usage # 查看任务状态、�
 - `Idempotency-Key` 在此接口可选；提供时按原生接口同一规则去重
 - 未支持字段返回 `400 unsupported_parameter`；等待超时但调用仍在执行时返回 `504 gateway_timeout` 并附带任务编号，可转到 `Jobs` 接口查询结果
 
-### 4.6 ChatGPT Pro 网页实验通道
+### 4.6 ChatGPT 网页通道
 
-网页实验通道只在调用方显式设置 `execution_channel: "chatgpt_web"` 时使用；普通 Codex 请求不会暗中切换通道
+网页通道只在调用方显式设置 `execution_channel: "chatgpt_web"` 时使用；普通 Codex 请求不会暗中切换通道
 
 管理员需要先通过受 Tailnet 和 Authentik 保护的 noVNC 页面手动登录 ChatGPT，再从页面动态发现并启用可见模型
 
 ```powershell
-$WebRequest = @{ # 创建明确选择网页实验通道的 Responses 请求
+$WebRequest = @{ # 创建明确选择网页通道的 Responses 请求
     model = "chatgpt-web.auto" # 使用管理员启用的网页自动模型入口
     input = "调查一个合成主题，并列出公网来源" # 避免在实验任务中放入凭据和个人信息
     aialra = @{ # 使用 AIALRA 命名空间，避免伪装成 OpenAI 官方字段
@@ -201,7 +201,7 @@ Deep Research 响应包含 `X-AIALRA-Data-Retention: persistent_chat_history`；
 
 ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 等效价格；接口返回 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”
 
-启用、真实网页探针、安全边界和完整错误说明见[ChatGPT Pro 网页实验通道](chatgpt-web-experiment.md)
+启用、真实网页探针、安全边界和完整错误说明见[ChatGPT 网页通道](chatgpt-web-experiment.md)
 
 ## 5 原生 `Jobs` 接口
 
@@ -249,6 +249,10 @@ $Events.data | Select-Object sequence, type, data # 查看状态、工具、审�
 `confirm` 权限会先进入 `awaiting_approval`，管理员授权后才进入 `queued`
 
 ### 5.3 执行权限
+
+调用通道与执行权限是两个独立限制。创建 API 密钥时，`executionChannels` 可设为 `codex`、`chatgpt_web` 或同时包含两者；API 会拒绝密钥未获授权的通道。`chatgpt_web` 还必须同时具有 `chatgpt:web` 作用域，旧密钥未设置该字段时会按原作用域保持原有能力
+
+仅 ChatGPT 密钥不接受 Codex 工作区权限配置；管理员密钥固定允许两个通道。接口会拒绝互相矛盾的组合，而不是静默忽略字段
 
 三档权限都只作用于本次调用的一次性隔离工作区：
 
@@ -390,7 +394,7 @@ enabled_tools = ["delegate_codex", "delegate_chatgpt", "preview_route", "job_sta
 
 </div>
 
-稳定通道任务由 Codex 模型执行；只有调用方显式选择且管理员启用后，任务才进入 ChatGPT Pro 网页实验通道
+Codex 通道任务由 Codex 模型执行；只有调用方显式选择、密钥允许且管理员启用后，任务才进入 ChatGPT 网页通道
 
 ## 10 常见错误
 
@@ -398,32 +402,34 @@ enabled_tools = ["delegate_codex", "delegate_chatgpt", "preview_route", "job_sta
 
 表 10.1 首次接入常见错误
 
-| 错误码                          | 原因                                     | 处理方法                                           |
-| ------------------------------- | ---------------------------------------- | -------------------------------------------------- |
-| `invalid_api_key`               | API Key 缺失、过期、吊销或摘要校验失败   | 创建新密钥并检查作用域与到期时间                   |
-| `insufficient_scope`            | API Key 缺少接口要求的作用域             | 为调用方签发最小且完整的作用域集合                 |
-| `idempotency_key_required`      | 写请求没有幂等键                         | 为每个业务请求创建稳定键，并在网络重试时复用       |
-| `idempotency_conflict`          | 同一键值对应不同请求摘要                 | 为新业务请求生成新键，保留旧键用于原请求重试       |
-| `codex_capacity_constrained`    | 自动 Terra 或 Sol 任务遇到 85% 配额水位  | 显式指定必要模型，或等待当前额度窗口重置           |
-| `codex_capacity_reserved`       | 自动 Terra 或 Sol 任务遇到 95% 配额水位  | 仅提交必要的显式任务，或等待额度窗口重置           |
-| `codex_auth_expired`            | VPS 上的 Codex 登录令牌已经过期          | 重新完成 Codex 登录后再创建新任务                  |
-| `codex_auth_failed`             | Codex 上游拒绝当前授权                   | 检查 VPS 上的 Codex 登录状态                       |
-| `codex_quota_exhausted`         | Codex 当前额度已经耗尽                   | 等待额度窗口重置或切换有效的上游授权               |
-| `codex_provider_timeout`        | Codex 上游在任务截止时间内没有完成       | 查询原任务状态；提交状态不明时不要创建重复任务     |
-| `codex_provider_unavailable`    | Codex 上游或 App Server 暂时不可用       | 保留原任务记录，恢复服务后创建新的幂等任务         |
-| `provider_unavailable`          | Worker 没有启用 Codex Adapter            | 检查 Codex 登录和 Adapter 开关                     |
-| `invalid_validation_rule`       | 旧版验收规则没有使用允许的前缀           | 改用结构化 `checks`，或使用 `equals:`、`contains:` |
-| `validation_failed`             | 模型输出没有通过明确的 Schema 或检查规则 | 查看验证消息，修正输入或规则后重新调用             |
-| `permission_ceiling_exceeded`   | 请求权限超过当前 API 密钥上限            | 使用允许该预设的可信 Agent 密钥，或降低权限        |
-| `session_expired`               | 会话线程不存在或已超过保留期限           | 去掉 `sessionKey` 重新开始对话                     |
-| `session_access_denied`         | 试图继续其他调用者的会话线程             | 只使用本人密钥创建的线程                           |
-| `gateway_timeout`               | Chat 兼容接口等待超时但调用仍在执行      | 用返回的任务编号查询 `GET /api/v1/jobs/{id}`       |
-| `chatgpt_login_required`        | 专用可见浏览器没有有效登录状态           | 管理员打开 noVNC 并手动登录                        |
-| `chatgpt_verification_required` | 网页要求验证码或人工验证                 | 管理员在可见页面处理；系统不会绕过                 |
-| `chatgpt_ui_changed`            | 必要页面元素无法识别                     | 关闭实验通道并重新验证页面契约                     |
-| `chatgpt_delivery_uncertain`    | 无法证明网页消息是否已经发送             | 保持失败并检查页面；系统不会自动重发               |
-| `chatgpt_output_incomplete`     | 无法证明最终正文已经稳定                 | 检查可见页面和扩展健康状态                         |
-| `chatgpt_sources_missing`       | 回答完成但没有提供可验证的公网来源       | 调整来源要求；账号不会因此被隔离                   |
+| 错误码                             | 原因                                     | 处理方法                                           |
+| ---------------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| `invalid_api_key`                  | API Key 缺失、过期、吊销或摘要校验失败   | 创建新密钥并检查作用域与到期时间                   |
+| `insufficient_scope`               | API Key 缺少接口要求的作用域             | 为调用方签发最小且完整的作用域集合                 |
+| `execution_channel_not_allowed`    | API Key 不允许任务选择的执行通道         | 创建允许该通道的新密钥，或改用密钥已允许的通道     |
+| `execution_channel_scope_mismatch` | 网页通道与 `chatgpt:web` 作用域配置矛盾  | 同时授予或同时移除网页通道与对应作用域             |
+| `idempotency_key_required`         | 写请求没有幂等键                         | 为每个业务请求创建稳定键，并在网络重试时复用       |
+| `idempotency_conflict`             | 同一键值对应不同请求摘要                 | 为新业务请求生成新键，保留旧键用于原请求重试       |
+| `codex_capacity_constrained`       | 自动 Terra 或 Sol 任务遇到 85% 配额水位  | 显式指定必要模型，或等待当前额度窗口重置           |
+| `codex_capacity_reserved`          | 自动 Terra 或 Sol 任务遇到 95% 配额水位  | 仅提交必要的显式任务，或等待额度窗口重置           |
+| `codex_auth_expired`               | VPS 上的 Codex 登录令牌已经过期          | 重新完成 Codex 登录后再创建新任务                  |
+| `codex_auth_failed`                | Codex 上游拒绝当前授权                   | 检查 VPS 上的 Codex 登录状态                       |
+| `codex_quota_exhausted`            | Codex 当前额度已经耗尽                   | 等待额度窗口重置或切换有效的上游授权               |
+| `codex_provider_timeout`           | Codex 上游在任务截止时间内没有完成       | 查询原任务状态；提交状态不明时不要创建重复任务     |
+| `codex_provider_unavailable`       | Codex 上游或 App Server 暂时不可用       | 保留原任务记录，恢复服务后创建新的幂等任务         |
+| `provider_unavailable`             | Worker 没有启用 Codex Adapter            | 检查 Codex 登录和 Adapter 开关                     |
+| `invalid_validation_rule`          | 旧版验收规则没有使用允许的前缀           | 改用结构化 `checks`，或使用 `equals:`、`contains:` |
+| `validation_failed`                | 模型输出没有通过明确的 Schema 或检查规则 | 查看验证消息，修正输入或规则后重新调用             |
+| `permission_ceiling_exceeded`      | 请求权限超过当前 API 密钥上限            | 使用允许该预设的可信 Agent 密钥，或降低权限        |
+| `session_expired`                  | 会话线程不存在或已超过保留期限           | 去掉 `sessionKey` 重新开始对话                     |
+| `session_access_denied`            | 试图继续其他调用者的会话线程             | 只使用本人密钥创建的线程                           |
+| `gateway_timeout`                  | Chat 兼容接口等待超时但调用仍在执行      | 用返回的任务编号查询 `GET /api/v1/jobs/{id}`       |
+| `chatgpt_login_required`           | 专用可见浏览器没有有效登录状态           | 管理员打开 noVNC 并手动登录                        |
+| `chatgpt_verification_required`    | 网页要求验证码或人工验证                 | 管理员在可见页面处理；系统不会绕过                 |
+| `chatgpt_ui_changed`               | 必要页面元素无法识别                     | 关闭网页通道并重新验证页面契约                     |
+| `chatgpt_delivery_uncertain`       | 无法证明网页消息是否已经发送             | 保持失败并检查页面；系统不会自动重发               |
+| `chatgpt_output_incomplete`        | 无法证明最终正文已经稳定                 | 检查可见页面和扩展健康状态                         |
+| `chatgpt_sources_missing`          | 回答完成但没有提供可验证的公网来源       | 调整来源要求；账号不会因此被隔离                   |
 
 </div>
 

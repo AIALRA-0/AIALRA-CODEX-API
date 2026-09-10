@@ -864,7 +864,17 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [admin, jobs:read, jobs:write, quota:read, keys:write, approvals:write]
+            enum:
+              [admin, jobs:read, jobs:write, quota:read, keys:write, approvals:write, "chatgpt:web"]
+        executionChannels:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          description: Explicit execution channels allowed for this key; omitted requests preserve the legacy scope-derived behavior
+          items:
+            type: string
+            enum: [codex, chatgpt_web]
         rateLimitPerMinute:
           type: integer
           minimum: 1
@@ -886,7 +896,17 @@ components:
           minLength: 1
     ApiKeyMetadata:
       type: object
-      required: [id, name, prefix, scopes, executionPolicy, rateLimitPerMinute, createdAt]
+      required:
+        [
+          id,
+          name,
+          prefix,
+          scopes,
+          executionChannels,
+          executionPolicy,
+          rateLimitPerMinute,
+          createdAt,
+        ]
       properties:
         id:
           type: string
@@ -899,6 +919,15 @@ components:
           type: array
           items:
             type: string
+        executionChannels:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          description: Execution channels enforced by the API for this key
+          items:
+            type: string
+            enum: [codex, chatgpt_web]
         executionPolicy:
           $ref: "#/components/schemas/ExecutionPolicy"
         rateLimitPerMinute:

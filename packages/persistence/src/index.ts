@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   ChatGptWebAccountSchema,
+  type ExecutionChannel,
   type ExecutionPolicy,
   type ChatGptWebAccount,
   type ChatGptWebAccountPlan,
@@ -346,6 +347,7 @@ export interface StoredApiKey {
   prefix: string;
   digest: string;
   scopes: string[];
+  executionChannels: ExecutionChannel[];
   executionPolicy: ExecutionPolicy;
   rateLimitPerMinute: number;
   expiresAt: string | null;
@@ -368,6 +370,7 @@ function apiKeyWithoutDigest(record: StoredApiKey): ApiKeyMetadata {
     name: record.name,
     prefix: record.prefix,
     scopes: record.scopes,
+    executionChannels: [...record.executionChannels],
     executionPolicy: structuredClone(record.executionPolicy),
     rateLimitPerMinute: record.rateLimitPerMinute,
     expiresAt: record.expiresAt,
@@ -1191,6 +1194,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   prefix TEXT UNIQUE NOT NULL,
   digest TEXT NOT NULL,
   scopes TEXT[] NOT NULL,
+  execution_channels TEXT[] NOT NULL DEFAULT ARRAY['codex']::TEXT[],
   execution_default_preset TEXT NOT NULL DEFAULT 'restricted',
   execution_allowed_presets TEXT[] NOT NULL DEFAULT ARRAY['restricted']::TEXT[],
   rate_limit_per_minute INTEGER NOT NULL,
@@ -1201,6 +1205,16 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS execution_channels TEXT[];
+UPDATE api_keys
+SET execution_channels = CASE
+  WHEN 'admin' = ANY(scopes) OR 'chatgpt:web' = ANY(scopes)
+    THEN ARRAY['codex', 'chatgpt_web']::TEXT[]
+  ELSE ARRAY['codex']::TEXT[]
+END
+WHERE execution_channels IS NULL;
+ALTER TABLE api_keys ALTER COLUMN execution_channels SET DEFAULT ARRAY['codex']::TEXT[];
+ALTER TABLE api_keys ALTER COLUMN execution_channels SET NOT NULL;
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS execution_default_preset TEXT NOT NULL DEFAULT 'restricted';
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS execution_allowed_presets TEXT[] NOT NULL DEFAULT ARRAY['restricted']::TEXT[];
 
@@ -2317,10 +2331,10 @@ export class PostgresJobRepository implements JobRepository {
   async createApiKey(record: StoredApiKey): Promise<StoredApiKey> {
     const result = await this.pool.query(
       `INSERT INTO api_keys (
-        id, created_by, name, prefix, digest, scopes, execution_default_preset,
+        id, created_by, name, prefix, digest, scopes, execution_channels, execution_default_preset,
         execution_allowed_presets, rate_limit_per_minute, expires_at, revoked_at, created_at,
         last_used_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [
         record.id,
         record.createdBy,
@@ -2328,6 +2342,7 @@ export class PostgresJobRepository implements JobRepository {
         record.prefix,
         record.digest,
         record.scopes,
+        record.executionChannels,
         record.executionPolicy.defaultPreset,
         record.executionPolicy.allowedPresets,
         record.rateLimitPerMinute,
@@ -2371,15 +2386,19 @@ export class PostgresJobRepository implements JobRepository {
             ? ["restricted", "confirm", "full"]
             : ["restricted"],
         };
+        saved.record.executionChannels ??=
+          saved.record.scopes.includes("admin") || saved.record.scopes.includes("chatgpt:web")
+            ? ["codex", "chatgpt_web"]
+            : ["codex"];
         await client.query("COMMIT");
         return { ...saved, replayed: true };
       }
       await client.query(
         `INSERT INTO api_keys (
-          id, created_by, name, prefix, digest, scopes, execution_default_preset,
+          id, created_by, name, prefix, digest, scopes, execution_channels, execution_default_preset,
           execution_allowed_presets, rate_limit_per_minute, expires_at, revoked_at, created_at,
           last_used_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [
           record.id,
           record.createdBy,
@@ -2387,6 +2406,7 @@ export class PostgresJobRepository implements JobRepository {
           record.prefix,
           record.digest,
           record.scopes,
+          record.executionChannels,
           record.executionPolicy.defaultPreset,
           record.executionPolicy.allowedPresets,
           record.rateLimitPerMinute,
@@ -2427,6 +2447,11 @@ export class PostgresJobRepository implements JobRepository {
       prefix: row.prefix,
       digest: row.digest,
       scopes: row.scopes,
+      executionChannels:
+        row.execution_channels ??
+        (row.scopes.includes("admin") || row.scopes.includes("chatgpt:web")
+          ? ["codex", "chatgpt_web"]
+          : ["codex"]),
       executionPolicy: {
         defaultPreset: row.execution_default_preset ?? "restricted",
         allowedPresets: row.execution_allowed_presets ?? ["restricted"],

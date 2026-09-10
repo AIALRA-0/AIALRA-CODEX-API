@@ -298,6 +298,7 @@ interface ApiKeyRecord {
   name: string;
   prefix: string;
   scopes: string[];
+  executionChannels?: Array<"codex" | "chatgpt_web">;
   rateLimitPerMinute: number;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -308,6 +309,33 @@ interface ApiKeyRecord {
     defaultPreset: "restricted" | "confirm" | "full";
     allowedPresets: Array<"restricted" | "confirm" | "full">;
   };
+}
+
+type ApiChannelAccess = "codex" | "chatgpt_web" | "both";
+
+function apiKeyChannels(key: ApiKeyRecord): Array<"codex" | "chatgpt_web"> {
+  if (key.executionChannels?.length) return key.executionChannels;
+  return key.scopes.includes("admin") || key.scopes.includes("chatgpt:web")
+    ? ["codex", "chatgpt_web"]
+    : ["codex"];
+}
+
+function apiKeyChannelLabel(key: ApiKeyRecord): string {
+  const channels = apiKeyChannels(key);
+  if (channels.length === 2) return "Codex + ChatGPT";
+  return channels[0] === "chatgpt_web" ? "仅 ChatGPT" : "仅 Codex";
+}
+
+function apiKeyScopeLabel(scopes: string[]): string {
+  if (scopes.includes("admin")) return "管理员全部功能";
+  const labels = [
+    scopes.includes("jobs:read") ? "读取任务" : null,
+    scopes.includes("jobs:write") ? "创建任务" : null,
+    scopes.includes("quota:read") ? "读取额度" : null,
+    scopes.includes("keys:write") ? "管理密钥" : null,
+    scopes.includes("approvals:write") ? "处理审批" : null,
+  ].filter(Boolean);
+  return labels.length ? labels.join("、") : "无业务功能";
 }
 
 interface AuditRecord {
@@ -979,7 +1007,7 @@ function Playground() {
               >
                 <option value="codex">Codex 订阅通道</option>
                 <option value="chatgpt_web" disabled={!chatGptWebAvailable}>
-                  ChatGPT Pro 网页实验通道
+                  ChatGPT 网页通道
                   {chatGptWebAvailable ? "" : "（暂不可用）"}
                 </option>
               </select>
@@ -1549,7 +1577,7 @@ function Jobs() {
               <dt>执行通道</dt>
               <dd>
                 {selected.task.executionChannel === "chatgpt_web"
-                  ? "ChatGPT Pro 网页实验通道"
+                  ? "ChatGPT 网页通道"
                   : "Codex 订阅通道"}
               </dd>
             </div>
@@ -2434,7 +2462,7 @@ function Models() {
       <PageHeading
         eyebrow="订阅容量"
         title="用量与模型"
-        copy="查看 Codex 额度周期，并管理 Codex 与 ChatGPT 网页实验通道中允许手动调用的模型"
+        copy="查看 Codex 额度周期，并管理 Codex 与 ChatGPT 网页通道中允许手动调用的模型"
         action={
           <a
             className="button"
@@ -2448,8 +2476,8 @@ function Models() {
       />
       <ErrorNotice message={error} />
       <section className="card console-section">
-        <span className="card-index">ChatGPT Pro 网页实验通道</span>
-        <h3>{webStatus?.configuredEnabled ? "实验通道可用性" : "当前关闭"}</h3>
+        <span className="card-index">ChatGPT 网页通道</span>
+        <h3>{webStatus?.configuredEnabled ? "网页通道可用性" : "当前关闭"}</h3>
         <p className="muted">
           {webStatus?.configuredEnabled
             ? `当前并发 ${webStatus.effectiveConcurrency}/${webStatus.maximumConcurrency} · 浏览器${webStatus.authenticated ? "已登录" : "未登录"} · 沙箱${webStatus.sandboxVerified ? "已验证" : "未验证"}`
@@ -2723,7 +2751,7 @@ function Keys() {
   const [rateLimit, setRateLimit] = useState(60);
   const [expiresInDays, setExpiresInDays] = useState("30");
   const [keyKind, setKeyKind] = useState<"ordinary" | "trusted">("ordinary");
-  const [allowChatGptWeb, setAllowChatGptWeb] = useState(false);
+  const [channelAccess, setChannelAccess] = useState<ApiChannelAccess>("codex");
   const [createConfirm, setCreateConfirm] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRecord | null>(null);
   const [confirmationPrefix, setConfirmationPrefix] = useState("");
@@ -2744,6 +2772,8 @@ function Keys() {
   async function createKey() {
     setBusy(true);
     try {
+      const includesCodex = channelAccess === "codex" || channelAccess === "both";
+      const includesChat = channelAccess === "chatgpt_web" || channelAccess === "both";
       const record = await routerFetch<ApiKeyRecord>("/api/v1/keys", {
         method: "POST",
         headers: { "idempotency-key": crypto.randomUUID() },
@@ -2753,7 +2783,11 @@ function Keys() {
             "jobs:read",
             "jobs:write",
             "quota:read",
-            ...(allowChatGptWeb ? ["chatgpt:web"] : []),
+            ...(includesChat ? ["chatgpt:web"] : []),
+          ],
+          executionChannels: [
+            ...(includesCodex ? ["codex"] : []),
+            ...(includesChat ? ["chatgpt_web"] : []),
           ],
           rateLimitPerMinute: rateLimit,
           expiresAt:
@@ -2761,7 +2795,7 @@ function Keys() {
               ? null
               : new Date(Date.now() + Number(expiresInDays) * 86_400_000).toISOString(),
           executionPolicy:
-            keyKind === "trusted"
+            includesCodex && keyKind === "trusted"
               ? {
                   defaultPreset: "full",
                   allowedPresets: ["restricted", "confirm", "full"],
@@ -2808,36 +2842,79 @@ function Keys() {
       <PageHeading
         eyebrow="访问控制"
         title="API 密钥"
-        copy="密钥明文只在创建后显示一次，随后只能查看前缀、范围和状态"
+        copy="先选择密钥能调用哪个通道，再设置 Codex 的工作区权限；服务端会强制执行这两层限制"
       />
       <ErrorNotice message={error} />
       <section className="card form-stack">
+        <div className="permission-guide" role="note">
+          <strong>两种权限分开设置</strong>
+          <p>
+            调用通道决定密钥能使用 Codex、ChatGPT，还是两者；Codex 执行权限只决定 Codex
+            能否写文件和访问网络，不会改变 ChatGPT 网页任务的能力
+          </p>
+        </div>
         <div className="field">
           <label htmlFor="key-name">密钥名称</label>
           <input id="key-name" value={name} onChange={(event) => setName(event.target.value)} />
         </div>
-        <div className="form-grid">
-          <div className="field">
-            <label htmlFor="key-kind">密钥类型</label>
-            <select
-              id="key-kind"
-              value={keyKind}
-              onChange={(event) => setKeyKind(event.target.value as "ordinary" | "trusted")}
-            >
-              <option value="ordinary">普通密钥（受限模式）</option>
-              <option value="trusted">可信 Agent（默认完全访问）</option>
-            </select>
-            <small className="muted">
-              {keyKind === "trusted"
-                ? "需要管理员在五分钟内重新认证，仍只访问单次隔离工作区"
-                : "只能读取任务工作区，不能写入或联网"}
-            </small>
-            {keyKind === "trusted" ? (
-              <a className="text-link" href="/_aialra_auth/logout?returnTo=/console/keys">
-                重新登录以刷新认证时间
-              </a>
-            ) : null}
+        <fieldset className="field-group">
+          <legend>可调用通道</legend>
+          <div className="choice-grid three-up">
+            {(
+              [
+                ["codex", "仅 Codex", "适合代码、文件和 Agent 任务，不允许网页聊天"],
+                ["chatgpt_web", "仅 ChatGPT", "适合聊天、搜索和 Deep Research，不允许 Codex"],
+                ["both", "Codex + ChatGPT", "同一集成需要同时使用两个通道时选择"],
+              ] as const
+            ).map(([value, title, description]) => (
+              <label className="choice-card" key={value}>
+                <input
+                  type="radio"
+                  name="key-channel"
+                  value={value}
+                  checked={channelAccess === value}
+                  onChange={() => {
+                    setChannelAccess(value);
+                    if (value === "chatgpt_web") setKeyKind("ordinary");
+                  }}
+                />
+                <span>
+                  <strong>{title}</strong>
+                  <small>{description}</small>
+                </span>
+              </label>
+            ))}
           </div>
+        </fieldset>
+        <div className="form-grid">
+          {channelAccess !== "chatgpt_web" ? (
+            <div className="field">
+              <label htmlFor="key-kind">Codex 执行权限</label>
+              <select
+                id="key-kind"
+                value={keyKind}
+                onChange={(event) => setKeyKind(event.target.value as "ordinary" | "trusted")}
+              >
+                <option value="ordinary">普通密钥（受限模式）</option>
+                <option value="trusted">可信 Agent（默认完全访问）</option>
+              </select>
+              <small className="muted">
+                {keyKind === "trusted"
+                  ? "需要管理员在五分钟内重新认证，仍只访问单次隔离工作区"
+                  : "只能读取任务工作区，不能写入或联网"}
+              </small>
+              {keyKind === "trusted" ? (
+                <a className="text-link" href="/_aialra_auth/logout?returnTo=/console/keys">
+                  重新登录以刷新认证时间
+                </a>
+              ) : null}
+            </div>
+          ) : (
+            <div className="permission-guide compact">
+              <strong>Codex 执行权限不适用</strong>
+              <p>这把密钥会在服务端被禁止创建 Codex 任务</p>
+            </div>
+          )}
           <div className="field">
             <label htmlFor="key-rate">每分钟请求数</label>
             <input
@@ -2863,17 +2940,15 @@ function Keys() {
             </select>
           </div>
         </div>
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={allowChatGptWeb}
-            onChange={(event) => setAllowChatGptWeb(event.target.checked)}
-          />
-          允许使用 ChatGPT Pro 网页实验通道
-        </label>
-        <small className="muted">
-          该通道依赖管理员在可见浏览器中的 ChatGPT 登录状态，可能因验证页面或界面变化中断
-        </small>
+        {channelAccess !== "codex" ? (
+          <div className="permission-guide warning-guide">
+            <strong>ChatGPT 网页通道的数据与可用性说明</strong>
+            <p>
+              聊天和搜索默认使用每任务独立的临时对话；Deep Research 使用非临时对话并保留在所选账号中
+            </p>
+            <p>该通道依赖浏览器登录状态，遇到验证码、限流或页面变化时会停止，不会重复发送</p>
+          </div>
+        ) : null}
         <div>
           <button
             className="button primary"
@@ -2912,8 +2987,9 @@ function Keys() {
             <tr>
               <th>名称</th>
               <th>前缀</th>
-              <th>范围</th>
-              <th>执行权限</th>
+              <th>可调用通道</th>
+              <th>功能权限</th>
+              <th>Codex 执行权限</th>
               <th>速率</th>
               <th>到期时间</th>
               <th>最后使用</th>
@@ -2924,7 +3000,7 @@ function Keys() {
           <tbody>
             {keys.length === 0 ? (
               <tr>
-                <td colSpan={9} className="muted">
+                <td colSpan={10} className="muted">
                   当前没有 API 密钥
                 </td>
               </tr>
@@ -2935,13 +3011,16 @@ function Keys() {
                   <td>
                     <code>{key.prefix}</code>
                   </td>
-                  <td>{key.scopes.join(", ")}</td>
+                  <td>{apiKeyChannelLabel(key)}</td>
+                  <td>{apiKeyScopeLabel(key.scopes)}</td>
                   <td>
-                    {key.executionPolicy.defaultPreset === "full"
-                      ? "可信 Agent"
-                      : key.executionPolicy.defaultPreset === "confirm"
-                        ? "执行前确认"
-                        : "受限模式"}
+                    {!apiKeyChannels(key).includes("codex")
+                      ? "不适用"
+                      : key.executionPolicy.defaultPreset === "full"
+                        ? "完全访问"
+                        : key.executionPolicy.defaultPreset === "confirm"
+                          ? "执行前确认"
+                          : "只读、无网络"}
                   </td>
                   <td>{key.rateLimitPerMinute} 次/分钟</td>
                   <td>{formatDate(key.expiresAt)}</td>
@@ -2984,17 +3063,28 @@ function Keys() {
               <dd>{name}</dd>
             </div>
             <div>
-              <dt>作用域</dt>
+              <dt>可调用通道</dt>
               <dd>
-                任务读取、任务写入、额度读取
-                {allowChatGptWeb ? "、ChatGPT 网页实验通道" : ""}
+                {channelAccess === "both"
+                  ? "Codex + ChatGPT"
+                  : channelAccess === "chatgpt_web"
+                    ? "仅 ChatGPT"
+                    : "仅 Codex"}
               </dd>
             </div>
             <div>
-              <dt>执行权限</dt>
+              <dt>Codex 执行权限</dt>
               <dd>
-                {keyKind === "trusted" ? "可信 Agent · 隔离区完全访问" : "普通密钥 · 受限模式"}
+                {channelAccess === "chatgpt_web"
+                  ? "不适用，服务端禁止 Codex 任务"
+                  : keyKind === "trusted"
+                    ? "完全访问，可写文件和访问网络"
+                    : "只读工作区，不允许联网"}
               </dd>
+            </div>
+            <div>
+              <dt>共同功能</dt>
+              <dd>读取任务、创建任务、读取额度</dd>
             </div>
             <div>
               <dt>速率</dt>

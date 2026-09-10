@@ -207,6 +207,8 @@ Admission pins one model and reasoning effort for the task lifetime.
 - Secure-cleanup mode rejects `sessionKey` and removes Codex session files after each job.
 - Defaults are read-only, offline, and 120 seconds; writes need an explicit contract and approval.
 - API keys store only a fixed prefix and HMAC-SHA-256 digest; defaults are 30 days and 60 requests/minute, with idempotent confirmed create and revoke operations.
+- API keys configure execution channels separately from Codex workspace permissions. A key can allow Codex only, ChatGPT only, or both, and the API enforces that choice for every task.
+- A ChatGPT-only key cannot create Codex work, while a Codex-only key cannot create browser work. Existing keys retain their scope-derived channel access.
 - Per-record AES-256-GCM binds the Job ID, field, and version as AAD; payloads expire after 24 hours and metadata after 90 days.
 - A Router-specific Authentik group plus independent Nginx→Web and Web→API proofs protect browser identity.
 - The web experiment uses a separate browser account and persistent profile volume. Treat that volume as a login credential and exclude it from ordinary backups.
