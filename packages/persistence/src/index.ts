@@ -2140,9 +2140,9 @@ export class PostgresJobRepository implements JobRepository {
     const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
     const result = await this.pool.query(
       `UPDATE chatgpt_web_accounts
-       SET lease_expires_at=$4, updated_at=$3,
+       SET lease_expires_at=$4::timestamptz, updated_at=$3::timestamptz,
            status=status || jsonb_build_object('leaseExpiresAt',$4::text,'updatedAt',$3::text)
-       WHERE account_id=$1 AND lease_job_id=$2 AND lease_expires_at > $3`,
+       WHERE account_id=$1 AND lease_job_id=$2 AND lease_expires_at > $3::timestamptz`,
       [accountId, jobId, now, leaseExpiresAt],
     );
     return (result.rowCount ?? 0) === 1;
