@@ -193,6 +193,8 @@ After Deep Research mode selection, the extension waits for the editor node and 
 
 After opening the tools menu for Search or Deep Research, the extension waits for the real menu row and its geometry to stabilize while excluding every Search control that already existed in the sidebar, navigation, or conversation. It recognizes the current `Search`, `Web search`, `网页搜索`, and `联网搜索` labels. Mode-menu interaction occurs before input and does not increase the message submission count.
 
+If mode selection fails, private Bridge diagnostics identify whether the failure occurred before the tools menu opened, while locating or activating the menu item, or while confirming activation. They retain only control types, counts, and short labels, never the task prompt, answer, cookies, account identity, or conversation URL. `submittedCount=0` proves that no message was sent and permits a new task after a fixed release is deployed. A submitted or uncertain task must never be retried or moved to another account.
+
 ### 5.3 CLI and MCP
 
 ```powershell

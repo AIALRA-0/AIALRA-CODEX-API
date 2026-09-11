@@ -113,6 +113,27 @@ export const BrowserControlDiagnosticsSchema = z.object({
     })
     .nullable()
     .default(null),
+  modeSelection: z
+    .object({
+      mode: ChatGptWebModeSchema,
+      phase: z.enum([
+        "preflight",
+        "tools_clicked",
+        "option_missing",
+        "option_selected",
+        "activated",
+        "activation_missing",
+      ]),
+      preexistingMatchCount: z.number().int().nonnegative(),
+      visiblePopupCount: z.number().int().nonnegative(),
+      matchingControlCount: z.number().int().nonnegative(),
+      newMatchingControlCount: z.number().int().nonnegative(),
+      popupLabels: z.array(z.string().min(1).max(64)).max(16),
+      toolsControl: BrowserControlSchema.nullable(),
+      selectedOption: BrowserControlSchema.nullable(),
+    })
+    .nullable()
+    .default(null),
   resolvedThinkingDepth: z.string().min(1).max(64).nullable().default(null),
   pageKind: z.enum(["home", "conversation", "other"]),
   surface: z.enum(["chat", "work", "unknown"]),

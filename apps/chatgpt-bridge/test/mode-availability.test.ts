@@ -15,6 +15,8 @@ function modeSelection(menuVisible: boolean, optionFound = false, visibleLabel =
       SELECTORS: { tools: [], composer: [] },
       document: { querySelectorAll: () => [] },
       nativeClick,
+      describeControl: () => null,
+      isDepthControlVisible: () => true,
       buttonByText: () => (menuVisible ? {} : null),
       waitForStableButtonByText: async () => (optionFound ? {} : null),
       setTimeout: (callback: () => void) => callback(),
@@ -73,9 +75,12 @@ describe("Temporary Chat mode availability", () => {
         first: () => tools,
         SELECTORS: { tools: [], composer: [] },
         document: {
-          querySelectorAll: () => [sidebarSearch, globalSearch],
+          querySelectorAll: (selector: string) =>
+            selector.includes("[role='menu']") ? [] : [sidebarSearch, globalSearch],
         },
         nativeClick,
+        describeControl: () => null,
+        isDepthControlVisible: () => true,
         buttonByText: () => null,
         waitForStableButtonByText,
         setTimeout: (callback: () => void) => callback(),

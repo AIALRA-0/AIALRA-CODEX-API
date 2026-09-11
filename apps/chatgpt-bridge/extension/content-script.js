@@ -70,6 +70,7 @@ const MODEL_LABEL_PATTERN = /^(?:instant|thinking(?:\s+effort)?|pro|自动|快�
 let activeJobId = null;
 let verifiedNonPersonalizedDocumentToken = null;
 let resolvedThinkingDepth = null;
+let modeSelectionDiagnostics = null;
 let cancelled = false;
 let depthDiscovery = null;
 let depthCatalog = [];
@@ -902,12 +903,60 @@ async function configureMode(mode, jobId, deadline) {
     ),
   );
   const tools = first(SELECTORS.tools) ?? buttonByText(/tools|工具|add.*more|更多/i);
+  modeSelectionDiagnostics = {
+    mode,
+    phase: "preflight",
+    preexistingMatchCount: preexistingModeControls.size,
+    visiblePopupCount: 0,
+    matchingControlCount: 0,
+    newMatchingControlCount: 0,
+    popupLabels: [],
+    toolsControl: describeControl(tools),
+    selectedOption: null,
+  };
   if (!tools) throw new Error("chatgpt_ui_changed");
   await nativeClick(tools, jobId, "tools_menu");
+  modeSelectionDiagnostics.phase = "tools_clicked";
   // The tools popover animates from the composer. Reading a row's rectangle on
   // the first mutation produces a stale Y coordinate and can click the row
   // above it after the animation settles.
   await new Promise((resolve) => setTimeout(resolve, 650));
+  const visiblePopups = [
+    ...document.querySelectorAll(
+      "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog']",
+    ),
+  ].filter(isDepthControlVisible);
+  const matchingControls = [
+    ...document.querySelectorAll("button, [role='menuitem'], [role='option']"),
+  ].filter((element) => {
+    const rectangle = element.getBoundingClientRect();
+    return (
+      rectangle.width > 0 &&
+      rectangle.height > 0 &&
+      pattern.test(`${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`.trim())
+    );
+  });
+  const popupLabels = visiblePopups
+    .flatMap((popup) => [
+      ...popup.querySelectorAll(
+        "button, [role='menuitem'], [role='menuitemradio'], [role='option']",
+      ),
+    ])
+    .map((element) => visibleText(element).replace(/\s+/g, " ").trim())
+    .filter(
+      (label, index, labels) =>
+        label.length > 0 &&
+        label.length <= 64 &&
+        !/[@\r\n]|https?:|\//i.test(label) &&
+        labels.indexOf(label) === index,
+    )
+    .slice(0, 16);
+  modeSelectionDiagnostics.visiblePopupCount = visiblePopups.length;
+  modeSelectionDiagnostics.matchingControlCount = matchingControls.length;
+  modeSelectionDiagnostics.newMatchingControlCount = matchingControls.filter(
+    (element) => !preexistingModeControls.has(element),
+  ).length;
+  modeSelectionDiagnostics.popupLabels = popupLabels;
   // Match the concrete tools-menu row, not the shorter global Search control in
   // ChatGPT's sidebar. The sidebar control previously won the text-length sort
   // and opened conversation search instead of enabling web search.
@@ -917,6 +966,7 @@ async function configureMode(mode, jobId, deadline) {
     preexistingModeControls.size > 0 ? preexistingModeControls : tools,
   );
   if (!option) {
+    modeSelectionDiagnostics.phase = "option_missing";
     // A recognizable open tools menu can legitimately omit a capability in
     // Temporary Chat. Do not classify that as a broken account or leave it.
     if (
@@ -930,15 +980,21 @@ async function configureMode(mode, jobId, deadline) {
     }
     throw new Error("chatgpt_ui_changed");
   }
+  modeSelectionDiagnostics.phase = "option_selected";
+  modeSelectionDiagnostics.selectedOption = describeControl(option);
   await nativeClick(option, jobId, "mode_option");
   const activationPattern = mode === "search" ? searchPattern : /deep research|深度研究/i;
   const activationDeadline = Math.min(deadline, Date.now() + 8_000);
   while (Date.now() < activationDeadline) {
     const activeComposer = first(SELECTORS.composer);
     const activeRoot = activeComposer ? composerControlRoot(activeComposer) : null;
-    if (activeRoot && activationPattern.test(visibleText(activeRoot))) return;
+    if (activeRoot && activationPattern.test(visibleText(activeRoot))) {
+      modeSelectionDiagnostics.phase = "activated";
+      return;
+    }
     await waitForMutation(250);
   }
+  modeSelectionDiagnostics.phase = "activation_missing";
   throw new Error("chatgpt_ui_changed");
 }
 
@@ -1422,6 +1478,7 @@ function controlDiagnostics(expectedObjective = null) {
     selectedSend: composer ? describeControl(sendControlFor(composer)) : null,
     sameRowControls,
     thinkingDepthDiscovery: thinkingDepthDiscoveryDiagnostics,
+    modeSelection: modeSelectionDiagnostics,
     resolvedThinkingDepth,
     pageKind: pageKind(),
     surface: currentSurface(),
@@ -1691,6 +1748,7 @@ async function invoke(invocation) {
   }
   activeJobId = invocation.jobId;
   resolvedThinkingDepth = null;
+  modeSelectionDiagnostics = null;
   cancelled = false;
   const deadline = invocation.deadlineAt - TERMINAL_REPORT_GRACE_MS;
   try {
@@ -1809,6 +1867,7 @@ async function invoke(invocation) {
     activeJobId = null;
     verifiedNonPersonalizedDocumentToken = null;
     resolvedThinkingDepth = null;
+    modeSelectionDiagnostics = null;
     cancelled = false;
   }
 }
