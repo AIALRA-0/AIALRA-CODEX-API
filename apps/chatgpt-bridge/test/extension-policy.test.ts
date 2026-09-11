@@ -170,7 +170,10 @@ describe("single-page browser agent policy", () => {
     );
     expect(enableScript).not.toContain('"${compose[@]}" build');
     expect(enableScript).toContain("process.exit(b.enabled&&b.sandboxVerified");
-    expect(enableScript).toContain('"${compose[@]}" up --detach --force-recreate api worker');
+    expect(enableScript).toContain(
+      '"${compose[@]}" up --detach --force-recreate --no-deps api worker',
+    );
+    expect(enableScript).not.toContain('"${compose[@]}" up --detach --force-recreate api worker');
     expect(enableScript).not.toContain(
       "up --detach --force-recreate api worker chatgpt-browser chatgpt-browser-b",
     );

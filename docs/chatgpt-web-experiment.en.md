@@ -253,6 +253,8 @@ RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
+The `enable`, `disable`, and rollback paths recreate only API and Worker with an explicit `--no-deps`. Compose therefore cannot restart Browser, Egress Proxy, Runner, or PostgreSQL as a side effect, so switching admission does not interrupt a signed-in browser or invalidate the qualification that just passed.
+
 Stop all experimental components:
 
 ```bash

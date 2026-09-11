@@ -298,6 +298,8 @@ RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 bash deploy/scripts/enable-chatgpt-web.sh
 ```
 
+`enable`、`disable` 和失败回滚只重建 API 与 Worker，并显式使用 `--no-deps`，不会让 Compose 顺带重启 Browser、Egress Proxy、Runner 或 PostgreSQL。浏览器登录态和刚通过的资格检查因此不会因切换接单开关而被打断
+
 完全停止实验组件：
 
 ```bash

@@ -94,7 +94,7 @@ restart_control_plane_with_rollback() {
       set_flag "$old_enabled"
       set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED "$old_diagnostic"
       set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$old_concurrency"
-      "${compose[@]}" up --detach --force-recreate api worker >/dev/null 2>&1 || true
+      "${compose[@]}" up --detach --force-recreate --no-deps api worker >/dev/null 2>&1 || true
       wait_for_control_plane >/dev/null 2>&1 || true
     fi
     exit "$exit_code"
@@ -103,7 +103,7 @@ restart_control_plane_with_rollback() {
   set_flag "$target_enabled"
   set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED "$target_diagnostic"
   set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$target_concurrency"
-  "${compose[@]}" up --detach --force-recreate api worker
+  "${compose[@]}" up --detach --force-recreate --no-deps api worker
   wait_for_control_plane
   transition_active=false
   trap - ERR INT TERM
