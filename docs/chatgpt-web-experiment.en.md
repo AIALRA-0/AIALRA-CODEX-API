@@ -189,6 +189,8 @@ JSON cannot legally contain comments. See [`openapi/openapi.yaml`](../openapi/op
 
 Chat and search use a new non-personalized Temporary Chat. Deep Research uses a new ordinary persistent conversation and requires `persistenceAcknowledged=true`; responses identify `persistent_chat_history`. No web mode continues an old conversation or retries automatically after timeout, rate limit, sign-in failure, verification prompt, UI change, or uncertain delivery.
 
+After Deep Research mode selection, the extension waits for the editor node and geometry to stabilize before input. It may repeat the pre-submit input operation once only when the page is still the same fresh document, the user-turn count has not changed, generation is inactive, and the editor is provably empty. This is not a second submission: the submit control is still activated at most once, and any uncertain send state fails immediately.
+
 ### 5.3 CLI and MCP
 
 ```powershell

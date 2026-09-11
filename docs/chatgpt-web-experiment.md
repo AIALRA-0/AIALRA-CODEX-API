@@ -230,6 +230,8 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 普通聊天和搜索固定使用新的非个性化 Temporary Chat。Deep Research 固定使用新的普通持久会话，并要求 `persistenceAcknowledged=true`；响应会明确标记 `persistent_chat_history`。任何模式都不续接旧会话，也不会在超时、限流、验证码、登录失效、页面变化或状态不确定时自动重试
 
+Deep Research 切换模式后会等待编辑器节点和位置稳定再输入。只有同时确认页面仍是同一新文档、用户消息数未增加、页面没有生成且编辑器为空时，才允许重做 1 次发送前输入；这不是第二次提交。提交按钮仍最多点击 1 次，无法证明未提交时立即失败
+
 ### 5.3 CLI 和 MCP
 
 ```powershell

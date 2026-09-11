@@ -262,6 +262,41 @@ function composerPlainText(composer) {
   return paragraphs.map(inlineText).join("\n");
 }
 
+async function waitForStableComposer(deadline, stabilityMs = 1_500) {
+  const stabilityDeadline = Math.min(deadline, Date.now() + 10_000);
+  let candidate = null;
+  let signature = "";
+  let stableSince = 0;
+  let stableReads = 0;
+  while (Date.now() < stabilityDeadline) {
+    const current = first(SELECTORS.composer);
+    const rectangle = current?.getBoundingClientRect();
+    const currentSignature = rectangle
+      ? [rectangle.left, rectangle.top, rectangle.width, rectangle.height]
+          .map((value) => Math.round(value))
+          .join(":")
+      : "";
+    if (
+      current &&
+      rectangle &&
+      rectangle.width > 0 &&
+      rectangle.height > 0 &&
+      current === candidate &&
+      currentSignature === signature
+    ) {
+      stableReads += 1;
+      if (stableReads >= 4 && Date.now() - stableSince >= stabilityMs) return current;
+    } else {
+      candidate = current;
+      signature = currentSignature;
+      stableSince = Date.now();
+      stableReads = current && rectangle?.width > 0 && rectangle.height > 0 ? 1 : 0;
+    }
+    await waitForMutation(250);
+  }
+  throw new Error("chatgpt_page_not_ready");
+}
+
 async function nativeSetComposerText(composer, text, jobId, deadline) {
   const point = nativePoint(composer);
   const accepted = await sendRuntimeMessage({
@@ -1627,10 +1662,30 @@ async function invoke(invocation) {
     await configureMode(invocation.mode, invocation.jobId, deadline);
     resolvedThinkingDepth = await configureThinkingDepth(invocation, deadline);
     await reportProgress(invocation.jobId, "mode_selected", controlDiagnostics());
-    composer = await waitForElement(SELECTORS.composer, deadline);
+    composer =
+      invocation.mode === "deep_research"
+        ? await waitForStableComposer(deadline)
+        : await waitForElement(SELECTORS.composer, deadline);
     const beforeAssistantCount = assistantTurnElements().length;
     const beforeUserCount = userMessages().length;
-    await nativeSetComposerText(composer, pageObjective, invocation.jobId, deadline);
+    const inputAttempts = invocation.mode === "deep_research" ? 2 : 1;
+    for (let attempt = 1; attempt <= inputAttempts; attempt += 1) {
+      try {
+        await nativeSetComposerText(composer, pageObjective, invocation.jobId, deadline);
+        break;
+      } catch (error) {
+        const currentComposer = first(SELECTORS.composer);
+        const definitelyNotSubmitted =
+          userMessages().length === beforeUserCount &&
+          !first(SELECTORS.stop) &&
+          currentComposer &&
+          canonicalEditorText(composerPlainText(currentComposer)) === "" &&
+          boundInvocationDocument(invocation.documentToken, invocation.temporaryChat);
+        if (attempt >= inputAttempts || !definitelyNotSubmitted) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        composer = await waitForStableComposer(deadline);
+      }
+    }
     composer = await waitForElement(SELECTORS.composer, deadline);
     if (canonicalEditorText(composerPlainText(composer)) !== canonicalEditorText(pageObjective)) {
       throw new Error("chatgpt_delivery_uncertain");
