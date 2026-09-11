@@ -184,13 +184,7 @@ async function nativeClick(element, jobId, action) {
   const x = Math.round(
     window.screenX + browserChromeWidth / 2 + rectangle.left + rectangle.width / 2,
   );
-  const y = Math.round(
-    window.screenY +
-      browserChromeHeight +
-      rectangle.top +
-      rectangle.height / 2 +
-      (action === "mode_option" ? 60 : 0),
-  );
+  const y = Math.round(window.screenY + browserChromeHeight + rectangle.top + rectangle.height / 2);
   const result = await sendRuntimeMessage({
     type: "aialra.native-click",
     jobId,

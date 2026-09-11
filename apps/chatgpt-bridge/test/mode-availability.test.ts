@@ -29,6 +29,37 @@ function modeSelection(menuVisible: boolean, optionFound = false, visibleLabel =
 }
 
 describe("Temporary Chat mode availability", () => {
+  it("clicks a mode option at its actual center without a legacy vertical offset", async () => {
+    const sendRuntimeMessage = vi.fn(async () => ({ ok: true }));
+    const nativeClick = runInNewContext(
+      `${source.slice(source.indexOf("async function nativeClick("), source.indexOf("function nativePoint("))}; nativeClick`,
+      {
+        window: {
+          screenX: 10,
+          screenY: 20,
+          outerWidth: 1_000,
+          innerWidth: 980,
+          outerHeight: 800,
+          innerHeight: 720,
+        },
+        sendRuntimeMessage,
+        Math,
+      },
+    );
+    const control = {
+      getBoundingClientRect: () => ({ left: 100, top: 200, width: 80, height: 20 }),
+    };
+
+    await nativeClick(control, "synthetic", "mode_option");
+
+    expect(sendRuntimeMessage).toHaveBeenCalledWith({
+      type: "aialra.native-click",
+      jobId: "synthetic",
+      action: "mode_option",
+      x: 160,
+      y: 310,
+    });
+  });
   it("reports a missing research capability only when the tools menu is recognizable", async () => {
     const { configureMode, nativeClick } = modeSelection(true);
     await expect(configureMode("deep_research", "synthetic", Date.now() + 10_000)).rejects.toThrow(

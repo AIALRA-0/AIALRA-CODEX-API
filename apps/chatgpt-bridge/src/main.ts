@@ -434,6 +434,8 @@ async function main(): Promise<void> {
   let pageReady = false;
   let authenticated = false;
   let discoveredModels: BrowserModel[] = [];
+  let modelCatalogRevision = 0;
+  const modelCatalogWaiters = new Set<(revision: number) => void>();
   let activeTabs = 0;
   let controlDiagnostics: BrowserControlDiagnostics | null = null;
   let browserFailureCode: BrowserPageFailureCode | null = null;
@@ -458,6 +460,22 @@ async function main(): Promise<void> {
   let lastResetAt: string | null = null;
   let lastSubmissionAt: string | null = null;
   let temporaryChatVerified = false;
+
+  const waitForModelCatalogUpdate = (previousRevision: number): Promise<void> =>
+    new Promise((resolve) => {
+      const finish = (revision: number) => {
+        if (revision <= previousRevision) return;
+        clearTimeout(timer);
+        modelCatalogWaiters.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        modelCatalogWaiters.delete(finish);
+        resolve();
+      }, 10_000);
+      timer.unref();
+      modelCatalogWaiters.add(finish);
+    });
 
   const finishActiveInvocation = (
     jobId: string,
@@ -598,7 +616,9 @@ async function main(): Promise<void> {
     }
     if (request.method === "GET" && url.pathname === "/models") {
       if (extension && !activeJobId) {
+        const update = waitForModelCatalogUpdate(modelCatalogRevision);
         extension.send(JSON.stringify({ type: "probe", discoverModels: true }));
+        await update;
       }
       const snapshot = ModelCatalogSnapshotSchema.parse({
         source: extension && pageReady && authenticated ? "chatgpt-web" : "unavailable",
@@ -963,6 +983,10 @@ async function main(): Promise<void> {
       }
       if (message.type === "hello" || message.type === "models") {
         discoveredModels = message.authenticated ? message.models : [];
+        if (message.type === "models") {
+          modelCatalogRevision += 1;
+          for (const waiter of modelCatalogWaiters) waiter(modelCatalogRevision);
+        }
         pageReady = message.pageReady;
         authenticated = message.authenticated;
         activeTabs = message.activeTabs;

@@ -209,6 +209,8 @@ Deep Research 响应包含 `X-AIALRA-Data-Retention: persistent_chat_history`；
 
 ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 等效价格；接口返回 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”
 
+Browser 刚启动时，思考深度目录可能仍在读取网页控件。`/api/v1/models` 会等待本次读取完成后再返回，调用方应从 `webThinkingDepths` 选择精确标签，不要缓存猜测值。显式档位尚未验证时，任务会在发送前返回 `chatgpt_thinking_depth_unavailable`，不会降级到其他档位，也不会发送消息
+
 启用、真实网页探针、安全边界和完整错误说明见[ChatGPT 网页通道](chatgpt-web-experiment.md)
 
 ## 5 原生 `Jobs` 接口

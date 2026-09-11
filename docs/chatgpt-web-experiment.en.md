@@ -195,6 +195,8 @@ After opening the tools menu for Search or Deep Research, the extension waits fo
 
 If mode selection fails, private Bridge diagnostics identify whether the failure occurred before the tools menu opened, while locating or activating the menu item, or while confirming activation. They retain only control types, counts, and short labels, never the task prompt, answer, cookies, account identity, or conversation URL. `submittedCount=0` proves that no message was sent and permits a new task after a fixed release is deployed. A submitted or uncertain task must never be retried or moved to another account.
 
+The first model-catalog request after a Browser restart waits for one current thinking-depth discovery instead of treating a not-yet-loaded empty catalog as proof that the account lacks Pro depths. An explicit `thinkingDepth` must still match the live `webThinkingDepths` value exactly, and the system never silently downgrades it.
+
 ### 5.3 CLI and MCP
 
 ```powershell

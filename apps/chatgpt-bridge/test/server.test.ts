@@ -111,9 +111,34 @@ describe("ChatGPT web bridge server", () => {
       lastFailureDiagnostics: null,
     });
 
-    const modelResponse = await fetch(`http://127.0.0.1:${port}/models`, {
+    const modelRefresh = nextMessage(extension);
+    let modelResponseSettled = false;
+    const modelResponsePromise = fetch(`http://127.0.0.1:${port}/models`, {
       headers: { authorization: "Bearer synthetic-api-token" },
+    }).then((response) => {
+      modelResponseSettled = true;
+      return response;
     });
+    expect(await modelRefresh).toMatchObject({ type: "probe", discoverModels: true });
+    expect(modelResponseSettled).toBe(false);
+    extension.send(
+      JSON.stringify({
+        type: "models",
+        pageReady: true,
+        authenticated: true,
+        models: [
+          {
+            id: "chatgpt-web.auto",
+            displayName: "GPT-5 Pro",
+            available: true,
+            webThinkingDepths: ["Standard", "Extended", "Heavy"],
+            defaultWebThinkingDepth: "Standard",
+          },
+        ],
+        activeTabs: 0,
+      }),
+    );
+    const modelResponse = await modelResponsePromise;
     const catalog = (await modelResponse.json()) as { models: Array<{ id: string }> };
     expect(catalog.models.map((model) => model.id)).toEqual(["chatgpt-web.auto"]);
     expect(catalog.models[0]).toMatchObject({
