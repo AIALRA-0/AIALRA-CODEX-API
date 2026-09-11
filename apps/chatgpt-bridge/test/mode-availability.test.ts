@@ -13,6 +13,7 @@ function modeSelection(menuVisible: boolean, optionFound = false, visibleLabel =
     {
       first: () => tools,
       SELECTORS: { tools: [], composer: [] },
+      document: { querySelectorAll: () => [] },
       nativeClick,
       buttonByText: () => (menuVisible ? {} : null),
       waitForStableButtonByText: async () => (optionFound ? {} : null),
@@ -52,13 +53,18 @@ describe("Temporary Chat mode availability", () => {
     ).resolves.toBeUndefined();
     expect(nativeClick).toHaveBeenCalledTimes(2);
   });
-  it("excludes a Search control that existed before the tools menu opened", async () => {
+  it("excludes every Search control that existed before the tools menu opened", async () => {
     const tools = {};
-    const sidebarSearch = {};
+    const searchControl = () => ({
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({ width: 100, height: 40 }),
+    });
+    const sidebarSearch = searchControl();
+    const globalSearch = searchControl();
     const menuSearch = {};
     const nativeClick = vi.fn();
     const waitForStableButtonByText = vi.fn(async (_pattern, _deadline, excluded) => {
-      expect(excluded).toBe(sidebarSearch);
+      expect([...excluded]).toEqual([sidebarSearch, globalSearch]);
       return menuSearch;
     });
     const configureMode = runInNewContext(
@@ -66,8 +72,11 @@ describe("Temporary Chat mode availability", () => {
       {
         first: () => tools,
         SELECTORS: { tools: [], composer: [] },
+        document: {
+          querySelectorAll: () => [sidebarSearch, globalSearch],
+        },
         nativeClick,
-        buttonByText: () => sidebarSearch,
+        buttonByText: () => null,
         waitForStableButtonByText,
         setTimeout: (callback: () => void) => callback(),
         composerControlRoot: () => ({}),

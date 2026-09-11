@@ -232,7 +232,7 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 Deep Research 切换模式后会等待编辑器节点和位置稳定再输入。只有同时确认页面仍是同一新文档、用户消息数未增加、页面没有生成且编辑器为空时，才允许重做 1 次发送前输入；这不是第二次提交。提交按钮仍最多点击 1 次，无法证明未提交时立即失败
 
-Search 和 Deep Research 打开工具菜单后会等待真实菜单项的节点和位置稳定，并排除页面原有的侧栏 Search 控件；`Search`、`Web search`、`网页搜索` 和 `联网搜索` 均按当前页面标签识别。模式菜单操作发生在输入前，不会增加消息提交次数
+Search 和 Deep Research 打开工具菜单后会等待真实菜单项的节点和位置稳定，并排除打开菜单前已经存在的全部侧栏、导航和对话 Search 控件；`Search`、`Web search`、`网页搜索` 和 `联网搜索` 均按当前页面标签识别。模式菜单操作发生在输入前，不会增加消息提交次数
 
 ### 5.3 CLI 和 MCP
 

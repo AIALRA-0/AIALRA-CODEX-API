@@ -779,14 +779,21 @@ async function configureThinkingDepth(invocation, deadline) {
 }
 
 function buttonByText(pattern, excluded = null) {
+  const isExcluded = (element) => {
+    const exclusions = excluded instanceof Set ? [...excluded] : [excluded];
+    return exclusions.some(
+      (candidate) =>
+        candidate &&
+        (element === candidate || candidate.contains(element) || element.contains(candidate)),
+    );
+  };
   const semanticControl = [
     ...document.querySelectorAll("button, [role='menuitem'], [role='option']"),
   ]
     .filter((element) => {
       const rectangle = element.getBoundingClientRect();
       return (
-        element !== excluded &&
-        !excluded?.contains(element) &&
+        !isExcluded(element) &&
         rectangle.width > 0 &&
         rectangle.height > 0 &&
         pattern.test(`${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`.trim())
@@ -806,7 +813,7 @@ function buttonByText(pattern, excluded = null) {
     const text = textNode.nodeValue?.trim() ?? "";
     const parent = textNode.parentElement;
     if (!text || !parent || !pattern.test(text)) continue;
-    if (parent === excluded || excluded?.contains(parent)) continue;
+    if (isExcluded(parent)) continue;
     let candidate = null;
     for (
       let current = parent;
@@ -820,7 +827,7 @@ function buttonByText(pattern, excluded = null) {
         break;
       }
     }
-    if (!candidate) continue;
+    if (!candidate || isExcluded(candidate)) continue;
     const rectangle = candidate.getBoundingClientRect();
     if (rectangle.width > 0 && rectangle.height > 0) textMatches.push(candidate);
   }
@@ -879,10 +886,21 @@ async function configureMode(mode, jobId, deadline) {
   if (mode === "chat") return;
   const searchPattern = /web search|search the web|(^|\s)search(\s|$)|网页搜索|联网搜索/i;
   const pattern = mode === "search" ? searchPattern : /deep research|深度研究/i;
-  // Remember a matching sidebar control before opening the menu. The real mode
-  // row appears only after the tools popover opens and must not be confused
-  // with an existing global Search button or conversation title.
-  const preexistingModeControl = buttonByText(pattern);
+  // Remember every matching control before opening the menu. The real mode row
+  // appears only after the tools popover opens and must not be confused with
+  // any of the existing sidebar, navigation, or conversation Search controls.
+  const preexistingModeControls = new Set(
+    [...document.querySelectorAll("button, [role='menuitem'], [role='option']")].filter(
+      (element) => {
+        const rectangle = element.getBoundingClientRect();
+        return (
+          rectangle.width > 0 &&
+          rectangle.height > 0 &&
+          pattern.test(`${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`.trim())
+        );
+      },
+    ),
+  );
   const tools = first(SELECTORS.tools) ?? buttonByText(/tools|工具|add.*more|更多/i);
   if (!tools) throw new Error("chatgpt_ui_changed");
   await nativeClick(tools, jobId, "tools_menu");
@@ -896,12 +914,18 @@ async function configureMode(mode, jobId, deadline) {
   const option = await waitForStableButtonByText(
     pattern,
     deadline,
-    preexistingModeControl ?? tools,
+    preexistingModeControls.size > 0 ? preexistingModeControls : tools,
   );
   if (!option) {
     // A recognizable open tools menu can legitimately omit a capability in
     // Temporary Chat. Do not classify that as a broken account or leave it.
-    if (mode === "deep_research" && buttonByText(searchPattern, preexistingModeControl ?? tools)) {
+    if (
+      mode === "deep_research" &&
+      buttonByText(
+        searchPattern,
+        preexistingModeControls.size > 0 ? preexistingModeControls : tools,
+      )
+    ) {
       throw new Error("chatgpt_mode_unavailable");
     }
     throw new Error("chatgpt_ui_changed");
