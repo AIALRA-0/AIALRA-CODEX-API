@@ -21,7 +21,7 @@
   "dependencies": {
     "@aialra/contracts": "workspace:*",
     "@aialra/security": "workspace:*",
-    "@openai/codex-sdk": "0.149.1",
+    "@openai/codex-sdk": "0.153.4",
     "zod": "latest"
   }
 }
