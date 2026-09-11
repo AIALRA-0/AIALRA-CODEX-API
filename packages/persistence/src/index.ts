@@ -2006,34 +2006,48 @@ export class PostgresJobRepository implements JobRepository {
     accountId: string,
     patch: ChatGptWebAccountPatch,
   ): Promise<ChatGptWebAccountRecord> {
-    const current = await this.findChatGptWebAccount(accountId);
-    if (!current) throw new Error("chatgpt_web_account_not_found");
-    const updated = ChatGptWebAccountSchema.parse({
-      ...current,
-      ...patch,
-      accountId: current.accountId,
-      slot: current.slot,
-      vncPath: current.vncPath,
-      updatedAt: new Date().toISOString(),
-    });
-    const result = await this.pool.query(
-      `UPDATE chatgpt_web_accounts SET
-         label=$2, plan=$3, enabled=$4, qualified=$5, status=$6,
-         lease_job_id=$7, lease_expires_at=$8, updated_at=$9
-       WHERE account_id=$1 RETURNING *`,
-      [
-        accountId,
-        updated.label,
-        updated.plan,
-        updated.enabled,
-        updated.qualified,
-        accountStatusWithoutBridge(updated),
-        updated.activeJobId,
-        updated.leaseExpiresAt,
-        updated.updatedAt,
-      ],
-    );
-    return this.rowToChatGptWebAccount(result.rows[0]);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const currentResult = await client.query(
+        "SELECT * FROM chatgpt_web_accounts WHERE account_id=$1 FOR UPDATE",
+        [accountId],
+      );
+      if (!currentResult.rowCount) throw new Error("chatgpt_web_account_not_found");
+      const current = this.rowToChatGptWebAccount(currentResult.rows[0]);
+      const updated = ChatGptWebAccountSchema.parse({
+        ...current,
+        ...patch,
+        accountId: current.accountId,
+        slot: current.slot,
+        vncPath: current.vncPath,
+        updatedAt: new Date().toISOString(),
+      });
+      const result = await client.query(
+        `UPDATE chatgpt_web_accounts SET
+           label=$2, plan=$3, enabled=$4, qualified=$5, status=$6,
+           lease_job_id=$7, lease_expires_at=$8, updated_at=$9
+         WHERE account_id=$1 RETURNING *`,
+        [
+          accountId,
+          updated.label,
+          updated.plan,
+          updated.enabled,
+          updated.qualified,
+          accountStatusWithoutBridge(updated),
+          updated.activeJobId,
+          updated.leaseExpiresAt,
+          updated.updatedAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return this.rowToChatGptWebAccount(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async acquireChatGptWebAccountLease(

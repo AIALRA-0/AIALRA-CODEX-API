@@ -211,20 +211,21 @@ Both menus and accessible sliders are supported. Slider discovery reads each act
 
 The page supplies no reliable token, Codex Credit, quota-delta, or API-equivalent-price measurement. Results use `measurementStatus: "unavailable"`; the console displays that the page did not provide reliable data and never substitutes zero.
 
-| Error                             | Direct cause                                     | Next action                                                      |
-| --------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
-| `chatgpt_login_required`          | The dedicated browser is signed out              | Open noVNC and sign in manually                                  |
-| `chatgpt_verification_required`   | Verification is visible                          | Complete it manually; the system does not bypass it              |
-| `chatgpt_ui_changed`              | Required UI elements are unrecognized            | Close admission and update the synthetic DOM contract            |
-| `chatgpt_rate_limited`            | The page shows a usage or rate limit             | Wait for the page's stated recovery time                         |
-| `chatgpt_delivery_uncertain`      | The bridge cannot prove whether send occurred    | Keep the job failed and do not auto-resend                       |
-| `chatgpt_output_incomplete`       | The final text never became provably stable      | Inspect the visible page and extension state                     |
-| `chatgpt_sources_missing`         | The answer completed without a verifiable source | Keep the task failed; the account remains available              |
-| `chatgpt_page_generation_blank`   | The page created an assistant turn without text  | Keep admission closed and inspect page mode and generation state |
-| `chatgpt_page_rendering_failed`   | DOM text exists but is not visible               | Repair rendering detection and rerun the stable-chat gate        |
-| `chatgpt_output_selector_changed` | Visible output exists outside the known selector | Update result targeting and rerun the complete gate              |
-| `chatgpt_clarification_required`  | Deep research asks for more information          | Amend the contract and create a new job                          |
-| `chatgpt_timeout`                 | The job exceeded its own deadline                | Inspect the page before deciding on a new job                    |
+| Error                             | Direct cause                                     | Next action                                                                                                                          |
+| --------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `chatgpt_login_required`          | The dedicated browser is signed out              | Open noVNC and sign in manually                                                                                                      |
+| `chatgpt_verification_required`   | Verification is visible                          | Complete it manually; the system does not bypass it                                                                                  |
+| `chatgpt_ui_changed`              | Required UI elements are unrecognized            | Close admission and update the synthetic DOM contract                                                                                |
+| `chatgpt_rate_limited`            | The page shows a usage or rate limit             | Wait for the page's stated recovery time                                                                                             |
+| `chatgpt_delivery_uncertain`      | The bridge cannot prove whether send occurred    | Keep the job failed and do not auto-resend                                                                                           |
+| `chatgpt_output_incomplete`       | The final text never became provably stable      | Inspect the visible page and extension state                                                                                         |
+| `chatgpt_sources_missing`         | The answer completed without a verifiable source | Keep the task failed; the account remains available                                                                                  |
+| `chatgpt_page_generation_blank`   | The page created an assistant turn without text  | Keep admission closed and inspect page mode and generation state                                                                     |
+| `chatgpt_page_rendering_failed`   | DOM text exists but is not visible               | Repair rendering detection and rerun the stable-chat gate                                                                            |
+| `chatgpt_output_selector_changed` | Visible output exists outside the known selector | Update result targeting and rerun the complete gate                                                                                  |
+| `chatgpt_clarification_required`  | Deep research asks for more information          | Amend the contract and create a new job                                                                                              |
+| `chatgpt_lease_lost`              | The account job lease disappeared unexpectedly   | Keep the job failed and do not resend; close admission and inspect Worker, database, and account-state updates for a lease overwrite |
+| `chatgpt_timeout`                 | The job exceeded its own deadline                | Inspect the page before deciding on a new job                                                                                        |
 
 Ordinary HTTP responses use `429` for `chatgpt_rate_limited`, with matching seconds in the body `retryAfter` and the `Retry-After` header. Pool cooldown hints use the earliest account recovery time while respecting any active global cooldown. Once an SSE response has started, its HTTP status cannot change to `429`: the terminal error event instead includes `chatgpt_rate_limited` and `retryAfter`, then the stream ends without reporting success or automatically resubmitting the task.
 
@@ -235,6 +236,8 @@ Only accounts with a successful `single_probe` enter web admission. Each account
 Web rate limits use progressive 30-, 60-, and 120-minute cooldowns. Expiry admits only one recovery probe. A successful probe enters observation, and three consecutive successes are required to clear that state; another rate limit returns to the next cooldown. Sign-out, verification, UI drift, duplicate sends, or result misattribution closes the channel and requires requalification. The official Codex SDK channel remains independent.
 
 Administrators can read the secret-free state from `GET /api/v1/chatgpt-web/status`, including sandbox, sign-in, concurrency, queue, circuit, and qualification fields.
+
+`chatgpt_lease_lost` does not mean that the account signed out or that ChatGPT applied a rate limit. It means the Router can no longer prove that the current Worker exclusively owns the account, so the job is aborted and the account is quarantined before another job can enter the same browser. The caller must not resend the original job with a new idempotency key. The administrator should close web admission, confirm that no web job is active, then inspect `activeJobId`, `leaseExpiresAt`, Worker restarts, and database errors before validating the repair with a new test job.
 
 Disable admission but keep the visible browser for diagnosis:
 

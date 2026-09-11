@@ -256,20 +256,21 @@ ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 
 
 表 6.1 网页通道错误及下一步
 
-| 错误码                            | 直接原因                   | 下一步                                 |
-| --------------------------------- | -------------------------- | -------------------------------------- |
-| `chatgpt_login_required`          | 专用浏览器没有有效登录状态 | 管理员打开 noVNC 并重新登录            |
-| `chatgpt_verification_required`   | 页面要求验证码或人工验证   | 管理员在可见页面完成验证；系统不会绕过 |
-| `chatgpt_ui_changed`              | 必要页面元素无法识别       | 停止接单，更新并重新验证合成 DOM 契约  |
-| `chatgpt_rate_limited`            | 网页显示额度或速率限制     | 等待页面给出的恢复时间后手动重试       |
-| `chatgpt_delivery_uncertain`      | 无法证明消息是否已经发送   | 保持失败，不自动重发                   |
-| `chatgpt_output_incomplete`       | 无法证明最终正文已经稳定   | 保持失败，检查可见页面和扩展状态       |
-| `chatgpt_sources_missing`         | 回答完成但没有可验证来源   | 保持任务失败，账号继续处理其他任务     |
-| `chatgpt_page_generation_blank`   | 页面创建助手消息但正文为空 | 保持通道关闭，核对页面模式与生成状态   |
-| `chatgpt_page_rendering_failed`   | DOM 有正文但页面不可见     | 修复页面渲染判断后重新执行稳定门       |
-| `chatgpt_output_selector_changed` | 页面有可见正文但定位失败   | 更新结果定位规则并重新执行完整门禁     |
-| `chatgpt_clarification_required`  | 深度研究要求补充信息       | 修改任务合同后创建新任务               |
-| `chatgpt_timeout`                 | 任务超过自身期限           | 查询网页状态后决定是否重新创建任务     |
+| 错误码                            | 直接原因                   | 下一步                                                                          |
+| --------------------------------- | -------------------------- | ------------------------------------------------------------------------------- |
+| `chatgpt_login_required`          | 专用浏览器没有有效登录状态 | 管理员打开 noVNC 并重新登录                                                     |
+| `chatgpt_verification_required`   | 页面要求验证码或人工验证   | 管理员在可见页面完成验证；系统不会绕过                                          |
+| `chatgpt_ui_changed`              | 必要页面元素无法识别       | 停止接单，更新并重新验证合成 DOM 契约                                           |
+| `chatgpt_rate_limited`            | 网页显示额度或速率限制     | 等待页面给出的恢复时间后手动重试                                                |
+| `chatgpt_delivery_uncertain`      | 无法证明消息是否已经发送   | 保持失败，不自动重发                                                            |
+| `chatgpt_output_incomplete`       | 无法证明最终正文已经稳定   | 保持失败，检查可见页面和扩展状态                                                |
+| `chatgpt_sources_missing`         | 回答完成但没有可验证来源   | 保持任务失败，账号继续处理其他任务                                              |
+| `chatgpt_page_generation_blank`   | 页面创建助手消息但正文为空 | 保持通道关闭，核对页面模式与生成状态                                            |
+| `chatgpt_page_rendering_failed`   | DOM 有正文但页面不可见     | 修复页面渲染判断后重新执行稳定门                                                |
+| `chatgpt_output_selector_changed` | 页面有可见正文但定位失败   | 更新结果定位规则并重新执行完整门禁                                              |
+| `chatgpt_clarification_required`  | 深度研究要求补充信息       | 修改任务合同后创建新任务                                                        |
+| `chatgpt_lease_lost`              | 账号任务租约意外丢失       | 保持失败且不要重发；关闭接单并检查 Worker、数据库和账号状态更新是否并发覆盖租约 |
+| `chatgpt_timeout`                 | 任务超过自身期限           | 查询网页状态后决定是否重新创建任务                                              |
 
 普通 HTTP 响应中的 `chatgpt_rate_limited` 使用 `429`，正文 `retryAfter` 与 `Retry-After` 响应头使用相同的秒数；账号池冷却时间取最早可恢复账号的剩余时间，并遵守仍生效的全局冷却。若 SSE 已经开始，HTTP 状态不能再改为 `429`，接口会在终态错误事件中返回 `chatgpt_rate_limited` 和 `retryAfter`，随后结束流，不伪装成功，也不自动重新提交任务
 
@@ -280,6 +281,8 @@ ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 
 网页限流统一进入 30、60、120 分钟的渐进冷却；冷却到期只允许一个恢复探针。恢复探针成功后进入观察态，累计连续 3 次成功才清除限流观察；再次限流会回到下一档冷却。登录失效、验证页面、页面结构变化、重复发送或错误归属会关闭通道并要求重新验收；Codex SDK 通道继续独立运行
 
 管理员可以通过 `GET /api/v1/chatgpt-web/status` 查看沙箱、登录、当前并发、排队数、熔断原因和最近验收结果；响应不含 Cookie、会话令牌、对话地址或浏览器配置路径
+
+`chatgpt_lease_lost` 不代表账号退出登录，也不代表 ChatGPT 限流。它表示 Router 已无法证明当前 Worker 仍独占该账号，因此会中止任务并隔离账号，避免另一任务同时进入同一浏览器。调用方不得用新幂等键重发原任务；管理员应先关闭网页接单，确认没有活动任务，再检查账号记录中的 `activeJobId`、`leaseExpiresAt`、Worker 重启记录和数据库错误，修复后使用全新的测试任务复验
 
 停止接单但保留浏览器用于诊断：
 

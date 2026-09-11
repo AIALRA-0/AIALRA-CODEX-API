@@ -187,6 +187,47 @@ describe("InMemoryJobRepository", () => {
     ).resolves.toBe(false);
   });
 
+  it("preserves an active lease while account health is refreshed", async () => {
+    const repository = new InMemoryJobRepository();
+    const [config] = configuredChatGptWebAccountConfigs("a");
+    await repository.syncChatGptWebAccounts([config!]);
+    await repository.updateChatGptWebAccount("account-a", {
+      enabled: true,
+      qualified: true,
+      state: "ready",
+      authenticated: true,
+      extensionConnected: true,
+      pageReady: true,
+      sandboxVerified: true,
+    });
+    const jobId = "00000000-0000-4000-8000-000000000008";
+    await repository.acquireChatGptWebAccountLease(
+      jobId,
+      ["account-a"],
+      new Date("2026-09-01T12:00:00.000Z"),
+      60_000,
+    );
+
+    await repository.updateChatGptWebAccount("account-a", {
+      lastHeartbeatAt: "2026-09-01T12:00:10.000Z",
+      pageReady: true,
+      authenticated: true,
+    });
+
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      activeJobId: jobId,
+      state: "busy",
+    });
+    await expect(
+      repository.renewChatGptWebAccountLease(
+        "account-a",
+        jobId,
+        new Date("2026-09-01T12:00:20.000Z"),
+        60_000,
+      ),
+    ).resolves.toBe(true);
+  });
+
   it("preserves idempotency lookup", async () => {
     const repository = new InMemoryJobRepository();
     await repository.create(jobFixture());
