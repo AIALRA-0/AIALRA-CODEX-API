@@ -840,8 +840,49 @@ async function waitForButtonByText(pattern, deadline, excluded = null) {
   return null;
 }
 
+async function waitForStableButtonByText(pattern, deadline, excluded = null) {
+  const stabilityDeadline = Math.min(deadline, Date.now() + 8_000);
+  let candidate = null;
+  let signature = "";
+  let stableSince = 0;
+  let stableReads = 0;
+  while (Date.now() < stabilityDeadline) {
+    const current = buttonByText(pattern, excluded);
+    const rectangle = current?.getBoundingClientRect();
+    const currentSignature = rectangle
+      ? [rectangle.left, rectangle.top, rectangle.width, rectangle.height]
+          .map((value) => Math.round(value))
+          .join(":")
+      : "";
+    if (
+      current &&
+      rectangle &&
+      rectangle.width > 0 &&
+      rectangle.height > 0 &&
+      current === candidate &&
+      currentSignature === signature
+    ) {
+      stableReads += 1;
+      if (stableReads >= 3 && Date.now() - stableSince >= 750) return current;
+    } else {
+      candidate = current;
+      signature = currentSignature;
+      stableSince = Date.now();
+      stableReads = current && rectangle?.width > 0 && rectangle.height > 0 ? 1 : 0;
+    }
+    await waitForMutation(250);
+  }
+  return null;
+}
+
 async function configureMode(mode, jobId, deadline) {
   if (mode === "chat") return;
+  const searchPattern = /web search|search the web|(^|\s)search(\s|$)|网页搜索|联网搜索/i;
+  const pattern = mode === "search" ? searchPattern : /deep research|深度研究/i;
+  // Remember a matching sidebar control before opening the menu. The real mode
+  // row appears only after the tools popover opens and must not be confused
+  // with an existing global Search button or conversation title.
+  const preexistingModeControl = buttonByText(pattern);
   const tools = first(SELECTORS.tools) ?? buttonByText(/tools|工具|add.*more|更多/i);
   if (!tools) throw new Error("chatgpt_ui_changed");
   await nativeClick(tools, jobId, "tools_menu");
@@ -852,20 +893,22 @@ async function configureMode(mode, jobId, deadline) {
   // Match the concrete tools-menu row, not the shorter global Search control in
   // ChatGPT's sidebar. The sidebar control previously won the text-length sort
   // and opened conversation search instead of enabling web search.
-  const pattern = mode === "search" ? /web search|网页搜索|联网搜索/i : /deep research|深度研究/i;
-  const option = await waitForButtonByText(pattern, deadline, tools);
+  const option = await waitForStableButtonByText(
+    pattern,
+    deadline,
+    preexistingModeControl ?? tools,
+  );
   if (!option) {
     // A recognizable open tools menu can legitimately omit a capability in
     // Temporary Chat. Do not classify that as a broken account or leave it.
-    if (mode === "deep_research" && buttonByText(/web search|网页搜索|联网搜索/i, tools)) {
+    if (mode === "deep_research" && buttonByText(searchPattern, preexistingModeControl ?? tools)) {
       throw new Error("chatgpt_mode_unavailable");
     }
     throw new Error("chatgpt_ui_changed");
   }
   await nativeClick(option, jobId, "mode_option");
-  const activationPattern =
-    mode === "search" ? /web search|网页搜索|联网搜索/i : /deep research|深度研究/i;
-  const activationDeadline = Math.min(deadline, Date.now() + 5_000);
+  const activationPattern = mode === "search" ? searchPattern : /deep research|深度研究/i;
+  const activationDeadline = Math.min(deadline, Date.now() + 8_000);
   while (Date.now() < activationDeadline) {
     const activeComposer = first(SELECTORS.composer);
     const activeRoot = activeComposer ? composerControlRoot(activeComposer) : null;

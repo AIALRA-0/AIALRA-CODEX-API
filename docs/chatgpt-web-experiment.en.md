@@ -191,6 +191,8 @@ Chat and search use a new non-personalized Temporary Chat. Deep Research uses a 
 
 After Deep Research mode selection, the extension waits for the editor node and geometry to stabilize before input. It may repeat the pre-submit input operation once only when the page is still the same fresh document, the user-turn count has not changed, generation is inactive, and the editor is provably empty. This is not a second submission: the submit control is still activated at most once, and any uncertain send state fails immediately.
 
+After opening the tools menu for Search or Deep Research, the extension waits for the real menu row and its geometry to stabilize while excluding any Search control that already existed in the sidebar. It recognizes the current `Search`, `Web search`, `网页搜索`, and `联网搜索` labels. Mode-menu interaction occurs before input and does not increase the message submission count.
+
 ### 5.3 CLI and MCP
 
 ```powershell
