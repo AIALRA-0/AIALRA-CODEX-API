@@ -356,7 +356,7 @@ export class JobsService {
           createdAt: new Date().toISOString(),
         },
       );
-      await this.queue.enqueue(job.id, job.task.executionChannel);
+      await this.queue.enqueue(job.id, job.task.executionChannel, job.task.deadlineMs);
     }
     return (await this.repository.findById(job.id)) as Job;
   }
@@ -568,7 +568,8 @@ export class JobsService {
         createdAt: new Date().toISOString(),
       },
     );
-    await this.queue.enqueue(id, (await this.get(id)).task.executionChannel);
+    const approvedJob = await this.get(id);
+    await this.queue.enqueue(id, approvedJob.task.executionChannel, approvedJob.task.deadlineMs);
     return this.get(id);
   }
 

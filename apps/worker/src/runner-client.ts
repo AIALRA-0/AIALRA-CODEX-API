@@ -20,6 +20,7 @@ import type {
 import { redact } from "@aialra/security";
 
 type RunnerFrame =
+  | { type: "heartbeat"; at: string }
   | { type: "event"; event: ProviderEvent }
   | { type: "result"; result: ProviderResult }
   | {
@@ -196,7 +197,9 @@ export class RunnerClientProvider implements ModelProvider {
       for await (const line of lines) {
         if (!line.trim()) continue;
         const frame = JSON.parse(line) as RunnerFrame;
-        if (frame.type === "event") {
+        if (frame.type === "heartbeat") {
+          continue;
+        } else if (frame.type === "event") {
           const phase =
             frame.event.data.kind === "chatgpt_web"
               ? ChatGptWebFailurePhaseSchema.safeParse(frame.event.data.phase)

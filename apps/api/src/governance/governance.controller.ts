@@ -97,6 +97,15 @@ function qualificationItems(suite: z.infer<typeof ChatGptWebQualificationSuiteSc
   }));
 }
 
+function qualificationDeadlineMs(items: ChatGptWebQualificationItem[]): number {
+  const executionMs = items.reduce(
+    (total, item) => total + (item.mode === "deep_research" ? 3_600_000 : 600_000),
+    0,
+  );
+  const pacingMs = Math.max(0, items.length - 1) * 90_000;
+  return Math.max(600_000, executionMs + pacingMs);
+}
+
 function publicAccount(account: ChatGptWebAccount & { bridgeUrl?: string }): ChatGptWebAccount {
   const safe = { ...account } as Record<string, unknown>;
   delete safe.bridgeUrl;
@@ -484,7 +493,7 @@ export class GovernanceController {
         error: { code: "idempotency_conflict", message: "该幂等键发生冲突。" },
       });
     }
-    await this.queue.enqueueChatGptWebQualification(id);
+    await this.queue.enqueueChatGptWebQualification(id, qualificationDeadlineMs(items));
     await this.repository.appendAudit({
       id: randomUUID(),
       actorId,

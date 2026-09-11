@@ -90,6 +90,29 @@ describe("RunnerClientProvider", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(fetchMock.mock.calls[1]?.[1]?.body);
   });
 
+  it("keeps a silent long invocation alive without exposing heartbeat frames as model events", async () => {
+    const onEvent = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        [
+          JSON.stringify({ type: "heartbeat", at: "2026-09-10T20:00:00.000Z" }),
+          JSON.stringify({ type: "heartbeat", at: "2026-09-10T20:00:15.000Z" }),
+          JSON.stringify({
+            type: "result",
+            result: { output: "OK", outputText: "OK", threadId: null, usage },
+          }),
+        ].join("\n") + "\n",
+        { status: 200, headers: { "content-type": "application/x-ndjson" } },
+      ),
+    );
+    const provider = new RunnerClientProvider("http://runner.test", "token");
+
+    await expect(provider.invoke({ ...invocation(), onEvent })).resolves.toMatchObject({
+      outputText: "OK",
+    });
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
   it("reports a busy Runner as definitely not submitted when no deadline signal exists", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: { code: "runner_busy", retryAfter: 1 } }), {

@@ -26,6 +26,7 @@ import { redact, scanForExternalData } from "@aialra/security";
 
 import type { ChatGptWebPoolProvider } from "./chatgpt-web-pool.js";
 import { RunnerProviderError } from "./runner-client.js";
+import { InvocationDeadline } from "./invocation-deadline.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired"]);
 const CHATGPT_WEB_MIN_DISPATCH_INTERVAL_MS = 90_000;
@@ -620,8 +621,11 @@ export class WorkerService {
     await this.transition(jobId, { status: "running" }, "worker.running");
 
     const workspace = provider.workspaceMode === "provider" ? null : await this.createWorkspace();
-    const deadlineSignal = AbortSignal.timeout(job.task.deadlineMs);
-    const signal = queueSignal ? AbortSignal.any([queueSignal, deadlineSignal]) : deadlineSignal;
+    const invocationDeadline = new InvocationDeadline(job.task.deadlineMs);
+    if (route.provider !== "chatgpt_web") invocationDeadline.start();
+    const signal = queueSignal
+      ? AbortSignal.any([queueSignal, invocationDeadline.signal])
+      : invocationDeadline.signal;
     let lastError: unknown = null;
 
     try {
@@ -636,6 +640,12 @@ export class WorkerService {
             workingDirectory: workspace ?? undefined,
             signal,
             onEvent: async (event) => {
+              if (
+                route.provider === "chatgpt_web" &&
+                event.data.kind === "chatgpt_web_account_assigned"
+              ) {
+                invocationDeadline.start();
+              }
               const scan = scanForExternalData(event.data);
               if (!scan.allowed) {
                 throw new Error(`secret_output_blocked:${scan.findings.join(",")}`);
@@ -759,6 +769,7 @@ export class WorkerService {
         );
       }
     } finally {
+      invocationDeadline.stop();
       if (workspace) await this.removeWorkspace(workspace);
     }
   }

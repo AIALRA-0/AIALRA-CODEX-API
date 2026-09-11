@@ -31,6 +31,84 @@ set_environment_value() {
   fi
 }
 
+read_environment_value() {
+  local name="$1"
+  local fallback="$2"
+  local value
+  value="$(awk -F= -v key="$name" '$1==key{print substr($0,index($0,"=")+1); exit}' "$PRODUCTION_ENV")"
+  printf '%s' "${value:-$fallback}"
+}
+
+assert_no_active_work() {
+  local active_count
+  active_count="$("${compose[@]}" exec -T postgres psql -At -U router -d router <<'SQL'
+SELECT
+  (SELECT count(*) FROM jobs WHERE status IN ('accepted','awaiting_approval','queued','running','validating')) +
+  (SELECT count(*) FROM chatgpt_web_qualification_runs
+   WHERE run->>'status' IN ('accepted','running'));
+SQL
+)"
+  [[ "$active_count" == "0" ]] || {
+    echo "Refusing to restart API or Worker while ${active_count} task or qualification run is active" >&2
+    exit 1
+  }
+}
+
+wait_for_service_health() {
+  local service="$1"
+  local attempt container_id state
+  for attempt in $(seq 1 90); do
+    container_id="$("${compose[@]}" ps -q "$service")"
+    if [[ -n "$container_id" ]]; then
+      state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+      if [[ "$state" == "healthy" || "$state" == "running" ]]; then
+        return 0
+      fi
+      [[ "$state" != "unhealthy" ]] || break
+    fi
+    sleep 1
+  done
+  echo "Service ${service} did not become healthy" >&2
+  return 1
+}
+
+wait_for_control_plane() {
+  wait_for_service_health api
+  wait_for_service_health worker
+  "${compose[@]}" exec -T api node -e \
+    "Promise.all(['/healthz','/readyz'].map(p=>fetch('http://127.0.0.1:13210'+p))).then(r=>process.exit(r.every(x=>x.ok)?0:1)).catch(()=>process.exit(1))"
+}
+
+restart_control_plane_with_rollback() {
+  local target_enabled="$1"
+  local target_diagnostic="$2"
+  local target_concurrency="$3"
+  local old_enabled old_diagnostic old_concurrency transition_active=true
+  old_enabled="$(read_environment_value CHATGPT_WEB_ADAPTER_ENABLED false)"
+  old_diagnostic="$(read_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false)"
+  old_concurrency="$(read_environment_value CHATGPT_WEB_MAX_CONCURRENCY 1)"
+  rollback_runtime() {
+    local exit_code=$?
+    trap - ERR INT TERM
+    if [[ "$transition_active" == "true" ]]; then
+      set_flag "$old_enabled"
+      set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED "$old_diagnostic"
+      set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$old_concurrency"
+      "${compose[@]}" up --detach --force-recreate api worker >/dev/null 2>&1 || true
+      wait_for_control_plane >/dev/null 2>&1 || true
+    fi
+    exit "$exit_code"
+  }
+  trap rollback_runtime ERR INT TERM
+  set_flag "$target_enabled"
+  set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED "$target_diagnostic"
+  set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$target_concurrency"
+  "${compose[@]}" up --detach --force-recreate api worker
+  wait_for_control_plane
+  transition_active=false
+  trap - ERR INT TERM
+}
+
 wait_for_bridge() {
   local service="$1"
   local attempt
@@ -61,6 +139,7 @@ case "$ACTION" in
     echo "Open the protected /chatgpt-browser/ and /chatgpt-browser-b/ VNC paths through the Router origin"
     ;;
   enable)
+    assert_no_active_work
     [[ "$QUALIFICATION_RUN_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || {
       echo "QUALIFICATION_RUN_ID must name a completed single probe or full qualification" >&2
       exit 1
@@ -198,24 +277,21 @@ ON CONFLICT (singleton) DO UPDATE SET
   ),
   updated_at=EXCLUDED.updated_at;
 SQL
-    set_flag true
-    set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
-    set_environment_value CHATGPT_WEB_MAX_CONCURRENCY "$effective_concurrency"
     # Browsers were deliberately started with their internal bridge enabled by ACTION=start.
     # Do not recreate them here: a Chromium restart can invalidate a freshly verified login.
-    "${compose[@]}" up --detach --force-recreate api worker
+    restart_control_plane_with_rollback true false "$effective_concurrency"
     echo "ChatGPT web account pool enabled at concurrency $effective_concurrency"
     ;;
   disable)
-    set_flag false
-    set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
-    "${compose[@]}" up --detach --force-recreate api worker
+    assert_no_active_work
+    restart_control_plane_with_rollback false false \
+      "$(read_environment_value CHATGPT_WEB_MAX_CONCURRENCY 1)"
     echo "ChatGPT web experiment disabled; the visible browser remains available for diagnosis"
     ;;
   stop)
-    set_flag false
-    set_environment_value CHATGPT_WEB_DIAGNOSTIC_ENABLED false
-    "${compose[@]}" up --detach --force-recreate api worker
+    assert_no_active_work
+    restart_control_plane_with_rollback false false \
+      "$(read_environment_value CHATGPT_WEB_MAX_CONCURRENCY 1)"
     "${compose[@]}" stop chatgpt-browser chatgpt-browser-b
     echo "ChatGPT web experiment and visible browser stopped"
     ;;

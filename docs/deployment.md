@@ -166,6 +166,10 @@ sudo ACTION=start \
 
 `ACTION=start` 会预先启用浏览器内部 Bridge，但 API 和 Worker 仍拒绝网页任务；探针通过后的 `ACTION=enable` 只重载 API 和 Worker，不再重启 Chromium，避免开关切换使刚验证的登录态失效
 
+`ACTION=enable`、`ACTION=disable` 和 `ACTION=stop` 会先确认没有正在执行的任务或资格运行，避免重载 Worker 时打断已提交调用；重载后脚本会等待 API、就绪检查和 Worker 健康检查全部通过才返回成功，失败时自动恢复原开关并重新启动原控制面
+
+长 Codex 调用由 Runner 每 15 秒发送一次内部保活帧，保活帧不会进入用户结果、任务事件或用量记录；网页任务的数据库队列期限来自请求的 `deadlineMs`，另有 5 分钟结果落库余量，账号租约在任务存活期间自动续期
+
 `ACTION=start` 不执行镜像构建；镜像只应在正式发布阶段构建一次并以不可变摘要写入生产环境，避免每次重新登录或诊断都制造大体积构建缓存
 
 ```bash

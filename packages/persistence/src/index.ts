@@ -486,6 +486,12 @@ export interface JobRepository {
     now: Date,
     leaseMs: number,
   ): Promise<ChatGptWebAccountRecord | null>;
+  renewChatGptWebAccountLease(
+    accountId: string,
+    jobId: string,
+    now: Date,
+    leaseMs: number,
+  ): Promise<boolean>;
   releaseChatGptWebAccountLease(
     accountId: string,
     jobId: string,
@@ -809,6 +815,32 @@ export class InMemoryJobRepository implements JobRepository {
       const record = { ...updated, bridgeUrl: current.bridgeUrl };
       this.chatGptWebAccounts.set(accountId, record);
       return structuredClone(record);
+    });
+  }
+
+  async renewChatGptWebAccountLease(
+    accountId: string,
+    jobId: string,
+    now: Date,
+    leaseMs: number,
+  ): Promise<boolean> {
+    return this.withChatGptWebAccountLeaseLock(async () => {
+      const current = this.chatGptWebAccounts.get(accountId);
+      if (
+        !current ||
+        current.activeJobId !== jobId ||
+        !current.leaseExpiresAt ||
+        new Date(current.leaseExpiresAt).getTime() <= now.getTime()
+      ) {
+        return false;
+      }
+      const updated = ChatGptWebAccountSchema.parse({
+        ...current,
+        leaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+        updatedAt: now.toISOString(),
+      });
+      this.chatGptWebAccounts.set(accountId, { ...updated, bridgeUrl: current.bridgeUrl });
+      return true;
     });
   }
 
@@ -2083,6 +2115,23 @@ export class PostgresJobRepository implements JobRepository {
     } finally {
       client.release();
     }
+  }
+
+  async renewChatGptWebAccountLease(
+    accountId: string,
+    jobId: string,
+    now: Date,
+    leaseMs: number,
+  ): Promise<boolean> {
+    const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+    const result = await this.pool.query(
+      `UPDATE chatgpt_web_accounts
+       SET lease_expires_at=$4, updated_at=$3,
+           status=status || jsonb_build_object('leaseExpiresAt',$4::text,'updatedAt',$3::text)
+       WHERE account_id=$1 AND lease_job_id=$2 AND lease_expires_at > $3`,
+      [accountId, jobId, now, leaseExpiresAt],
+    );
+    return (result.rowCount ?? 0) === 1;
   }
 
   async releaseChatGptWebAccountLease(

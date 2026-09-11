@@ -181,6 +181,14 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 普通聊天和搜索始终使用新的非个性化 Temporary Chat。Deep Research 改用每次新建的普通持久会话，因为当前 Temporary Chat 页面没有稳定入口；调用方必须显式传入 `deep_research_persistence_acknowledged = $true`，并承担该内容进入 ChatGPT 历史记录、可能使用账号记忆或个性化的风险
 
+搜索和 Deep Research 属于长任务，调用方应优先使用原生 `Jobs` 接口，保存创建请求返回的任务编号并轮询原任务
+
+任务进入账号后才开始计算 `deadlineMs`；数据库队列的执行上限会自动采用该期限并增加 5 分钟结果写入余量，网页账号租约会在任务运行期间持续续期，因此 15 分钟不再是搜索或 Deep Research 的固定终止点
+
+如果客户端连接断开，不要创建第二条请求；使用原幂等键重取原任务，或直接通过任务编号读取状态、事件和最终结果
+
+以下期限适合作为起点：普通聊天 `600000` 毫秒，搜索 `3600000` 毫秒，Deep Research `3600000` 毫秒；期限只控制本系统最多等待多久，不能保证上游一定在期限内生成结果
+
 ```powershell
 $DeepResearchRequest = @{
     model = "chatgpt-web.auto"

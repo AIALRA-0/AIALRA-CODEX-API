@@ -21,6 +21,7 @@ import {
   type RunnerExecutionError,
 } from "./public-error.js";
 import { abortInvocationOnDisconnect } from "./invocation-lifecycle.js";
+import { DEFAULT_RUNNER_HEARTBEAT_MS, startInvocationHeartbeat } from "./invocation-heartbeat.js";
 
 const InvocationSchema = z
   .object({
@@ -119,6 +120,7 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
   const abortController = new AbortController();
   abortInvocationOnDisconnect(request, response, abortController);
   let workspace: string | null = null;
+  let stopHeartbeat: (() => void) | null = null;
   try {
     const input = InvocationSchema.parse(await readJson(request));
     workspace = await mkdtemp(join("/workspace/jobs", `${input.jobId}-`));
@@ -127,6 +129,10 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
     });
+    stopHeartbeat = startInvocationHeartbeat(
+      response,
+      Math.max(1_000, Number(process.env.RUNNER_HEARTBEAT_MS ?? DEFAULT_RUNNER_HEARTBEAT_MS)),
+    );
     const provider = new CodexProvider({
       codexPathOverride: process.env.CODEX_BIN || undefined,
       authDirectory: process.env.CODEX_HOME,
@@ -169,6 +175,7 @@ async function invoke(request: IncomingMessage, response: ServerResponse): Promi
       response.end();
     }
   } finally {
+    stopHeartbeat?.();
     if (workspace) await rm(workspace, { recursive: true, force: true });
     activeInvocations -= 1;
   }

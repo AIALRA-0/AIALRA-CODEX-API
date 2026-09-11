@@ -20,9 +20,9 @@ import type {
 } from "@aialra/providers";
 
 import { RunnerClientProvider, RunnerProviderError, RunnerQuotaClient } from "./runner-client.js";
+import { CHATGPT_WEB_ACCOUNT_LEASE_MS, startLeaseRenewal } from "./lease-renewal.js";
 
 const ACCOUNT_HEARTBEAT_STALE_MS = 45_000;
-const ACCOUNT_LEASE_MS = 15 * 60_000;
 const POOL_WAIT_MS = 250;
 
 const HARD_FAILURE_CODES = new Set([
@@ -487,7 +487,7 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         jobId,
         ids,
         now,
-        ACCOUNT_LEASE_MS,
+        CHATGPT_WEB_ACCOUNT_LEASE_MS,
       );
       if (leased) return leased;
       const accounts = await this.repository.listChatGptWebAccounts();
@@ -614,8 +614,27 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         data: { kind: "chatgpt_web_account_assigned", accountId: account.accountId },
       });
 
+      let leaseLost = false;
+      const leaseAbort = new AbortController();
+      const stopLeaseRenewal = startLeaseRenewal(
+        () =>
+          this.repository.renewChatGptWebAccountLease(
+            account.accountId,
+            invocation.jobId!,
+            new Date(),
+            CHATGPT_WEB_ACCOUNT_LEASE_MS,
+          ),
+        () => {
+          leaseLost = true;
+          leaseAbort.abort(new Error("chatgpt_lease_lost"));
+        },
+      );
+      const signal = invocation.signal
+        ? AbortSignal.any([invocation.signal, leaseAbort.signal])
+        : leaseAbort.signal;
+
       try {
-        const result = await client.invoke({ ...invocation, onEvent });
+        const result = await client.invoke({ ...invocation, signal, onEvent });
         const now = new Date().toISOString();
         await this.release(account, invocation.jobId, {
           state: "ready",
@@ -633,10 +652,20 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         });
         return result;
       } catch (error) {
-        const runnerError = error instanceof RunnerProviderError ? error : null;
+        const effectiveError = leaseLost
+          ? new RunnerProviderError(
+              "chatgpt_lease_lost",
+              "The account lease could not be renewed while the task was active.",
+              "uncertain",
+              phase.value,
+            )
+          : error;
+        const runnerError = effectiveError instanceof RunnerProviderError ? effectiveError : null;
         const code =
           runnerError?.code ??
-          (error instanceof Error ? error.message.split(":", 1)[0]! : "provider_error");
+          (effectiveError instanceof Error
+            ? effectiveError.message.split(":", 1)[0]!
+            : "provider_error");
         const submissionState = runnerError?.submissionState ?? "uncertain";
         const failurePhase = runnerError?.failurePhase ?? phase.value;
         const diagnosticSummary = runnerError?.diagnosticSummary ?? null;
@@ -677,7 +706,8 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         });
         const poolError = new ChatGptWebPoolError(
           code,
-          runnerError?.message ?? (error instanceof Error ? error.message : String(error)),
+          runnerError?.message ??
+            (effectiveError instanceof Error ? effectiveError.message : String(effectiveError)),
           submissionState,
           account.accountId,
           failurePhase,
@@ -688,6 +718,8 @@ export class ChatGptWebPoolProvider implements ModelProvider {
           continue;
         }
         throw poolError;
+      } finally {
+        stopLeaseRenewal();
       }
     }
 

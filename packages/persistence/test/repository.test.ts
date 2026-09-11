@@ -145,6 +145,48 @@ describe("InMemoryJobRepository", () => {
     });
   });
 
+  it("renews a lease only while the same job still owns an unexpired account", async () => {
+    const repository = new InMemoryJobRepository();
+    const [config] = configuredChatGptWebAccountConfigs("a");
+    await repository.syncChatGptWebAccounts([config!]);
+    await repository.updateChatGptWebAccount("account-a", {
+      enabled: true,
+      qualified: true,
+      state: "ready",
+      authenticated: true,
+      extensionConnected: true,
+      pageReady: true,
+      sandboxVerified: true,
+    });
+    const jobId = "00000000-0000-4000-8000-000000000006";
+    await repository.acquireChatGptWebAccountLease(
+      jobId,
+      ["account-a"],
+      new Date("2026-09-01T12:00:00.000Z"),
+      60_000,
+    );
+
+    await expect(
+      repository.renewChatGptWebAccountLease(
+        "account-a",
+        jobId,
+        new Date("2026-09-01T12:00:30.000Z"),
+        60_000,
+      ),
+    ).resolves.toBe(true);
+    expect((await repository.findChatGptWebAccount("account-a"))?.leaseExpiresAt).toBe(
+      "2026-09-01T12:01:30.000Z",
+    );
+    await expect(
+      repository.renewChatGptWebAccountLease(
+        "account-a",
+        "00000000-0000-4000-8000-000000000007",
+        new Date("2026-09-01T12:00:40.000Z"),
+        60_000,
+      ),
+    ).resolves.toBe(false);
+  });
+
   it("preserves idempotency lookup", async () => {
     const repository = new InMemoryJobRepository();
     await repository.create(jobFixture());

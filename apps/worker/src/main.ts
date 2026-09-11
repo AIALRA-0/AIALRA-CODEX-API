@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   await chatgptWebPool.syncAccounts();
   const chatgptProvider = chatgptWebEnabled ? chatgptWebPool : undefined;
   const codexConcurrency = Math.max(1, Number(process.env.CODEX_MAX_CONCURRENCY ?? 1));
-  const chatgptConcurrency = chatgptWebEnabled ? chatgptAccountConfigs.length : 0;
+  const chatgptConcurrency = chatgptWebEnabled ? Math.max(1, await chatgptWebPool.capacity()) : 0;
   const codexPool = new PermitPool(codexConcurrency);
   const chatgptPermitPool = chatgptConcurrency
     ? new PermitPool(async () => Math.max(1, await chatgptWebPool.capacity()))
