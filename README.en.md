@@ -138,7 +138,7 @@ See [architecture](ARCHITECTURE.md) for component relationships, state transitio
 
 - Normal chat and search always use a fresh Temporary Chat with zero prior messages, personalization disabled, and at most one submission
 - Deep Research uses a fresh persistent conversation, does not reuse older conversations, and does not support web `sessionKey` continuation
-- `chatgpt-web.auto` selects the page's automatic model and is not a reasoning depth; `thinking_depth` requests a depth currently exposed by the page
+- `chatgpt-web.auto` selects the page's automatic model and is not a reasoning depth; `thinking_depth` accepts only a live depth label returned by the model catalog, while omission follows the page default, so do not pass `auto`
 - Every account has an independent browser profile, concurrency limit of `1`, pacing, lease, cooldown, and quarantine state
 - Plans are operator metadata limited to `plus`, `pro`, or `unknown`; the service never guesses a plan from cookies, page text, or response time
 - Failover is permitted only before submission is definitively attempted; once the page accepts a task or delivery is uncertain, the service does not switch accounts or resend

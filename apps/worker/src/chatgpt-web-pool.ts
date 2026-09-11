@@ -549,7 +549,19 @@ export class ChatGptWebPoolProvider implements ModelProvider {
     let lastPreSubmitError: ChatGptWebPoolError | null = null;
 
     while (!invocation.signal?.aborted && excluded.size < this.configs.length) {
-      const account = await this.waitForLease(invocation.jobId, excluded, invocation.signal);
+      let account: ChatGptWebAccountRecord;
+      try {
+        account = await this.waitForLease(invocation.jobId, excluded, invocation.signal);
+      } catch (error) {
+        if (
+          lastPreSubmitError &&
+          error instanceof ChatGptWebPoolError &&
+          error.code === "chatgpt_web_circuit_open"
+        ) {
+          throw lastPreSubmitError;
+        }
+        throw error;
+      }
       excluded.add(account.accountId);
       const client = this.clients.get(account.accountId);
       const requestedDepth = invocation.task.chatgptWeb?.thinkingDepth;

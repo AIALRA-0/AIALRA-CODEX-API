@@ -248,9 +248,9 @@ MCP 工具 `delegate_chatgpt` 接受 `objective`、`mode`、`model`、`require_s
 
 网页通道保留 `chatgpt-web.auto` 入口；`GET /api/v1/models` 的 `webThinkingDepths` 从已认证、可接单账号的当前网页思考菜单读取全部可用档位，使用页面原名，不映射成 Codex 的推理等级
 
-任务接口使用 `task.chatgptWeb.thinkingDepth`，Chat Completions 和 Responses 接口使用 `aialra.thinking_depth`；值必须来自发现的档位列表，不传则沿用网页默认。系统只在空闲页面发现档位，不输入或发送消息；菜单发现结果按需刷新，最多缓存一分钟。未读到菜单时返回空列表，不伪造可选档位
+任务接口使用 `task.chatgptWeb.thinkingDepth`，Chat Completions 和 Responses 接口使用 `aialra.thinking_depth`；值必须来自发现的档位列表，不传则沿用网页默认，不能把模型名中的 `auto` 当作思考深度。系统只在空闲页面发现档位，不输入或发送消息；菜单发现结果按需刷新，最多缓存一分钟。未读到菜单时返回空列表，不伪造可选档位
 
-账号池合并可用档位，但任务只派给实际支持所选档位的账号；新临时页面发送前再次选中并确认。档位消失返回 `chatgpt_thinking_depth_unavailable`，选中状态无法确认返回 `chatgpt_thinking_depth_unverified`，均不发送、不降档代跑
+账号池合并可用档位，但任务只派给实际支持所选档位的账号；新临时页面发送前再次选中并确认。档位消失返回 `chatgpt_thinking_depth_unavailable`，即使其余账号尚未登录也不会误报为账号池熔断；选中状态无法确认返回 `chatgpt_thinking_depth_unverified`，均不发送、不降档代跑
 
 菜单和滑块两种控件均支持；滑块通过实际可访问标签逐档读取，读取后恢复原选项，不写死档位数量或名称。CLI `call` / `research` 使用 `--thinking-depth`，MCP `delegate_chatgpt` 使用 `thinking_depth`
 

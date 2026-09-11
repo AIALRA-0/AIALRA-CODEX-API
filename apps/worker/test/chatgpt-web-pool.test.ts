@@ -237,6 +237,38 @@ describe("ChatGptWebPoolProvider", () => {
     ).toBe(true);
   });
 
+  it("preserves the requested-depth error when no other qualified account remains", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = String(input);
+        if (url.endsWith("/healthz")) return Response.json(health("synthetic"));
+        if (url.endsWith("/models")) return Response.json(depthCatalog(["Standard"]));
+        sent.push(url);
+        throw new Error("Unexpected submission");
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    await repository.updateChatGptWebAccount("account-b", {
+      qualified: false,
+      state: "login_required",
+      authenticated: false,
+    });
+    const task = invocation();
+    task.task.chatgptWeb!.thinkingDepth = "Missing";
+
+    await expect(pool.invoke(task)).rejects.toMatchObject({
+      code: "chatgpt_thinking_depth_unavailable",
+      submissionState: "not_submitted",
+      accountId: "account-a",
+    });
+    expect(sent).toEqual([]);
+  });
+
   it("prefers the primary account but lends overflow to another idle account", async () => {
     const { repository } = await readyRepository();
     await repository.updateChatGptWebAccount("account-a", {
