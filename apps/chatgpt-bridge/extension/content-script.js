@@ -993,18 +993,31 @@ async function configureMode(mode, jobId, deadline) {
 }
 
 function isTemporaryChatControlLabel(label) {
-  return /^(?:(?:turn|switch) (?:on|off) )?temporary(?: chat)?(?: (?:on|off|enabled))?$|^(?:开启|关闭)?临时聊天(?:已开启|开启中)?$/i.test(
-    normalizedText(label),
+  return /^(?:(?:(?:turn|switch) (?:on|off)|enable|disable|open|close|start|exit|leave|use) )?temporary(?: chat)?(?: (?:mode|toggle|button|on|off|enabled|disabled|active|inactive))?$|^(?:开启|关闭|启用|停用|进入|退出)?临时聊天(?:模式|开关|按钮|已开启|已关闭|开启中)?$/i.test(
+    normalizedText(label).replace(/[-_]+/g, " "),
   );
 }
 
+function temporaryChatControlLabels(element) {
+  return [
+    element.getAttribute("aria-label") ?? "",
+    element.getAttribute("title") ?? "",
+    element.getAttribute("data-testid") ?? "",
+    element.getAttribute("data-tooltip") ?? "",
+    visibleText(element),
+  ].filter(Boolean);
+}
+
 function temporaryChatControls() {
-  return [...document.querySelectorAll("button, [role='button']")].filter((element) => {
+  return [
+    ...document.querySelectorAll(
+      "button, [role='button'], [role='switch'], [data-testid*='temporary' i]",
+    ),
+  ].filter((element) => {
     // ChatGPT collapses the top-right pill to an icon at narrower widths. Its
-    // accessible name is then just "Temporary", without the word "Chat".
-    return isTemporaryChatControlLabel(
-      `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`,
-    );
+    // accessible name is then just "Temporary"; some builds expose the stable
+    // identity only through title, tooltip, or data-testid.
+    return temporaryChatControlLabels(element).some(isTemporaryChatControlLabel);
   });
 }
 
@@ -1064,19 +1077,19 @@ function temporaryChatSemanticMarker() {
 
 function temporaryChatEnabled() {
   const explicitControlState = temporaryChatControls().some((element) => {
-    const label = `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`;
+    const labels = temporaryChatControlLabels(element).join(" ");
     const explicitState =
       element.getAttribute("aria-pressed") === "true" ||
       element.getAttribute("aria-checked") === "true" ||
       ["on", "checked", "active"].includes(element.getAttribute("data-state") ?? "");
     return (
       explicitState ||
-      /turn off temporary chat|temporary chat.*(?:on|enabled)|关闭临时聊天|临时聊天.*(?:已开启|开启中)/i.test(
-        label,
+      /(?:turn off|disable|exit|leave|close) temporary(?: chat)?|temporary(?: chat)?.*(?:on|enabled|active)|(?:关闭|停用|退出)临时聊天|临时聊天.*(?:已开启|开启中)/i.test(
+        labels,
       )
     );
   });
-  return explicitControlState || (temporaryChatUrlEnabled() && temporaryChatSemanticMarker());
+  return explicitControlState || temporaryChatUrlEnabled();
 }
 
 function temporaryChatPersonalized() {
@@ -1506,6 +1519,10 @@ function controlDiagnostics(expectedObjective = null) {
     composerPoint: composer ? nativePoint(composer) : null,
     composerRect: rectangleDiagnostics(composer),
     windowMetrics: windowMetrics(),
+    temporaryChatControlFound: temporaryChatControls().some((element) => {
+      const rectangle = element.getBoundingClientRect();
+      return rectangle.width > 0 && rectangle.height > 0;
+    }),
     temporaryChatEnabled: temporaryChatEnabled(),
     temporaryChatPersonalized: diagnosticPersonalization(),
     modelControlFound: Boolean(modelControl),

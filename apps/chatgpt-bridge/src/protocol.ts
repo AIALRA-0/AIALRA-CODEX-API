@@ -69,6 +69,7 @@ export const BrowserControlDiagnosticsSchema = z.object({
     .object({ x: z.number().int().nonnegative(), y: z.number().int().nonnegative() })
     .nullable()
     .default(null),
+  temporaryChatControlFound: z.boolean().default(false),
   temporaryChatEnabled: z.boolean(),
   temporaryChatPersonalized: z.boolean().nullable().default(null),
   modelControlFound: z.boolean(),

@@ -16,6 +16,9 @@ describe("control diagnostic redaction", () => {
     expect(isTemporaryChatControlLabel("Temporary")).toBe(true);
     expect(isTemporaryChatControlLabel("Turn on Temporary Chat")).toBe(true);
     expect(isTemporaryChatControlLabel("Temporary Chat enabled")).toBe(true);
+    expect(isTemporaryChatControlLabel("Enable Temporary Chat")).toBe(true);
+    expect(isTemporaryChatControlLabel("temporary-chat-toggle")).toBe(true);
+    expect(isTemporaryChatControlLabel("Exit temporary mode")).toBe(true);
     expect(isTemporaryChatControlLabel("Temporary conversation from sidebar")).toBe(false);
   });
 
