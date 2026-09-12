@@ -1143,7 +1143,7 @@ function temporaryChatPersonalized() {
 }
 
 async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
-  let acceptedDefaultNonPersonalized = false;
+  let acceptedDefaultNonPersonalized = temporaryChatUrlEnabled();
   const intro = temporaryChatIntroControl();
   if (intro) {
     if (temporaryChatPersonalized() === true) throw new Error("chatgpt_ui_changed");
@@ -1156,7 +1156,15 @@ async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
     }
     if (temporaryChatIntroControl()) throw new Error("chatgpt_ui_changed");
   }
-  if (temporaryChatEnabled() && temporaryChatPersonalized() === false) return;
+  const currentPersonalization = temporaryChatPersonalized();
+  if (
+    temporaryChatEnabled() &&
+    currentPersonalization !== true &&
+    (currentPersonalization === false || acceptedDefaultNonPersonalized)
+  ) {
+    verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN;
+    return;
+  }
   const control = temporaryChatControls().find((candidate) => {
     const rectangle = candidate.getBoundingClientRect();
     return rectangle.width > 0 && rectangle.height > 0;

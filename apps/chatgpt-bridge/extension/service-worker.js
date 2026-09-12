@@ -2,6 +2,7 @@ import { BRIDGE_TOKEN } from "./runtime-config.js";
 
 const BRIDGE_URL = `ws://127.0.0.1:13216/extension?token=${encodeURIComponent(BRIDGE_TOKEN)}`;
 const CHATGPT_URL = "https://chatgpt.com/";
+const TEMPORARY_CHAT_URL = `${CHATGPT_URL}?temporary-chat=true`;
 const STORAGE_KEY = "aialra.chatgpt.single-page-v1.slot";
 const ADAPTER_VERSION = "single-page-v1";
 const READY_STABILITY_MS = 2_000;
@@ -141,9 +142,8 @@ async function createSlot() {
   return slot;
 }
 
-async function navigateToFreshChat(slot, active) {
+async function navigateToFreshChat(slot, active, targetUrl = CHATGPT_URL) {
   const tab = await chrome.tabs.get(slot.tabId);
-  const targetUrl = CHATGPT_URL;
   const currentPage = await sendToTab(
     slot.tabId,
     { type: "aialra.probe", discoverModels: false },
@@ -455,30 +455,30 @@ async function prepareSlot(slot, invocation) {
     documentToken: null,
     quarantinedUntil: null,
   });
-  // Always begin from a regular blank chat. ChatGPT now asks whether a new
-  // Temporary Chat should be personalized, and a direct temporary-chat URL can
-  // restore the account's previous personalized choice. The content script
-  // explicitly selects the non-personalized option before it enters any text.
-  const previousDocumentToken = await navigateToFreshChat(slot, true);
-  const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken, preparationDeadline);
-  const diagnostics = page.diagnostics ?? {};
   const temporaryReady =
     invocation.conversationMode === "temporary_per_request" &&
     invocation.temporaryChat === true &&
-    invocation.personalized === false &&
-    diagnostics.temporaryChatEnabled === false;
+    invocation.personalized === false;
   const persistentDeepResearchReady =
     invocation.mode === "deep_research" &&
     invocation.conversationMode === "persistent_per_request" &&
     invocation.temporaryChat === false &&
     invocation.personalized === true &&
-    invocation.persistenceAcknowledged === true &&
-    diagnostics.temporaryChatEnabled === false;
-  if (
-    !diagnostics.freshConversation ||
-    !diagnostics.documentToken ||
-    (!temporaryReady && !persistentDeepResearchReady)
-  ) {
+    invocation.persistenceAcknowledged === true;
+  // Begin ordinary chat requests on a new Temporary document directly. Current
+  // ChatGPT defaults Temporary Chat to non-personalized; an explicitly observed
+  // personalized state is still rejected by the content script before input.
+  const previousDocumentToken = await navigateToFreshChat(
+    slot,
+    true,
+    temporaryReady ? TEMPORARY_CHAT_URL : CHATGPT_URL,
+  );
+  const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken, preparationDeadline);
+  const diagnostics = page.diagnostics ?? {};
+  const pageModeReady = temporaryReady
+    ? diagnostics.temporaryChatEnabled === true && diagnostics.temporaryChatPersonalized !== true
+    : persistentDeepResearchReady && diagnostics.temporaryChatEnabled === false;
+  if (!diagnostics.freshConversation || !diagnostics.documentToken || !pageModeReady) {
     throw new Error("chatgpt_ui_changed");
   }
   await patchSlot(slot, { state: "ready", documentToken: diagnostics.documentToken });

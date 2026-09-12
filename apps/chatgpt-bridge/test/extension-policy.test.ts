@@ -84,16 +84,21 @@ describe("single-page browser agent policy", () => {
     expect(serviceWorker).toContain("page?.diagnostics?.userTurnCount === 0");
     expect(serviceWorker).toContain("page?.diagnostics?.assistantTurnCount === 0");
     expect(serviceWorker).toContain("page?.diagnostics?.generationActive === false");
-    expect(serviceWorker).not.toContain("TEMPORARY_CHAT_URL");
+    expect(serviceWorker).toContain("TEMPORARY_CHAT_URL");
+    expect(serviceWorker).toContain("temporaryReady ? TEMPORARY_CHAT_URL : CHATGPT_URL");
     expect(serviceWorker).toContain("navigateToFreshChat(slot, false)");
     expect(serviceWorker).toContain("navigateToFreshChat(slot, true)");
-    expect(serviceWorker).toContain("Always begin from a regular blank chat");
+    expect(serviceWorker).toContain("Begin ordinary chat requests on a new Temporary document");
     expect(serviceWorker).toContain("A browser can restore an unsent draft");
     expect(serviceWorker).toContain("requireEmptyComposer = true");
     expect(serviceWorker).toContain("!requireEmptyComposer ||");
-    expect(serviceWorker).toContain("diagnostics.temporaryChatEnabled === false");
+    expect(serviceWorker).toContain("diagnostics.temporaryChatEnabled === true");
+    expect(serviceWorker).toContain("diagnostics.temporaryChatPersonalized !== true");
     expect(contentScript).toContain("temporaryChatPersonalized() !== false");
     expect(contentScript).toContain("await configureNonPersonalizedTemporaryChat");
+    expect(contentScript).toContain(
+      "let acceptedDefaultNonPersonalized = temporaryChatUrlEnabled()",
+    );
     expect(contentScript).toContain('accessible name is then just "Temporary"');
     expect(contentScript).toContain("acceptedDefaultNonPersonalized");
     expect(contentScript).toContain("verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN");
