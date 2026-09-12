@@ -131,19 +131,22 @@ describe("visible thinking depth menu", () => {
     expect(h.control.dispatchEvent).not.toHaveBeenCalled();
   });
 
-  it("ignores an unrelated non-modal dialog while preserving it", async () => {
-    const h = harness();
-    const dialog = {
-      ...h.menu,
-      visible: true,
-      id: "page-shell",
-      getAttribute: (key: string) => (key === "role" ? "dialog" : null),
-    };
-    h.context.document.querySelectorAll = () => [dialog, h.menu];
-    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
-    expect(dialog.visible).toBe(true);
-    expect(h.menu.visible).toBe(false);
-  });
+  it.each(["dialog", "radiogroup"])(
+    "ignores an unrelated non-modal %s while preserving it",
+    async (role) => {
+      const h = harness();
+      const backgroundControl = {
+        ...h.menu,
+        visible: true,
+        id: "page-shell",
+        getAttribute: (key: string) => (key === "role" ? role : null),
+      };
+      h.context.document.querySelectorAll = () => [backgroundControl, h.menu];
+      expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+      expect(backgroundControl.visible).toBe(true);
+      expect(h.menu.visible).toBe(false);
+    },
+  );
 
   it("does not publish a model submenu as a single thinking depth", async () => {
     const h = harness(["High", "Latest", "GPT-5.6 Sol"]);
@@ -211,6 +214,17 @@ describe("visible thinking depth menu", () => {
     menu.visible = true;
     expect(await api.discoverThinkingDepths()).toEqual([]);
     expect(menu.visible).toBe(true);
+  });
+
+  it("does not touch a radio group owned by the depth control", async () => {
+    const h = harness();
+    h.menu.visible = true;
+    Object.assign(h.menu, {
+      id: "depths",
+      getAttribute: (key: string) => (key === "role" ? "radiogroup" : null),
+    });
+    expect(await h.api.discoverThinkingDepths()).toEqual([]);
+    expect(h.menu.visible).toBe(true);
   });
 
   it("selects and verifies exactly the requested depth before any submission", async () => {

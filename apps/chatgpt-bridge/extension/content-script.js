@@ -430,14 +430,14 @@ async function openThinkingDepthMenu(control, click, deadline) {
       ),
     ].filter(isDepthControlVisible);
   const previous = new Set(visibleMenus());
-  // A non-modal dialog can be a permanent page shell. It does not own the
-  // depth control, so it must not prevent discovery of a newly opened menu.
+  // Non-modal dialogs and radio groups can be permanent page controls. Only
+  // an owned or modal one should prevent discovery of a newly opened menu.
   const ownedId = control.getAttribute("aria-controls");
   if (
     control.getAttribute("aria-expanded") === "true" ||
     [...previous].some(
       (popup) =>
-        popup.getAttribute("role") !== "dialog" ||
+        !["dialog", "radiogroup"].includes(popup.getAttribute("role")) ||
         popup.getAttribute("aria-modal") === "true" ||
         (ownedId && popup.id === ownedId),
     )
