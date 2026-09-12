@@ -131,6 +131,20 @@ describe("visible thinking depth menu", () => {
     expect(h.control.dispatchEvent).not.toHaveBeenCalled();
   });
 
+  it("ignores an unrelated non-modal dialog while preserving it", async () => {
+    const h = harness();
+    const dialog = {
+      ...h.menu,
+      visible: true,
+      id: "page-shell",
+      getAttribute: (key: string) => (key === "role" ? "dialog" : null),
+    };
+    h.context.document.querySelectorAll = () => [dialog, h.menu];
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+    expect(dialog.visible).toBe(true);
+    expect(h.menu.visible).toBe(false);
+  });
+
   it("does not publish a model submenu as a single thinking depth", async () => {
     const h = harness(["High", "Latest", "GPT-5.6 Sol"]);
     expect(await h.api.discoverThinkingDepths()).toEqual([]);

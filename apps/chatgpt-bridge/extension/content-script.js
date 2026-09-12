@@ -430,8 +430,19 @@ async function openThinkingDepthMenu(control, click, deadline) {
       ),
     ].filter(isDepthControlVisible);
   const previous = new Set(visibleMenus());
-  // Do not close or interact with a menu the user already has open.
-  if (previous.size || control.getAttribute("aria-expanded") === "true") return null;
+  // A non-modal dialog can be a permanent page shell. It does not own the
+  // depth control, so it must not prevent discovery of a newly opened menu.
+  const ownedId = control.getAttribute("aria-controls");
+  if (
+    control.getAttribute("aria-expanded") === "true" ||
+    [...previous].some(
+      (popup) =>
+        popup.getAttribute("role") !== "dialog" ||
+        popup.getAttribute("aria-modal") === "true" ||
+        (ownedId && popup.id === ownedId),
+    )
+  )
+    return null;
   await click(control);
   const keyboardFallbackAt = Date.now() + 500;
   let keyboardFallbackUsed = false;
@@ -672,6 +683,13 @@ async function discoverThinkingDepths() {
           "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog'], [data-radix-popper-content-wrapper]",
         ),
       ].filter(isDepthControlVisible).length,
+      visiblePopupRoles: [
+        ...document.querySelectorAll(
+          "[role='menu'], [role='listbox'], [role='radiogroup'], [role='dialog']",
+        ),
+      ]
+        .filter(isDepthControlVisible)
+        .map((popup) => popup.getAttribute("role") ?? "unknown"),
       visibleSliderCount: [
         ...document.querySelectorAll("[role='slider'], input[type='range']"),
       ].filter(isDepthControlVisible).length,

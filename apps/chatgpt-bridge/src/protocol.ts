@@ -104,6 +104,7 @@ export const BrowserControlDiagnosticsSchema = z.object({
       menuFound: z.boolean().optional(),
       controlExpanded: z.boolean().optional(),
       visiblePopupCount: z.number().int().nonnegative().optional(),
+      visiblePopupRoles: z.array(z.string().max(16)).max(16).optional(),
       visibleSliderCount: z.number().int().nonnegative().optional(),
       sliderCount: z.number().int().nonnegative().optional(),
       buttonCount: z.number().int().nonnegative().optional(),
