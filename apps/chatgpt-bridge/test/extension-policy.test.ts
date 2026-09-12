@@ -94,6 +94,9 @@ describe("single-page browser agent policy", () => {
     expect(serviceWorker).toContain("diagnostics.temporaryChatEnabled === false");
     expect(contentScript).toContain("temporaryChatPersonalized() !== false");
     expect(contentScript).toContain("await configureNonPersonalizedTemporaryChat");
+    expect(contentScript).toContain('accessible name is then just "Temporary"');
+    expect(contentScript).toContain("acceptedDefaultNonPersonalized");
+    expect(contentScript).toContain("verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN");
     expect(contentScript).toContain('url.searchParams.get("temporary-chat") === "true"');
     expect(contentScript).toContain("temporaryChatSemanticMarker()");
     expect(contentScript).toContain("function temporaryChatIntroControl()");

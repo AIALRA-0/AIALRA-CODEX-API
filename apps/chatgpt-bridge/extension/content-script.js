@@ -992,12 +992,20 @@ async function configureMode(mode, jobId, deadline) {
   throw new Error("chatgpt_ui_changed");
 }
 
-function temporaryChatControls() {
-  return [...document.querySelectorAll("button, [role='button']")].filter((element) =>
-    /temporary chat|临时聊天/i.test(
-      `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`,
-    ),
+function isTemporaryChatControlLabel(label) {
+  return /^(?:(?:turn|switch) (?:on|off) )?temporary(?: chat)?(?: (?:on|off|enabled))?$|^(?:开启|关闭)?临时聊天(?:已开启|开启中)?$/i.test(
+    normalizedText(label),
   );
+}
+
+function temporaryChatControls() {
+  return [...document.querySelectorAll("button, [role='button']")].filter((element) => {
+    // ChatGPT collapses the top-right pill to an icon at narrower widths. Its
+    // accessible name is then just "Temporary", without the word "Chat".
+    return isTemporaryChatControlLabel(
+      `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`,
+    );
+  });
 }
 
 function temporaryChatIntroControl() {
@@ -1072,7 +1080,29 @@ function temporaryChatEnabled() {
 }
 
 function temporaryChatPersonalized() {
+  const personalizationControls = [
+    ...document.querySelectorAll(
+      "input[type='checkbox'], [role='checkbox'], [role='switch'], button[aria-pressed]",
+    ),
+  ].filter((element) => {
+    const label = normalizedText(
+      `${element.getAttribute("aria-label") ?? ""} ${element.getAttribute("title") ?? ""} ${visibleText(element)}`,
+    );
+    return /personaliz|个性化/i.test(label);
+  });
+  for (const element of personalizationControls) {
+    if (element instanceof HTMLInputElement && element.type === "checkbox") {
+      return element.checked;
+    }
+    const state =
+      element.getAttribute("aria-checked") ??
+      element.getAttribute("aria-pressed") ??
+      element.getAttribute("data-state");
+    if (["true", "checked", "on", "active"].includes(state ?? "")) return true;
+    if (["false", "unchecked", "off", "inactive"].includes(state ?? "")) return false;
+  }
   if (!temporaryChatEnabled()) return null;
+  if (verifiedNonPersonalizedDocumentToken === DOCUMENT_TOKEN) return false;
   const labels = [...document.querySelectorAll("button, [role='button'], [role='menuitem']")]
     .map((element) =>
       normalizedText(
@@ -1082,7 +1112,7 @@ function temporaryChatPersonalized() {
     .filter(Boolean);
   if (
     labels.some((label) =>
-      /unpersonalized|non-personalized|not personalized|without personalization|不使用个性化|非个性化|不启用个性化/i.test(
+      /turn on personalization|enable personalization|unpersonalized|non-personalized|not personalized|without personalization|开启个性化|不使用个性化|非个性化|不启用个性化/i.test(
         label,
       ),
     )
@@ -1091,9 +1121,7 @@ function temporaryChatPersonalized() {
   }
   if (
     labels.some((label) =>
-      /(^|\s)personalized(\s|$)|personalization enabled|个性化临时聊天|临时聊天.*个性化/i.test(
-        label,
-      ),
+      /turn off personalization|personalization enabled|个性化已开启|关闭个性化/i.test(label),
     )
   ) {
     return true;
@@ -1102,9 +1130,12 @@ function temporaryChatPersonalized() {
 }
 
 async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
+  let acceptedDefaultNonPersonalized = false;
   const intro = temporaryChatIntroControl();
   if (intro) {
+    if (temporaryChatPersonalized() === true) throw new Error("chatgpt_ui_changed");
     await nativeClick(intro, jobId, "temporary_chat_intro");
+    acceptedDefaultNonPersonalized = true;
     const introDeadline = Math.min(deadline, Date.now() + 7_500);
     while (Date.now() < introDeadline) {
       if (!temporaryChatIntroControl()) break;
@@ -1120,6 +1151,7 @@ async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
   if (!control) throw new Error("chatgpt_ui_changed");
   if (!temporaryChatEnabled()) {
     await nativeClick(control, jobId, "temporary_chat");
+    acceptedDefaultNonPersonalized = true;
   }
 
   const selectionDeadline = Math.min(deadline, Date.now() + 7_500);
@@ -1129,8 +1161,22 @@ async function configureNonPersonalizedTemporaryChat(jobId, deadline) {
     );
     if (nonPersonalized) {
       await nativeClick(nonPersonalized, jobId, "temporary_chat_non_personalized");
+      acceptedDefaultNonPersonalized = true;
     }
-    if (temporaryChatEnabled() && temporaryChatPersonalized() === false) return;
+    const continueControl = temporaryChatIntroControl();
+    if (continueControl && temporaryChatPersonalized() !== true) {
+      await nativeClick(continueControl, jobId, "temporary_chat_intro");
+      acceptedDefaultNonPersonalized = true;
+    }
+    const personalization = temporaryChatPersonalized();
+    if (
+      temporaryChatEnabled() &&
+      personalization !== true &&
+      (personalization === false || acceptedDefaultNonPersonalized)
+    ) {
+      verifiedNonPersonalizedDocumentToken = DOCUMENT_TOKEN;
+      return;
+    }
     await waitForMutation(250);
   }
   throw new Error("chatgpt_ui_changed");

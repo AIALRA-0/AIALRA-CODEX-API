@@ -6,8 +6,19 @@ const source = readFileSync(new URL("../extension/content-script.js", import.met
 const safeControlLabel = runInNewContext(
   `${source.slice(source.indexOf("function safeControlLabel("), source.indexOf("function describeControl("))}; safeControlLabel`,
 );
+const isTemporaryChatControlLabel = runInNewContext(
+  `${source.slice(source.indexOf("function isTemporaryChatControlLabel("), source.indexOf("function temporaryChatControls("))}; isTemporaryChatControlLabel`,
+  { normalizedText: (value: string) => value.replace(/\s+/g, " ").trim() },
+);
 
 describe("control diagnostic redaction", () => {
+  it("recognizes the collapsed Temporary control without matching arbitrary text", () => {
+    expect(isTemporaryChatControlLabel("Temporary")).toBe(true);
+    expect(isTemporaryChatControlLabel("Turn on Temporary Chat")).toBe(true);
+    expect(isTemporaryChatControlLabel("Temporary Chat enabled")).toBe(true);
+    expect(isTemporaryChatControlLabel("Temporary conversation from sidebar")).toBe(false);
+  });
+
   it("does not search sidebar label substrings for a model control", () => {
     const selectors = [
       "model-switcher-test-id",
