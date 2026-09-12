@@ -81,6 +81,7 @@ async function waitForReadyPage(
   attempts = 80,
   previousDocumentToken = null,
   deadlineAt = Number.POSITIVE_INFINITY,
+  requireEmptyComposer = true,
 ) {
   let stableDocumentToken = null;
   let stableSince = 0;
@@ -97,7 +98,10 @@ async function waitForReadyPage(
       page?.authenticated &&
       documentToken &&
       documentToken !== previousDocumentToken &&
-      page?.diagnostics?.freshConversation === true;
+      page?.diagnostics?.userTurnCount === 0 &&
+      page?.diagnostics?.assistantTurnCount === 0 &&
+      page?.diagnostics?.generationActive === false &&
+      (!requireEmptyComposer || page?.diagnostics?.composerTextLength === 0);
     if (ready) {
       if (documentToken === stableDocumentToken) {
         stableReads += 1;
@@ -244,7 +248,16 @@ async function resetSlot(slot) {
     quarantinedUntil: null,
   });
   const previousDocumentToken = await navigateToFreshChat(slot, false);
-  let page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken);
+  // A browser can restore an unsent draft after a clean restart. First bind to
+  // the otherwise empty document, then clear only that managed composer and
+  // require the normal fully blank invariant before returning the slot to use.
+  let page = await waitForReadyPage(
+    slot.tabId,
+    80,
+    previousDocumentToken,
+    Number.POSITIVE_INFINITY,
+    false,
+  );
   let diagnostics = page.diagnostics ?? {};
   if (diagnostics.composerTextLength > 0) {
     await chrome.tabs.update(slot.tabId, { active: true });

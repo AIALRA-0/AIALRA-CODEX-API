@@ -374,12 +374,19 @@ export async function processChatGptWebQualification(
 
   if (run.suite === "readiness") {
     const health: Record<string, unknown> = await client.health().catch(() => ({}));
+    const slots = Array.isArray(health.slots) ? health.slots : [];
     const passed =
       health.sandboxVerified === true &&
       health.extensionConnected === true &&
       health.pageReady === true &&
       health.authenticated === true &&
-      Number(health.quarantinedTabs ?? 0) === 0;
+      Number(health.quarantinedTabs ?? 0) === 0 &&
+      Number(health.activeTabs ?? 0) === 0 &&
+      Number(health.pending ?? 0) === 0 &&
+      slots.some(
+        (slot) =>
+          slot && typeof slot === "object" && (slot as Record<string, unknown>).state === "idle",
+      );
     await repository.updateChatGptWebQualificationRun(runId, {
       status: passed ? "succeeded" : "failed",
       errorCode: passed ? null : "chatgpt_readiness_failed",
