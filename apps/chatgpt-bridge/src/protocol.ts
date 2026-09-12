@@ -294,6 +294,7 @@ export const ExtensionNativeClickRequestSchema = z.object({
   type: z.literal("native_click_request"),
   jobId: z.string().uuid(),
   action: z.enum([
+    "chat_surface",
     "tools_menu",
     "mode_option",
     "temporary_chat",

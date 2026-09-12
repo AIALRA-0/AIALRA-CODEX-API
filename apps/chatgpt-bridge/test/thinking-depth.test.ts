@@ -1,9 +1,15 @@
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
-import { ExtensionFailedSchema, ExtensionProgressSchema } from "../src/protocol.js";
+import {
+  ExtensionFailedSchema,
+  ExtensionNativeClickRequestSchema,
+  ExtensionProgressSchema,
+} from "../src/protocol.js";
 
 function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
+  let workSurface = false;
+  let freshConversation = true;
   const element = (text: string, attributes: Record<string, string> = {}) => ({
     innerText: text,
     visible: true,
@@ -41,8 +47,15 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
       attributes["aria-expanded"] = String(menu.visible);
     },
   };
+  const chatTab = {
+    ...element("Chat"),
+    click: vi.fn(() => {
+      workSurface = false;
+    }),
+  };
   const native = vi.fn(async (target: typeof control, _job: string, action: string) => {
     if (action === "thinking_depth_menu") control.click();
+    else if (action === "chat_surface") chatTab.click();
     else {
       control.innerText = target.innerText;
       menu.visible = false;
@@ -55,8 +68,14 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
     userMessages: () => [],
     SELECTORS: { composer: ["composer"], stop: ["stop"] },
     first: (selectors: string[]) => (selectors[0] === "composer" ? {} : null),
-    composerControlRoot: () => ({ querySelectorAll: () => [control] }),
-    document: { querySelectorAll: () => [menu], getElementById: () => menu },
+    composerControlRoot: () => ({ querySelectorAll: () => (workSurface ? [] : [control]) }),
+    currentSurface: () => (workSurface ? "work" : "chat"),
+    controlDiagnostics: () => ({ freshConversation }),
+    document: {
+      querySelectorAll: (selector: string) =>
+        selector === "button, [role='tab']" ? [chatTab] : [menu],
+      getElementById: () => menu,
+    },
     getComputedStyle: () => ({ visibility: "visible" }),
     visibleText: (target: typeof control | null) => target?.innerText ?? "",
     waitForMutation: () => Promise.resolve(),
@@ -87,11 +106,60 @@ function harness(labels = ["Standard", "Extended", "Heavy", "Future depth"]) {
     content.indexOf("function buttonByText("),
   );
   const api = runInNewContext(
-    `${functions}\n({ discoverThinkingDepths, configureThinkingDepth, thinkingDepthOptions, readThinkingDepthChoices })`,
+    `${functions}\n({ discoverThinkingDepths, configureThinkingDepth, thinkingDepthOptions, readThinkingDepthChoices, ensureChatSurface })`,
     context,
   );
-  return { api, context, control, menu, options, native };
+  return {
+    api,
+    context,
+    control,
+    menu,
+    options,
+    native,
+    chatTab,
+    setWorkSurface: (value: boolean) => {
+      workSurface = value;
+    },
+    setFreshConversation: (value: boolean) => {
+      freshConversation = value;
+    },
+  };
 }
+
+describe("fresh Work surface", () => {
+  it("allows the verified Chat tab navigation through the bridge protocol", () => {
+    expect(
+      ExtensionNativeClickRequestSchema.safeParse({
+        type: "native_click_request",
+        jobId: "00000000-0000-4000-8000-000000000001",
+        action: "chat_surface",
+        x: 777,
+        y: 112,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("switches to Chat before publishing depth choices without submitting a message", async () => {
+    const h = harness();
+    h.setWorkSurface(true);
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+    expect(h.chatTab.click).toHaveBeenCalledOnce();
+    expect(h.native).not.toHaveBeenCalled();
+  });
+
+  it("uses one verified native navigation before a task and rejects a draft", async () => {
+    const h = harness();
+    h.setWorkSurface(true);
+    await expect(h.api.ensureChatSurface(Date.now() + 3_000, "task-1")).resolves.toBeUndefined();
+    expect(h.native.mock.calls.map((call) => call[2])).toEqual(["chat_surface"]);
+    h.setWorkSurface(true);
+    h.setFreshConversation(false);
+    await expect(h.api.ensureChatSurface(Date.now() + 3_000, "task-2")).rejects.toThrow(
+      "chatgpt_ui_changed",
+    );
+    expect(h.native).toHaveBeenCalledTimes(1);
+  });
+});
 
 it.each(["6\nPro", "6\u00a0Pro", "Extra\nHigh", "Extra\u00a0High"])(
   "rediscovers a selected multi-part depth without an aria label: %s",

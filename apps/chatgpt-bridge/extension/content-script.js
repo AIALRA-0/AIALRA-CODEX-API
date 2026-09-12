@@ -362,6 +362,28 @@ function modelControlForComposer() {
 let thinkingDepthDiscoveryDiagnostics = null;
 const thinkingDepthMenuOwnership = new WeakMap();
 
+async function ensureChatSurface(deadline, jobId = null) {
+  if (thinkingDepthControl()) return;
+  if (currentSurface() !== "work" || !controlDiagnostics().freshConversation) {
+    throw new Error("chatgpt_ui_changed");
+  }
+  const tabs = [...document.querySelectorAll("button, [role='tab']")].filter(
+    (element) =>
+      isDepthControlVisible(element) &&
+      !depthControlDisabled(element) &&
+      visibleText(element).trim().toLowerCase() === "chat",
+  );
+  if (tabs.length !== 1) throw new Error("chatgpt_ui_changed");
+  if (jobId) await nativeClick(tabs[0], jobId, "chat_surface");
+  else tabs[0].click();
+  const end = Math.min(deadline, Date.now() + 3_000);
+  while (Date.now() < end) {
+    if (currentSurface() === "chat" && thinkingDepthControl()) return;
+    await waitForMutation(100);
+  }
+  throw new Error("chatgpt_ui_changed");
+}
+
 function thinkingDepthControl() {
   const composer = first(SELECTORS.composer);
   const root = composer ? composerControlRoot(composer) : null;
@@ -659,6 +681,14 @@ async function clickThinkingDepthControl(control) {
 async function discoverThinkingDepths() {
   thinkingDepthDiscoveryDiagnostics = { phase: "preflight" };
   if (activeJobId || !authenticated() || userMessages().length || first(SELECTORS.stop)) return [];
+  if (!thinkingDepthControl() && currentSurface() === "work") {
+    try {
+      await ensureChatSurface(Date.now() + 3_000);
+    } catch {
+      thinkingDepthDiscoveryDiagnostics = { phase: "control_missing" };
+      return [];
+    }
+  }
   const control = thinkingDepthControl();
   thinkingDepthDiscoveryDiagnostics = { phase: control ? "control_found" : "control_missing" };
   if (!control) return [];
@@ -1872,6 +1902,11 @@ async function invoke(invocation) {
     const pageObjective = objectiveWithCompletionMarker(invocation.objective, completionMarker);
     let composer = await waitForElement(SELECTORS.composer, deadline);
     if (!controlDiagnostics().freshConversation) throw new Error("chatgpt_ui_changed");
+    if (invocation.mode !== "deep_research") {
+      await ensureChatSurface(deadline, invocation.jobId);
+      composer = await waitForElement(SELECTORS.composer, deadline);
+      if (!controlDiagnostics().freshConversation) throw new Error("chatgpt_ui_changed");
+    }
     await reportProgress(invocation.jobId, "configuring");
     const temporaryRequest =
       invocation.mode !== "deep_research" &&

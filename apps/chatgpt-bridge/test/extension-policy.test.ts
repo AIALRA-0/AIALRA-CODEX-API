@@ -153,8 +153,10 @@ describe("single-page browser agent policy", () => {
     expect(entrypoint).toContain('if [ "$extension_enabled" = "true" ]');
     expect(entrypoint).toContain('elif [ "$extension_enabled" != "false" ]');
     expect(entrypoint).toContain("--disable-session-crashed-bubble");
+    expect(entrypoint).toContain('xdotool windowclose "$window_id"');
     expect(entrypoint).toContain('kill -TERM "$chrome_pid"');
-    expect(entrypoint).toContain('[ "$attempt" -lt 150 ]');
+    expect(entrypoint).toContain('[ "$attempt" -lt 80 ]');
+    expect(entrypoint).toContain('[ "$attempt" -lt 120 ]');
     expect(compose).toContain(
       "CHATGPT_BROWSER_EXTENSION_ENABLED: ${CHATGPT_BROWSER_EXTENSION_ENABLED:-true}",
     );

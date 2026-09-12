@@ -122,9 +122,21 @@ bridge_pid=$!
 cleanup() {
   trap - INT TERM EXIT
   kill -TERM "$bridge_pid" 2>/dev/null || true
-  kill -TERM "$chrome_pid" 2>/dev/null || true
+  # Give Chromium a window-manager close first so it can persist a clean
+  # session and does not cover the next login with a Restore pages bubble.
+  for window_id in $(xdotool search --onlyvisible --class chromium 2>/dev/null || true); do
+    xdotool windowclose "$window_id" 2>/dev/null || true
+  done
   attempt=0
-  while kill -0 "$chrome_pid" 2>/dev/null && [ "$attempt" -lt 150 ]; do
+  while kill -0 "$chrome_pid" 2>/dev/null && [ "$attempt" -lt 80 ]; do
+    attempt=$((attempt + 1))
+    sleep 0.1
+  done
+  if kill -0 "$chrome_pid" 2>/dev/null; then
+    kill -TERM "$chrome_pid" 2>/dev/null || true
+  fi
+  attempt=0
+  while kill -0 "$chrome_pid" 2>/dev/null && [ "$attempt" -lt 120 ]; do
     attempt=$((attempt + 1))
     sleep 0.1
   done
