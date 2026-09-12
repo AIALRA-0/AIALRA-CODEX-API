@@ -42,3 +42,19 @@ export function zodHttpError(error: ZodError): BadRequestException {
     },
   });
 }
+
+export function webReasoningEffortHttpError(
+  parameter: "reasoning_effort" | "reasoning.effort",
+): BadRequestException {
+  return new BadRequestException({
+    error: {
+      code: "unsupported_parameter",
+      message: `${parameter} is for Codex API models. For ChatGPT web, choose an exact webThinkingDepths label from GET /api/v1/models and pass aialra.thinking_depth.`,
+      details: {
+        parameter,
+        supportedParameter: "aialra.thinking_depth",
+        discoveryEndpoint: "/api/v1/models",
+      },
+    },
+  });
+}

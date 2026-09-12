@@ -213,6 +213,8 @@ The web channel retains the `chatgpt-web.auto` entry. Its `webThinkingDepths` in
 
 Use `task.chatgptWeb.thinkingDepth` for jobs, or `aialra.thinking_depth` for Chat Completions and Responses, with an exact discovered label. Omission preserves the page default; the model name's `auto` value is not a thinking depth. Discovery only opens and closes the menu on an idle page, without typing or sending messages. Results refresh on demand with a one-minute cache; an unreadable menu produces an empty list, never invented choices.
 
+The web channel rejects Codex `reasoning_effort` and Responses `reasoning.effort` with HTTP 400 `unsupported_parameter` before creating a job. Use `aialra.thinking_depth` instead. `GET /api/v1/jobs/{id}` includes `webExecution` with the requested depth, page-verified depth, verification flag, and assigned account slot. A missing page observation stays null rather than being guessed. The retained `route.effort` field is not the effective web thinking depth.
+
 The pool combines available choices but dispatches only to an account that actually offers the requested depth. Each fresh page selects and verifies the depth before submission. Missing choices return `chatgpt_thinking_depth_unavailable`, even when the remaining accounts are signed out, instead of being masked as a pool circuit error. Unconfirmed selections return `chatgpt_thinking_depth_unverified`. Neither failure sends a message or silently downgrades the requested depth.
 
 Both menus and accessible sliders are supported. Slider discovery reads each actual label and restores the original choice; counts and labels are not hardcoded. CLI `call` / `research` accepts `--thinking-depth`; MCP `delegate_chatgpt` accepts `thinking_depth`.

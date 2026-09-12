@@ -14,7 +14,7 @@ import {
 } from "@aialra/contracts";
 
 import type { AuthenticatedRequest } from "../common/api-key.guard.js";
-import { zodHttpError } from "../common/http-errors.js";
+import { webReasoningEffortHttpError, zodHttpError } from "../common/http-errors.js";
 import { RequireScopes } from "../common/scopes.decorator.js";
 import { openEventStream } from "../common/sse.js";
 import { JobsService } from "../jobs/jobs.service.js";
@@ -139,6 +139,9 @@ export class ChatCompletionsController {
     const executionChannel =
       value.aialra?.execution_channel ??
       (value.model.startsWith("chatgpt-web.") ? "chatgpt_web" : "codex");
+    if (executionChannel === "chatgpt_web" && value.reasoning_effort !== undefined) {
+      throw webReasoningEffortHttpError("reasoning_effort");
+    }
     const sessionKey = value.aialra?.session_key;
     const chatgptMode = value.aialra?.chatgpt_mode ?? "chat";
     const persistentDeepResearch =

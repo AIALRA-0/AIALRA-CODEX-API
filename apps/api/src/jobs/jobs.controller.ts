@@ -20,6 +20,7 @@ import type { AuthenticatedRequest } from "../common/api-key.guard.js";
 import { zodHttpError } from "../common/http-errors.js";
 import { RequireScopes } from "../common/scopes.decorator.js";
 import { JobsService } from "./jobs.service.js";
+import { summarizeWebExecution } from "./web-execution.js";
 
 @Controller("api/v1/jobs")
 export class JobsController {
@@ -69,7 +70,12 @@ export class JobsController {
   @Get(":id")
   @RequireScopes("jobs:read")
   async get(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
-    return this.jobs.getForActor(id, request.callerId ?? "unknown", request.isAdmin === true);
+    const actorId = request.callerId ?? "unknown";
+    const isAdmin = request.isAdmin === true;
+    const job = await this.jobs.getForActor(id, actorId, isAdmin);
+    if (job.task.executionChannel !== "chatgpt_web") return job;
+    const events = await this.jobs.eventsForActor(id, actorId, isAdmin);
+    return { ...job, webExecution: summarizeWebExecution(job, events) };
   }
 
   @Get(":id/events")

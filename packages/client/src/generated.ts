@@ -203,6 +203,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /** @description Discover Codex reasoning efforts and exact ChatGPT web thinking-depth labels before creating a job. The web model's auto ID is not a depth. */
     get: operations["listModels"];
     put?: never;
     post?: never;
@@ -609,7 +610,7 @@ export interface components {
       execution_channel?: "codex" | "chatgpt_web";
       /** @enum {string} */
       chatgpt_mode?: "chat" | "search" | "deep_research";
-      /** @description Exact depth label discovered from the account's visible thinking menu; omitted uses the page default. */
+      /** @description Exact label from GET /api/v1/models webThinkingDepths. For ChatGPT web this is the only supported explicit depth parameter; omission uses the page default. Standard reasoning_effort is rejected for web jobs. */
       thinking_depth?: string;
       /**
        * @default temporary_per_request
@@ -730,6 +731,7 @@ export interface components {
       /** @default auto */
       model: string;
       /**
+       * @description Codex reasoning effort. For ChatGPT web jobs use chatgptWeb.thinkingDepth instead; this legacy field does not select a web depth.
        * @default medium
        * @enum {string}
        */
@@ -761,6 +763,7 @@ export interface components {
         | "expired";
       task: components["schemas"]["TaskContract"];
       route?: components["schemas"]["RouteDecision"] | null;
+      webExecution?: components["schemas"]["WebExecutionSummary"];
       output?: unknown;
       usage: components["schemas"]["UsageLedger"];
       validation?: unknown;
@@ -772,6 +775,13 @@ export interface components {
       updatedAt: string;
       /** Format: date-time */
       expiresAt: string;
+    };
+    /** @description Available on GET /api/v1/jobs/{id} for web jobs; derived from the job's sanitized events, never from a guessed model tier. */
+    WebExecutionSummary: {
+      accountId: string | null;
+      requestedThinkingDepth: string | null;
+      resolvedThinkingDepth: string | null;
+      thinkingDepthVerified: boolean;
     };
     JobEvent: {
       id: string;
@@ -790,6 +800,7 @@ export interface components {
       /** @enum {string} */
       provider: "codex" | "chatgpt_web";
       model: string;
+      /** @description Codex routing effort. For a ChatGPT web route this retained value does not represent the effective page thinking depth; read webExecution instead. */
       effort: string;
       policyVersion: string;
       reasonCode: string;
@@ -856,6 +867,7 @@ export interface components {
       hidden: boolean;
       isDefault: boolean;
       supportedReasoningEfforts: string[];
+      /** @description Exact labels observed on the current web UI across eligible accounts; do not infer a model or a subscription tier from them. */
       webThinkingDepths?: string[];
       defaultWebThinkingDepth?: string | null;
       defaultReasoningEffort: string | null;
@@ -1134,7 +1146,10 @@ export interface components {
               strict?: boolean;
             };
           };
-      /** @enum {string} */
+      /**
+       * @description Codex only; rejected with HTTP 400 for ChatGPT web requests. Use aialra.thinking_depth for web.
+       * @enum {string}
+       */
       reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
       metadata?: {
         [key: string]: string;
@@ -1179,6 +1194,7 @@ export interface components {
       model: string;
       input: string | unknown[];
       instructions?: string;
+      /** @description Codex only; reasoning.effort is rejected for ChatGPT web requests. Use aialra.thinking_depth for web. */
       reasoning?: {
         /** @enum {string} */
         effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

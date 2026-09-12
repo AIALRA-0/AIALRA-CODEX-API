@@ -162,15 +162,24 @@ $Response | Select-Object status, model, output, usage # 查看任务状态、�
 
 网页通道只在调用方显式设置 `execution_channel: "chatgpt_web"` 时使用；普通 Codex 请求不会暗中切换通道
 
+`chatgpt-web.auto` 只表示网页自动模型入口，不表示任何思考深度。Codex 的 `reasoning_effort` 和 Responses 的 `reasoning.effort` 不能控制 ChatGPT 网页；网页请求显式传这两个字段会在创建任务前返回 `400 unsupported_parameter`，而不是悄悄使用网页默认档位。网页档位只能通过 `aialra.thinking_depth` 指定，原生 Jobs 使用 `task.chatgptWeb.thinkingDepth`
+
+Agent 应先用具有 `jobs:read` 权限的密钥读取 `/api/v1/models`，从 `chatgpt-web.auto` 的 `webThinkingDepths` 中选择当前真实存在的标签。列表是可用账号的合并结果，Worker 会在提交前再次核对被分配账号；某档位消失时返回 `chatgpt_thinking_depth_unavailable`，不会发送消息或自动降档。未指定档位时使用页面默认值，不代表 Pro 最高档，也不能仅凭 Pro 订阅标签推断具体模型
+
 管理员需要先通过受 Tailnet 和 Authentik 保护的 noVNC 页面手动登录 ChatGPT，再从页面动态发现并启用可见模型
 
 ```powershell
+$WebModels = (Invoke-RestMethod -Method Get -Uri "$RouterUrl/api/v1/models" -Headers @{ Authorization = $Headers.Authorization }).data # 读取当前网页档位，不发送消息
+$WebModel = $WebModels | Where-Object { $_.id -eq "chatgpt-web.auto" } | Select-Object -First 1 # 选择网页自动模型入口
+$DesiredDepth = "<从 webThinkingDepths 复制的精确标签>" # 由调用方明确决定，不猜测或硬编码套餐档位
+if ($DesiredDepth -notin $WebModel.webThinkingDepths) { throw "当前网页账号不提供所选思考深度" } # 提交前本地检查
 $WebRequest = @{ # 创建明确选择网页通道的 Responses 请求
     model = "chatgpt-web.auto" # 使用管理员启用的网页自动模型入口
     input = "调查一个合成主题，并列出公网来源" # 避免在实验任务中放入凭据和个人信息
     aialra = @{ # 使用 AIALRA 命名空间，避免伪装成 OpenAI 官方字段
         execution_channel = "chatgpt_web" # 明确选择网页通道
         chatgpt_mode = "search" # 选择普通对话、搜索或深度研究之一
+        thinking_depth = $DesiredDepth # 传当前页面发现的精确标签
         require_sources = $true # 要求提取最终回答中的公网来源
     } # 完成实验参数
 } | ConvertTo-Json -Depth 8 # 保留嵌套字段
@@ -210,6 +219,8 @@ Deep Research 响应包含 `X-AIALRA-Data-Retention: persistent_chat_history`；
 ChatGPT 网页没有提供可靠的 Token、Codex Credits、额度变化或 API 等效价格；接口返回 `measurementStatus: "unavailable"`，控制台显示“网页未提供可靠数据”
 
 Browser 刚启动时，思考深度目录可能仍在读取网页控件。`/api/v1/models` 会等待本次读取完成后再返回，调用方应从 `webThinkingDepths` 选择精确标签，不要缓存猜测值。显式档位尚未验证时，任务会在发送前返回 `chatgpt_thinking_depth_unavailable`，不会降级到其他档位，也不会发送消息
+
+调用结束后，通过 `GET /api/v1/jobs/{id}` 查看 `webExecution`：`requestedThinkingDepth` 是请求值，`resolvedThinkingDepth` 是页面在发送前确认的标签，`thinkingDepthVerified` 表示是否有可核对的页面证据，`accountId` 是实际使用的脱敏账号槽位。`route.effort` 是保留的 Codex 路由字段，不是网页实际档位；`webExecution` 无法证明网页服务背后的隐藏模型身份。普通聊天和搜索的流式接口只发送状态与最终正文，不承诺逐 Token 增量
 
 启用、真实网页探针、安全边界和完整错误说明见[ChatGPT 网页通道](chatgpt-web-experiment.md)
 

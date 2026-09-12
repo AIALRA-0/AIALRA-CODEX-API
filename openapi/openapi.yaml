@@ -312,6 +312,7 @@ paths:
   /api/v1/models:
     get:
       operationId: listModels
+      description: Discover Codex reasoning efforts and exact ChatGPT web thinking-depth labels before creating a job. The web model's auto ID is not a depth.
       responses:
         "200":
           description: Runtime Codex model catalog merged with Router settings
@@ -1023,7 +1024,7 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-          description: Exact depth label discovered from the account's visible thinking menu; omitted uses the page default.
+          description: Exact label from GET /api/v1/models webThinkingDepths. For ChatGPT web this is the only supported explicit depth parameter; omission uses the page default. Standard reasoning_effort is rejected for web jobs.
         conversation_mode:
           type: string
           enum: [temporary_per_request, persistent_per_request]
@@ -1208,6 +1209,7 @@ components:
           type: string
           enum: [minimal, low, medium, high, xhigh, max]
           default: medium
+          description: Codex reasoning effort. For ChatGPT web jobs use chatgptWeb.thinkingDepth instead; this legacy field does not select a web depth.
         replayable:
           type: boolean
           default: true
@@ -1257,6 +1259,8 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RouteDecision"
             - type: "null"
+        webExecution:
+          $ref: "#/components/schemas/WebExecutionSummary"
         output: {}
         usage:
           $ref: "#/components/schemas/UsageLedger"
@@ -1274,6 +1278,15 @@ components:
         expiresAt:
           type: string
           format: date-time
+    WebExecutionSummary:
+      type: object
+      description: Available on GET /api/v1/jobs/{id} for web jobs; derived from the job's sanitized events, never from a guessed model tier.
+      required: [accountId, requestedThinkingDepth, resolvedThinkingDepth, thinkingDepthVerified]
+      properties:
+        accountId: { type: [string, "null"] }
+        requestedThinkingDepth: { type: [string, "null"] }
+        resolvedThinkingDepth: { type: [string, "null"] }
+        thinkingDepthVerified: { type: boolean }
     JobEvent:
       type: object
       required: [id, jobId, sequence, type, data, createdAt]
@@ -1305,6 +1318,7 @@ components:
           type: string
         effort:
           type: string
+          description: Codex routing effort. For a ChatGPT web route this retained value does not represent the effective page thinking depth; read webExecution instead.
         policyVersion:
           type: string
         reasonCode:
@@ -1462,6 +1476,7 @@ components:
         webThinkingDepths:
           type: array
           maxItems: 32
+          description: Exact labels observed on the current web UI across eligible accounts; do not infer a model or a subscription tier from them.
           items: { type: string, minLength: 1, maxLength: 64 }
         defaultWebThinkingDepth: { type: [string, "null"] }
         defaultReasoningEffort: { type: [string, "null"] }
@@ -1840,6 +1855,7 @@ components:
         reasoning_effort:
           type: string
           enum: [minimal, low, medium, high, xhigh, max]
+          description: Codex only; rejected with HTTP 400 for ChatGPT web requests. Use aialra.thinking_depth for web.
         metadata:
           type: object
           additionalProperties:
@@ -1910,6 +1926,7 @@ components:
           type: string
         reasoning:
           type: object
+          description: Codex only; reasoning.effort is rejected for ChatGPT web requests. Use aialra.thinking_depth for web.
           properties:
             effort:
               type: string

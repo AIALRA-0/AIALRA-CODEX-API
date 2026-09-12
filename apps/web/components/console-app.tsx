@@ -47,6 +47,12 @@ interface Job {
     permissions?: { preset?: "restricted" | "confirm" | "full" };
   };
   route: { provider: "codex" | "chatgpt_web"; model: string; reasonCode: string } | null;
+  webExecution?: {
+    accountId: string | null;
+    requestedThinkingDepth: string | null;
+    resolvedThinkingDepth: string | null;
+    thinkingDepthVerified: boolean;
+  };
   output: unknown;
   errorCode: string | null;
   errorMessage: string | null;
@@ -1276,8 +1282,34 @@ function Playground() {
                   </div>
                   <div>
                     <dt>实际模型</dt>
-                    <dd>{job.route?.model ?? "等待路由"}</dd>
+                    <dd>
+                      {job.task.executionChannel === "chatgpt_web"
+                        ? "ChatGPT 网页自动模型"
+                        : (job.route?.model ?? "等待路由")}
+                    </dd>
                   </div>
+                  {job.task.executionChannel === "chatgpt_web" ? (
+                    <>
+                      <div>
+                        <dt>请求思考深度</dt>
+                        <dd>{job.webExecution?.requestedThinkingDepth ?? "跟随网页默认"}</dd>
+                      </div>
+                      <div>
+                        <dt>页面确认档位</dt>
+                        <dd>
+                          {job.webExecution?.resolvedThinkingDepth
+                            ? job.webExecution.thinkingDepthVerified
+                              ? job.webExecution.resolvedThinkingDepth
+                              : `${job.webExecution.resolvedThinkingDepth}（与请求档位不一致）`
+                            : "尚未确认"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>执行账号</dt>
+                        <dd>{job.webExecution?.accountId ?? "尚未分配"}</dd>
+                      </div>
+                    </>
+                  ) : null}
                   <div>
                     <dt>API 等效成本</dt>
                     <dd>

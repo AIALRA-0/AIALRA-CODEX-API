@@ -4,7 +4,7 @@ import type { Response } from "express";
 import { ResponsesRequestSchema, TaskContractSchema } from "@aialra/contracts";
 
 import type { AuthenticatedRequest } from "../common/api-key.guard.js";
-import { zodHttpError } from "../common/http-errors.js";
+import { webReasoningEffortHttpError, zodHttpError } from "../common/http-errors.js";
 import { RequireScopes } from "../common/scopes.decorator.js";
 import { openEventStream } from "../common/sse.js";
 import { JobsService } from "../jobs/jobs.service.js";
@@ -39,6 +39,9 @@ export class ResponsesController {
     const executionChannel =
       value.aialra?.execution_channel ??
       (value.model.startsWith("chatgpt-web.") ? "chatgpt_web" : "codex");
+    if (executionChannel === "chatgpt_web" && value.reasoning?.effort !== undefined) {
+      throw webReasoningEffortHttpError("reasoning.effort");
+    }
     const chatgptMode = value.aialra?.chatgpt_mode ?? "chat";
     const persistentDeepResearch =
       executionChannel === "chatgpt_web" && chatgptMode === "deep_research";

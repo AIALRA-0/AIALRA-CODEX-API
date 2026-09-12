@@ -329,6 +329,14 @@ export const JobEventSchema = z.object({
 });
 export type JobEvent = z.infer<typeof JobEventSchema>;
 
+export const WebExecutionSummarySchema = z.object({
+  accountId: z.string().nullable(),
+  requestedThinkingDepth: z.string().nullable(),
+  resolvedThinkingDepth: z.string().nullable(),
+  thinkingDepthVerified: z.boolean(),
+});
+export type WebExecutionSummary = z.infer<typeof WebExecutionSummarySchema>;
+
 export const JobSchema = z.object({
   id: z.string().uuid(),
   status: JobStatusSchema,
@@ -337,6 +345,7 @@ export const JobSchema = z.object({
   callerId: z.string().min(1),
   task: TaskContractSchema,
   route: RouteDecisionSchema.nullable(),
+  webExecution: WebExecutionSummarySchema.optional(),
   output: z.unknown().nullable(),
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),

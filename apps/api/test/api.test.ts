@@ -604,6 +604,23 @@ describe("AIALRA Model Router API", () => {
     expect(response.body.error.code).toBe("unsupported_parameter");
   });
 
+  it("rejects a Codex reasoning effort on a web Responses request before queuing", async () => {
+    const response = await request(app.getHttpServer())
+      .post("/v1/responses")
+      .set("Authorization", `Bearer ${bootstrapKey}`)
+      .set("Idempotency-Key", "synthetic-web-effort-response")
+      .send({
+        model: "chatgpt-web.auto",
+        input: "Synthetic request",
+        reasoning: { effort: "high" },
+      })
+      .expect(400);
+    expect(response.body.error).toMatchObject({
+      code: "unsupported_parameter",
+      details: { parameter: "reasoning.effort", supportedParameter: "aialra.thinking_depth" },
+    });
+  });
+
   it("exposes audit records without task payloads", async () => {
     const response = await request(app.getHttpServer()).get("/api/v1/audit").expect(200);
 
@@ -676,6 +693,22 @@ describe("AIALRA Model Router API", () => {
       .expect(400);
 
     expect(response.body.error.code).toBe("unsupported_parameter");
+  });
+
+  it("rejects a Codex reasoning effort on a web Chat Completions request", async () => {
+    const response = await request(app.getHttpServer())
+      .post("/v1/chat/completions")
+      .set("Authorization", `Bearer ${bootstrapKey}`)
+      .send({
+        model: "chatgpt-web.auto",
+        messages: [{ role: "user", content: "Synthetic request" }],
+        reasoning_effort: "high",
+      })
+      .expect(400);
+    expect(response.body.error).toMatchObject({
+      code: "unsupported_parameter",
+      details: { parameter: "reasoning_effort", supportedParameter: "aialra.thinking_depth" },
+    });
   });
 
   it("rejects a Chat Completions call for an unknown model before queuing", async () => {

@@ -36,6 +36,7 @@ export default function DocsPage() {
             <a href="#contract">任务合同</a>
             <a href="#events">事件流</a>
             <a href="#routing">路由规则</a>
+            <a href="#web-depth">网页思考深度</a>
             <a href="#errors">错误处理</a>
             <a href="#interfaces">MCP 与 CLI</a>
           </nav>
@@ -98,6 +99,22 @@ export default function DocsPage() {
               <p>
                 版本化确定性策略在接单时选择模型。首个输出或工具副作用出现后，路由不再切换。边界清楚的任务可使用
                 Luna，工程任务可使用 Terra，高歧义或高风险任务可使用 Sol
+              </p>
+            </section>
+            <section id="web-depth">
+              <h2>网页思考深度怎么选</h2>
+              <p>
+                先用有 <code>jobs:read</code> 权限的密钥请求 <code>GET /api/v1/models</code>，找到
+                <code>chatgpt-web.auto</code> 的 <code>webThinkingDepths</code>
+                ，再把其中一个精确标签放进
+                <code>aialra.thinking_depth</code>。原生 Jobs 使用{" "}
+                <code>task.chatgptWeb.thinkingDepth</code>
+              </p>
+              <p>
+                <code>auto</code> 只是网页模型入口，不是思考档位。不传档位就沿用网页默认；
+                <code>reasoning_effort</code> 只控制 Codex，请求网页通道时会被拒绝。任务详情中的
+                <code>webExecution</code> 显示请求档位、页面确认档位和实际账号槽位；
+                <code>route.effort</code> 不是网页实际档位
               </p>
             </section>
             <section id="errors">
