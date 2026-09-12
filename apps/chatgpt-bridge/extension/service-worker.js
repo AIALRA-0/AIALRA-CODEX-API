@@ -2,7 +2,6 @@ import { BRIDGE_TOKEN } from "./runtime-config.js";
 
 const BRIDGE_URL = `ws://127.0.0.1:13216/extension?token=${encodeURIComponent(BRIDGE_TOKEN)}`;
 const CHATGPT_URL = "https://chatgpt.com/";
-const TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
 const STORAGE_KEY = "aialra.chatgpt.single-page-v1.slot";
 const ADAPTER_VERSION = "single-page-v1";
 const READY_STABILITY_MS = 2_000;
@@ -138,9 +137,9 @@ async function createSlot() {
   return slot;
 }
 
-async function navigateToFreshChat(slot, active, temporaryChat = false) {
+async function navigateToFreshChat(slot, active) {
   const tab = await chrome.tabs.get(slot.tabId);
-  const targetUrl = temporaryChat ? TEMPORARY_CHAT_URL : CHATGPT_URL;
+  const targetUrl = CHATGPT_URL;
   const currentPage = await sendToTab(
     slot.tabId,
     { type: "aialra.probe", discoverModels: false },
@@ -244,7 +243,7 @@ async function resetSlot(slot) {
     jobHash: null,
     quarantinedUntil: null,
   });
-  const previousDocumentToken = await navigateToFreshChat(slot, false, true);
+  const previousDocumentToken = await navigateToFreshChat(slot, false);
   let page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken);
   let diagnostics = page.diagnostics ?? {};
   if (diagnostics.composerTextLength > 0) {
@@ -357,7 +356,7 @@ async function probeSlot(slot, discoverModels) {
       ) {
         // A restored background document can remain only partially hydrated.
         // Refresh only our empty, authenticated system page, never a draft/login.
-        const previousDocument = await navigateToFreshChat(slot, true, true);
+        const previousDocument = await navigateToFreshChat(slot, true);
         const ready = await waitForReadyPage(slot.tabId, 80, previousDocument);
         slot.depthRecoveryDocument = ready.documentToken;
         await patchSlot(slot, { documentToken: ready.documentToken });
@@ -443,15 +442,18 @@ async function prepareSlot(slot, invocation) {
     documentToken: null,
     quarantinedUntil: null,
   });
-  const previousDocumentToken = await navigateToFreshChat(slot, true, invocation.temporaryChat);
+  // Always begin from a regular blank chat. ChatGPT now asks whether a new
+  // Temporary Chat should be personalized, and a direct temporary-chat URL can
+  // restore the account's previous personalized choice. The content script
+  // explicitly selects the non-personalized option before it enters any text.
+  const previousDocumentToken = await navigateToFreshChat(slot, true);
   const page = await waitForReadyPage(slot.tabId, 80, previousDocumentToken, preparationDeadline);
   const diagnostics = page.diagnostics ?? {};
   const temporaryReady =
     invocation.conversationMode === "temporary_per_request" &&
     invocation.temporaryChat === true &&
     invocation.personalized === false &&
-    diagnostics.temporaryChatEnabled === true &&
-    diagnostics.temporaryChatPersonalized === false;
+    diagnostics.temporaryChatEnabled === false;
   const persistentDeepResearchReady =
     invocation.mode === "deep_research" &&
     invocation.conversationMode === "persistent_per_request" &&
