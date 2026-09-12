@@ -216,14 +216,16 @@ describe("visible thinking depth menu", () => {
     expect(menu.visible).toBe(true);
   });
 
-  it("does not touch a radio group owned by the depth control", async () => {
+  it("reads an already-open owned radio group without touching it", async () => {
     const h = harness();
     h.menu.visible = true;
     Object.assign(h.menu, {
       id: "depths",
       getAttribute: (key: string) => (key === "role" ? "radiogroup" : null),
     });
-    expect(await h.api.discoverThinkingDepths()).toEqual([]);
+    const click = vi.spyOn(h.control, "click");
+    expect((await h.api.discoverThinkingDepths())[0].webThinkingDepths).toHaveLength(4);
+    expect(click).not.toHaveBeenCalled();
     expect(h.menu.visible).toBe(true);
   });
 

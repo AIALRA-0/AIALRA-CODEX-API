@@ -662,6 +662,35 @@ async function discoverThinkingDepths() {
   const control = thinkingDepthControl();
   thinkingDepthDiscoveryDiagnostics = { phase: control ? "control_found" : "control_missing" };
   if (!control) return [];
+  const ownedId = control.getAttribute("aria-controls");
+  const ownedMenu = ownedId ? document.getElementById(ownedId) : null;
+  if (ownedMenu?.id === ownedId && isDepthControlVisible(ownedMenu)) {
+    // A user-owned menu may already be open. Read only its static radio choices;
+    // never move a slider or close a menu that discovery did not open.
+    const options = thinkingDepthOptions(ownedMenu);
+    const valid =
+      options.length > 0 &&
+      options.length <= 32 &&
+      !options.some(({ label }) => /^(?:latest|gpt[-\s]|chatgpt\b)/i.test(label));
+    thinkingDepthDiscoveryDiagnostics = {
+      phase: valid ? "discovered" : "choices_unreadable",
+      hadOpenMenu: true,
+      menuFound: true,
+      controlExpanded: control.getAttribute("aria-expanded") === "true",
+      optionCount: options.length,
+      visiblePopupRoles: [ownedMenu.getAttribute("role") ?? "unknown"],
+    };
+    if (!valid) return [];
+    return [
+      {
+        id: "chatgpt-web.auto",
+        displayName: "ChatGPT 网页自动选择",
+        available: true,
+        webThinkingDepths: options.map(({ label }) => label),
+        defaultWebThinkingDepth: options.find(({ selected }) => selected)?.label ?? null,
+      },
+    ];
+  }
   let menu = null;
   try {
     const hadOpenMenu =
