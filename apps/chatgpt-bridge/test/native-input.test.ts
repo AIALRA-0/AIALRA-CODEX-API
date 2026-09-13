@@ -10,14 +10,17 @@ function harness() {
     source.indexOf("async function clearX11Clipboard("),
   );
   const clipboard = { kill: vi.fn() };
+  let clipboardText = "";
+  let mockNow = 0;
   const runXdotool = vi.fn(async (args: string[]) => {
     void args;
   });
   const stopClipboard = vi.fn(async () => {});
   const startClipboard = vi.fn(async (value: string) => {
-    void value;
+    clipboardText = value;
     return clipboard;
   });
+  const readClipboard = vi.fn(async () => clipboardText);
   const paste = runInNewContext(
     `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2023 } }).outputText}; pasteX11Text`,
     {
@@ -28,11 +31,13 @@ function harness() {
       }),
       runXdotool,
       startX11Clipboard: startClipboard,
+      readX11Clipboard: readClipboard,
       stopX11Clipboard: stopClipboard,
+      Date: { now: () => (mockNow += 100) },
       setTimeout: (callback: () => void) => callback(),
     },
   );
-  return { paste, runXdotool, clipboard, startClipboard, stopClipboard };
+  return { paste, runXdotool, clipboard, startClipboard, readClipboard, stopClipboard };
 }
 
 describe("native input diagnostics", () => {
@@ -104,6 +109,7 @@ describe("native input diagnostics", () => {
       "locating_window",
       "point_translated",
       "clipboard_started",
+      "clipboard_verified",
       "paste_keys_completed",
       "clipboard_released",
     ]);
@@ -111,6 +117,14 @@ describe("native input diagnostics", () => {
     expect(JSON.stringify(trace.mock.calls)).not.toContain("synthetic private input");
     expect(h.runXdotool.mock.calls.flat(2).filter((value) => value === "ctrl+v")).toHaveLength(1);
     expect(h.stopClipboard).toHaveBeenCalledOnce();
+    expect(h.readClipboard).toHaveBeenCalledOnce();
+  });
+  it("never presses paste when X11 has not acquired the expected clipboard text", async () => {
+    const h = harness();
+    h.readClipboard.mockResolvedValue("different selection");
+    await expect(h.paste("fixture", 10, 20, null, vi.fn())).rejects.toThrow("clipboard_not_ready");
+    expect(h.runXdotool.mock.calls.flat(2)).not.toContain("ctrl+v");
+    expect(h.clipboard.kill).toHaveBeenCalledWith("SIGKILL");
   });
   it("stops its clipboard owner and propagates a failed native command without retrying", async () => {
     const h = harness();

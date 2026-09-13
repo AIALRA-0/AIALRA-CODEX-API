@@ -324,6 +324,17 @@ function stopX11Clipboard(child: ReturnType<typeof spawn>): Promise<void> {
   });
 }
 
+function readX11Clipboard(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "xclip",
+      ["-selection", "clipboard", "-out"],
+      { env: x11Environment(), timeout: 2_000, maxBuffer: 64 * 1024 },
+      (error, output) => (error ? reject(error) : resolve(output)),
+    );
+  });
+}
+
 function waitForClipboardExit(child: ReturnType<typeof spawn>): Promise<void> {
   return new Promise((resolve, reject) => {
     if (child.exitCode !== null) {
@@ -373,6 +384,19 @@ async function pasteX11Text(
     if (index === 0) trace("clipboard_started");
     try {
       await new Promise((resolve) => setTimeout(resolve, 250));
+      // stdin completion does not prove that xclip already owns the X11
+      // selection. Do not press Ctrl+V until the exact chunk is readable.
+      const clipboardDeadline = Date.now() + 2_000;
+      let clipboardReady = false;
+      while (Date.now() < clipboardDeadline) {
+        if ((await readX11Clipboard().catch(() => null)) === chunks[index]) {
+          clipboardReady = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!clipboardReady) throw new Error("clipboard_not_ready");
+      if (index === 0) trace("clipboard_verified");
       const focus =
         index === 0
           ? [
