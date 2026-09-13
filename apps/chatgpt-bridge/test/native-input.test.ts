@@ -32,6 +32,66 @@ function harness() {
 }
 
 describe("native input diagnostics", () => {
+  it("subtracts window-manager frame offsets before pasting into an unmaximized editor", async () => {
+    const source = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const code = source.slice(
+      source.indexOf("async function translateBrowserPoint("),
+      source.indexOf("async function runFocusedXdotoolAtPoint("),
+    );
+    const translate = runInNewContext(
+      `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2023 } }).outputText}; translateBrowserPoint`,
+      {
+        findChromiumWindowGeometry: async () => ({ x: 6, y: 40, width: 1050, height: 875 }),
+        findChromiumWindowFrameExtents: async () => ({ left: 1, top: 20 }),
+        Math,
+      },
+    );
+    const metrics = {
+      screenX: 5,
+      screenY: 20,
+      outerWidth: 1050,
+      outerHeight: 875,
+      innerWidth: 1050,
+      innerHeight: 788,
+      browserChromeWidth: 0,
+      browserChromeHeight: 87,
+    };
+    expect(await translate("100", { x: 594, y: 471 }, { windowMetrics: metrics })).toEqual({
+      x: 594,
+      y: 471,
+    });
+  });
+
+  it("keeps coordinates unchanged when the Chromium window is maximized", async () => {
+    const source = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const code = source.slice(
+      source.indexOf("async function translateBrowserPoint("),
+      source.indexOf("async function runFocusedXdotoolAtPoint("),
+    );
+    const translate = runInNewContext(
+      `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2023 } }).outputText}; translateBrowserPoint`,
+      {
+        findChromiumWindowGeometry: async () => ({ x: 0, y: 0, width: 1440, height: 900 }),
+        findChromiumWindowFrameExtents: async () => ({ left: 0, top: 0 }),
+        Math,
+      },
+    );
+    const metrics = {
+      screenX: 0,
+      screenY: 0,
+      outerWidth: 1440,
+      outerHeight: 900,
+      innerWidth: 1440,
+      innerHeight: 813,
+      browserChromeWidth: 0,
+      browserChromeHeight: 87,
+    };
+    expect(await translate("100", { x: 594, y: 471 }, { windowMetrics: metrics })).toEqual({
+      x: 594,
+      y: 471,
+    });
+  });
+
   it("traces coordinates and operation stages without retaining input text, with one paste", async () => {
     const h = harness();
     const trace = vi.fn();

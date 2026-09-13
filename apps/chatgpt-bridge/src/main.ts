@@ -222,6 +222,24 @@ function findChromiumWindowGeometry(windowId: string): Promise<X11WindowGeometry
   });
 }
 
+function findChromiumWindowFrameExtents(windowId: string): Promise<{ left: number; top: number }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "xprop",
+      ["-id", windowId, "_NET_FRAME_EXTENTS"],
+      { env: x11Environment(), timeout: 5_000, encoding: "utf8" },
+      (error, stdout) => {
+        const match = stdout?.match(/_NET_FRAME_EXTENTS\([^)]*\)\s*=\s*(\d+),\s*\d+,\s*(\d+),/);
+        if (error || !match) {
+          reject(new Error("chromium_window_frame_unavailable"));
+          return;
+        }
+        resolve({ left: Number(match[1]), top: Number(match[2]) });
+      },
+    );
+  });
+}
+
 async function translateBrowserPoint(
   windowId: string,
   point: BrowserPoint,
@@ -231,6 +249,7 @@ async function translateBrowserPoint(
   if (!metrics?.innerWidth || !metrics.innerHeight) return point;
 
   const geometry = await findChromiumWindowGeometry(windowId);
+  const frame = await findChromiumWindowFrameExtents(windowId);
   const reportedChromeWidth = Math.max(0, metrics.browserChromeWidth);
   const reportedChromeHeight = Math.max(0, metrics.browserChromeHeight);
   const viewportPoint = {
@@ -240,8 +259,8 @@ async function translateBrowserPoint(
   const actualChromeWidth = Math.max(0, geometry.width - metrics.innerWidth);
   const actualChromeHeight = Math.max(0, geometry.height - metrics.innerHeight);
   return {
-    x: Math.round(geometry.x + actualChromeWidth / 2 + viewportPoint.x),
-    y: Math.round(geometry.y + actualChromeHeight + viewportPoint.y),
+    x: Math.round(geometry.x - frame.left + actualChromeWidth / 2 + viewportPoint.x),
+    y: Math.round(geometry.y - frame.top + actualChromeHeight + viewportPoint.y),
   };
 }
 
