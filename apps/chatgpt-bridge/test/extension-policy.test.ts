@@ -35,7 +35,7 @@ describe("single-page browser agent policy", () => {
     const bridgeServer = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 
     expect(contentScript).not.toContain("execCommand");
-    expect(contentScript).toContain('action: "paste_prompt"');
+    expect(contentScript).toContain('attempt === 1 ? "paste_prompt" : "paste_prompt_retry"');
     expect(contentScript).toContain('action: "clear_clipboard"');
     expect(contentScript).toContain('nativeClick(send, jobId, "send_prompt")');
     expect(contentScript).toContain("async function sendRuntimeMessage");

@@ -314,12 +314,12 @@ async function waitForStableComposer(deadline, stabilityMs = 1_500) {
   throw new Error("chatgpt_page_not_ready");
 }
 
-async function nativeSetComposerText(composer, text, jobId, deadline) {
+async function nativeSetComposerText(composer, text, jobId, deadline, attempt = 1) {
   const point = nativePoint(composer);
   const accepted = await sendRuntimeMessage({
     type: "aialra.native-input",
     jobId,
-    action: "paste_prompt",
+    action: attempt === 1 ? "paste_prompt" : "paste_prompt_retry",
     x: point.x,
     y: point.y,
     text,
@@ -357,6 +357,17 @@ async function nativeSetComposerText(composer, text, jobId, deadline) {
     await waitForMutation(250);
   }
   throw new Error("chatgpt_delivery_uncertain");
+}
+
+function canRetryEmptyNativeInput(beforeUserCount, invocation) {
+  const currentComposer = first(SELECTORS.composer);
+  return Boolean(
+    userMessages().length === beforeUserCount &&
+    !first(SELECTORS.stop) &&
+    currentComposer &&
+    canonicalEditorText(composerPlainText(currentComposer)) === "" &&
+    boundInvocationDocument(invocation.documentToken, invocation.temporaryChat),
+  );
 }
 
 async function reportProgress(jobId, phase, diagnostics = null) {
@@ -2049,26 +2060,18 @@ async function invoke(invocation) {
     await configureMode(invocation.mode, invocation.jobId, deadline);
     resolvedThinkingDepth = await configureThinkingDepth(invocation, deadline);
     await reportProgress(invocation.jobId, "mode_selected", controlDiagnostics());
-    composer =
-      invocation.mode === "deep_research"
-        ? await waitForStableComposer(deadline)
-        : await waitForElement(SELECTORS.composer, deadline);
+    composer = await waitForStableComposer(deadline);
     const beforeAssistantCount = assistantTurnElements().length;
     const beforeUserCount = userMessages().length;
-    const inputAttempts = invocation.mode === "deep_research" ? 2 : 1;
+    // A missed native paste may be repeated only while the page proves no message was sent.
+    const inputAttempts = 2;
     for (let attempt = 1; attempt <= inputAttempts; attempt += 1) {
       try {
-        await nativeSetComposerText(composer, pageObjective, invocation.jobId, deadline);
+        await nativeSetComposerText(composer, pageObjective, invocation.jobId, deadline, attempt);
         break;
       } catch (error) {
-        const currentComposer = first(SELECTORS.composer);
-        const definitelyNotSubmitted =
-          userMessages().length === beforeUserCount &&
-          !first(SELECTORS.stop) &&
-          currentComposer &&
-          canonicalEditorText(composerPlainText(currentComposer)) === "" &&
-          boundInvocationDocument(invocation.documentToken, invocation.temporaryChat);
-        if (attempt >= inputAttempts || !definitelyNotSubmitted) throw error;
+        if (attempt >= inputAttempts || !canRetryEmptyNativeInput(beforeUserCount, invocation))
+          throw error;
         await new Promise((resolve) => setTimeout(resolve, 1_000));
         composer = await waitForStableComposer(deadline);
       }

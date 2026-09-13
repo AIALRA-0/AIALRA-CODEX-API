@@ -310,7 +310,7 @@ export const ExtensionNativeClickRequestSchema = z.object({
 export const ExtensionNativeInputRequestSchema = z.object({
   type: z.literal("native_input_request"),
   jobId: z.string().uuid(),
-  action: z.enum(["paste_prompt", "clear_clipboard"]),
+  action: z.enum(["paste_prompt", "paste_prompt_retry", "clear_clipboard"]),
   x: z.number().int().min(0).max(1_439).nullable().default(null),
   y: z.number().int().min(0).max(899).nullable().default(null),
   text: z.string().max(100_000).nullable().default(null),
