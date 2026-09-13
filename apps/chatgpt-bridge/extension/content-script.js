@@ -177,6 +177,28 @@ function visibleText(element) {
   return (element?.innerText ?? element?.textContent ?? "").trim();
 }
 
+function userMessageText(element) {
+  if (!element) return "";
+  // ChatGPT can append controls such as "Show more" inside a long user turn.
+  // Read the message body when it is identifiable instead of including the
+  // controls in the exact ownership comparison.
+  const bodies = [...(element.querySelectorAll?.("[class~='whitespace-pre-wrap']") ?? [])].filter(
+    (node) => !node.closest?.("button, [role='button']"),
+  );
+  return bodies.length === 1 ? visibleText(bodies[0]) : visibleText(element);
+}
+
+function userMessageMatchesObjective(element, objective) {
+  const expected = normalizedText(objective);
+  if (normalizedText(userMessageText(element)) === expected) return true;
+  const full = normalizedText(visibleText(element));
+  if (!full.startsWith(`${expected} `)) return false;
+  const suffix = full.slice(expected.length).trim();
+  return [...(element?.querySelectorAll?.("button, [role='button']") ?? [])].some(
+    (control) => normalizedText(visibleText(control)) === suffix,
+  );
+}
+
 async function nativeClick(element, jobId, action) {
   const rectangle = element.getBoundingClientRect();
   const browserChromeHeight = Math.max(0, window.outerHeight - window.innerHeight);
@@ -1612,7 +1634,7 @@ function controlDiagnostics(expectedObjective = null) {
   const assistantTurns = assistantTurnElements();
   const latestAssistant = assistantTurns.at(-1);
   const users = userMessages();
-  const latestUserText = normalizedText(visibleText(users.at(-1)));
+  const latestUserText = normalizedText(userMessageText(users.at(-1)));
   const expectedUserText = expectedObjective ? normalizedText(expectedObjective) : null;
   const sameRowControls = controlRoot
     ? visibleEnabledButtons(controlRoot).slice(-16).map(describeControl).filter(Boolean)
@@ -1650,7 +1672,9 @@ function controlDiagnostics(expectedObjective = null) {
     latestUserTextLength: latestUserText.length,
     expectedUserTextLength: expectedUserText?.length ?? null,
     latestUserMatchesObjective:
-      expectedUserText === null ? null : latestUserText === expectedUserText,
+      expectedUserText === null
+        ? null
+        : userMessageMatchesObjective(users.at(-1), expectedObjective),
     composerTextLength: canonicalEditorText(composerPlainText(composer)).length,
     documentToken: DOCUMENT_TOKEN,
     freshConversation:
@@ -1673,7 +1697,7 @@ function assistantMessages() {
 }
 
 function userMessages() {
-  return all(SELECTORS.user).filter((element) => visibleText(element));
+  return all(SELECTORS.user).filter((element) => userMessageText(element));
 }
 
 function normalizedText(value) {
@@ -1744,8 +1768,8 @@ async function waitForUserEcho(
       throw new Error("chatgpt_delivery_uncertain");
     }
     if (messages.length === beforeCount + 1) {
-      const actual = normalizedText(visibleText(messages.at(-1)));
-      if (actual === normalizedText(objective)) {
+      const actual = normalizedText(userMessageText(messages.at(-1)));
+      if (userMessageMatchesObjective(messages.at(-1), objective)) {
         matchedStableReads += 1;
         matchedStableSince ||= Date.now();
         if (matchedStableReads >= 2 && Date.now() - matchedStableSince >= 750) return;
@@ -1796,11 +1820,10 @@ async function waitForStableResult(
     if (failure) throw new Error(failure);
     const users = userMessages();
     const latestUser = users.at(-1);
-    const latestUserText = normalizedText(visibleText(latestUser));
     if (
       !boundInvocationDocument(documentToken, temporaryChat) ||
       users.length !== beforeUserCount + 1 ||
-      latestUserText !== normalizedText(objective)
+      !userMessageMatchesObjective(latestUser, objective)
     ) {
       throw new Error("chatgpt_delivery_uncertain");
     }

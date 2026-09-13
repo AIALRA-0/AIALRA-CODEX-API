@@ -1255,6 +1255,15 @@ export interface components {
         "application/json": components["schemas"]["ErrorEnvelope"];
       };
     };
+    /** @description ChatGPT web input exceeds the safe browser limit (`chatgpt_web_input_too_long`); no task is created */
+    WebInputTooLong: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ErrorEnvelope"];
+      };
+    };
     /** @description ChatGPT web cooldown or recovery probe is active (`chatgpt_rate_limited`) */
     TooManyRequests: {
       headers: {
@@ -1364,6 +1373,7 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       409: components["responses"]["Conflict"];
+      422: components["responses"]["WebInputTooLong"];
       429: components["responses"]["TooManyRequests"];
     };
   };
@@ -1394,6 +1404,7 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       409: components["responses"]["Conflict"];
+      422: components["responses"]["WebInputTooLong"];
       429: components["responses"]["TooManyRequests"];
       /** @description The underlying call failed */
       502: {
@@ -1488,6 +1499,7 @@ export interface operations {
         };
       };
       409: components["responses"]["Conflict"];
+      422: components["responses"]["WebInputTooLong"];
       429: components["responses"]["TooManyRequests"];
     };
   };

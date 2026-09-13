@@ -6,6 +6,46 @@ import { InMemoryJobRepository } from "@aialra/persistence";
 import { JobsService } from "../src/jobs/jobs.service.js";
 
 describe("job object authorization", () => {
+  it("rejects oversized web prompts before enqueueing or touching the browser", async () => {
+    let enqueued = 0;
+    const service = new JobsService(
+      new InMemoryJobRepository(),
+      {
+        enqueue: async () => {
+          enqueued += 1;
+        },
+      } as never,
+      { read: async () => null } as never,
+    );
+    await expect(
+      service.create(
+        {
+          task: TaskContractSchema.parse({
+            objective: "x".repeat(4_001),
+            executionChannel: "chatgpt_web",
+            model: "chatgpt-web.auto",
+            chatgptWeb: { mode: "chat" },
+          }),
+          metadata: {},
+        },
+        "admin",
+        "oversized-web-prompt",
+        undefined,
+        ["admin"],
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      response: {
+        error: {
+          code: "chatgpt_web_input_too_long",
+          maxCharacters: 4_000,
+          actualCharacters: 4_001,
+        },
+      },
+    });
+    expect(enqueued).toBe(0);
+  });
+
   it("prevents one API key from reading or cancelling another key's job", async () => {
     const repository = new InMemoryJobRepository();
     const queue = {

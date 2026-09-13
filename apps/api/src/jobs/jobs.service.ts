@@ -33,6 +33,9 @@ import { QuotaService } from "../quota/quota.service.js";
 import { JOB_QUEUE, JOB_REPOSITORY } from "../tokens.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired"]);
+// Longer native pastes can freeze the ChatGPT renderer before the bridge can
+// verify delivery. Keep the web channel below the measured safe envelope.
+const MAX_CHATGPT_WEB_OBJECTIVE_CHARACTERS = 4_000;
 const RESTRICTED_EXECUTION_POLICY: ExecutionPolicy = {
   defaultPreset: "restricted",
   allowedPresets: ["restricted"],
@@ -106,6 +109,19 @@ export class JobsService {
       });
     }
     if (parsedTask.executionChannel === "chatgpt_web") {
+      if (parsedTask.objective.length > MAX_CHATGPT_WEB_OBJECTIVE_CHARACTERS) {
+        throw new HttpException(
+          {
+            error: {
+              code: "chatgpt_web_input_too_long",
+              message: `网页对话当前最多接受 ${MAX_CHATGPT_WEB_OBJECTIVE_CHARACTERS} 个字符；请缩短输入，避免浏览器页面无响应。`,
+              maxCharacters: MAX_CHATGPT_WEB_OBJECTIVE_CHARACTERS,
+              actualCharacters: parsedTask.objective.length,
+            },
+          },
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
       if (process.env.CHATGPT_WEB_ADAPTER_ENABLED !== "true") {
         throw new ConflictException({
           error: { code: "chatgpt_web_disabled", message: "ChatGPT 网页通道尚未启用。" },

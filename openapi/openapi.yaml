@@ -59,6 +59,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/WebInputTooLong"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/chat/completions:
@@ -86,6 +88,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/WebInputTooLong"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
@@ -144,6 +148,8 @@ paths:
                 $ref: "#/components/schemas/Job"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/WebInputTooLong"
         "429":
           $ref: "#/components/responses/TooManyRequests"
     get:
@@ -812,6 +818,12 @@ components:
             $ref: "#/components/schemas/ErrorEnvelope"
     Conflict:
       description: Idempotency key reused with a different request digest
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    WebInputTooLong:
+      description: ChatGPT web input exceeds the safe browser limit (`chatgpt_web_input_too_long`); no task is created
       content:
         application/json:
           schema:

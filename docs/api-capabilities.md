@@ -12,6 +12,8 @@ Web administrators can PATCH an account's `priority` (integer 0–100, default 0
 
 Login is manual. A login or verification failure cannot safely be repaired by replaying a submitted task or copying another account's browser profile.
 
+ChatGPT Web requests currently accept at most 4,000 characters in `objective`. Larger input returns HTTP 422 (`chatgpt_web_input_too_long`) before job creation because the visible browser can freeze or convert a native paste into an attachment. Codex requests retain the general 100,000-character task contract limit. The web limit is an operational boundary, not silent truncation.
+
 Chat and search remain isolated in a new non-personalized Temporary Chat for every request. Deep Research uses a new ordinary ChatGPT conversation because the current Temporary Chat surface does not expose that mode. Every Deep Research call must explicitly acknowledge persistent history; the response returns `X-AIALRA-Data-Retention: persistent_chat_history`. A missing Deep Research entry returns `chatgpt_mode_unavailable` before sending and never falls back to ordinary chat or replays the task on another account.
 
 ## Request support

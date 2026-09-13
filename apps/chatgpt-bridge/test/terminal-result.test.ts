@@ -19,6 +19,8 @@ function harness({
     failureState: () => null,
     userMessages: () => [user],
     visibleText: (node: typeof user) => node.text,
+    userMessageText: (node: typeof user) => node.text,
+    userMessageMatchesObjective: (node: typeof user, objective: string) => node.text === objective,
     normalizedText: (value: string) => value.replace(/\s+/g, " ").trim(),
     boundTemporaryDocument: () => ownership,
     boundInvocationDocument: () => ownership,

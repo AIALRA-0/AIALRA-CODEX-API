@@ -228,6 +228,8 @@ Invoke-RestMethod -Method Post -Uri "$RouterUrl/v1/responses" -Headers $Headers 
 
 该 JSON 不能合法加入注释；字段约束以 [`openapi/openapi.yaml`](../openapi/openapi.yaml) 为准
 
+网页通道当前将单次 `objective` 限制为 4000 字符。更长的原生粘贴曾让 Chromium 页面无响应，或让 ChatGPT 将文本变成附件，导致无法证明消息原文和结果归属。超过上限时 API 返回 HTTP 422、`chatgpt_web_input_too_long`、`maxCharacters` 和 `actualCharacters`，不会创建任务或触碰浏览器。此上限只适用于网页通道，不限制 Codex 任务；调整上限前必须用真实网页请求验证输入、用户回显和一次提交。
+
 普通聊天和搜索固定使用新的非个性化 Temporary Chat。Deep Research 固定使用新的普通持久会话，并要求 `persistenceAcknowledged=true`；响应会明确标记 `persistent_chat_history`。任何模式都不续接旧会话，也不会在超时、限流、验证码、登录失效、页面变化或状态不确定时自动重试
 
 Deep Research 切换模式后会等待编辑器节点和位置稳定再输入。只有同时确认页面仍是同一新文档、用户消息数未增加、页面没有生成且编辑器为空时，才允许重做 1 次发送前输入；这不是第二次提交。提交按钮仍最多点击 1 次，无法证明未提交时立即失败
