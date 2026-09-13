@@ -1062,7 +1062,21 @@ async function main(): Promise<void> {
       if (!entry || entry.settled) return;
       if (message.type === "progress") {
         if (message.diagnostics) entry.lastDiagnostics = message.diagnostics;
+        const acknowledgeSubmitted = () => {
+          if (message.phase !== "submitted" || !message.requestId) return;
+          websocket.send(
+            JSON.stringify({
+              type: "progress_ack",
+              requestId: message.requestId,
+              jobId: message.jobId,
+            } satisfies ControllerMessage),
+          );
+        };
         if (entry.lastProgressPhase === message.phase) {
+          if (message.phase === "submitted" && message.requestId) {
+            acknowledgeSubmitted();
+            return;
+          }
           if (message.diagnostics) {
             writeFrame(entry.response, {
               type: "event",
@@ -1105,6 +1119,7 @@ async function main(): Promise<void> {
             },
           },
         });
+        acknowledgeSubmitted();
       } else if (message.type === "failed") {
         const code = message.code;
         lastFailureDiagnostics = message.diagnostics ?? null;

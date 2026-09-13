@@ -405,11 +405,13 @@ describe("ChatGPT web bridge server", () => {
       expect((controllerMessage.invocation as { deadlineAt: number }).deadlineAt).toBeGreaterThan(
         Date.now(),
       );
+      const ackMessage = nextMessage(extension);
       extension.send(
         JSON.stringify({
           type: "progress",
           jobId,
           phase: "submitted",
+          requestId: "0190abcd-0000-7000-8000-000000000123",
           diagnostics: {
             composerFound: true,
             temporaryChatEnabled: true,
@@ -439,6 +441,24 @@ describe("ChatGPT web bridge server", () => {
           },
         }),
       );
+      expect(await ackMessage).toMatchObject({
+        type: "progress_ack",
+        jobId,
+        requestId: "0190abcd-0000-7000-8000-000000000123",
+      });
+      const duplicateAck = nextMessage(extension);
+      extension.send(
+        JSON.stringify({
+          type: "progress",
+          jobId,
+          phase: "submitted",
+          requestId: "0190abcd-0000-7000-8000-000000000123",
+        }),
+      );
+      expect(await duplicateAck).toMatchObject({
+        type: "progress_ack",
+        jobId,
+      });
 
       if (diagnosticDrift) {
         extension.send(
@@ -459,6 +479,12 @@ describe("ChatGPT web bridge server", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
+      expect(
+        frames.filter(
+          (frame) =>
+            frame.event?.data?.kind === "chatgpt_web" && frame.event.data.phase === "submitted",
+        ),
+      ).toHaveLength(1);
       expect(frames.at(-1)).toMatchObject({
         type: "error",
         error: {

@@ -11,6 +11,7 @@ const ACTIVE_STATES = new Set(["preparing", "ready", "submitted", "generating"])
 const slots = new Map();
 const activeJobs = new Map();
 const pendingNativeResets = new Map();
+const pendingProgressAcks = new Map();
 let socket = null;
 let reconnectTimer = null;
 let keepaliveTimer = null;
@@ -22,6 +23,30 @@ let poolMutation = Promise.resolve();
 
 function send(value) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value));
+}
+
+function sendSubmittedProgressWithAck(message, sendResponse) {
+  const requestId = crypto.randomUUID();
+  const frame = {
+    type: "progress",
+    jobId: message.jobId,
+    phase: message.phase,
+    diagnostics: message.diagnostics ?? null,
+    requestId,
+  };
+  const settle = (ok) => {
+    if (!pendingProgressAcks.has(requestId)) return;
+    pendingProgressAcks.delete(requestId);
+    clearTimeout(retryTimer);
+    clearTimeout(timeoutTimer);
+    sendResponse({ ok });
+  };
+  const retryTimer = setTimeout(() => {
+    if (pendingProgressAcks.has(requestId)) send(frame);
+  }, 1_000);
+  const timeoutTimer = setTimeout(() => settle(false), 4_000);
+  pendingProgressAcks.set(requestId, { jobId: message.jobId, settle });
+  send(frame);
 }
 
 function publicSlots() {
@@ -621,6 +646,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       void patchSlot(slot, { state: "submitted", submitted: true });
     if (message.phase === "generating")
       void patchSlot(slot, { state: "generating", submitted: true });
+    if (message.phase === "submitted") {
+      sendSubmittedProgressWithAck(message, sendResponse);
+      return true;
+    }
     send({
       type: "progress",
       jobId: message.jobId,
@@ -702,6 +731,9 @@ function connect() {
         clearTimeout(pending.timer);
         pendingNativeResets.delete(message.requestId);
         pending.resolve(Boolean(message.ok));
+      } else if (message.type === "progress_ack") {
+        const pending = pendingProgressAcks.get(message.requestId);
+        if (pending?.jobId === message.jobId) pending.settle(true);
       } else if (message.type === "invoke") void invoke(message.invocation);
       else if (message.type === "cancel") void cancel(message.jobId);
       else if (message.type === "probe") void probe(message.discoverModels ?? true);
@@ -714,6 +746,7 @@ function connect() {
   });
   candidate.addEventListener("close", () => {
     if (socket !== candidate) return;
+    for (const pending of pendingProgressAcks.values()) pending.settle(false);
     clearInterval(keepaliveTimer);
     keepaliveTimer = null;
     socket = null;
