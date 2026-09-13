@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("../extension/content-script.js", import.meta.url), "utf8");
 
@@ -48,48 +48,5 @@ describe("composer stability", () => {
     await expect(harness.waitForStableComposer(2_000, 1_000)).rejects.toThrow(
       "chatgpt_page_not_ready",
     );
-  });
-
-  it("requires the real browser focus to land in the editor before native paste", async () => {
-    const editor = { contains: () => false };
-    const document = { activeElement: null as object | null, hasFocus: () => true };
-    const nativeClick = vi.fn(async () => {
-      document.activeElement = editor;
-    });
-    const focus = runInNewContext(
-      `${source.slice(
-        source.indexOf("async function focusComposerForNativeInput("),
-        source.indexOf("async function nativeSetComposerText("),
-      )}; focusComposerForNativeInput`,
-      {
-        Date: { now: () => 0 },
-        document,
-        nativeClick,
-        first: () => editor,
-        SELECTORS: { composer: [] },
-      },
-    );
-    await expect(focus(editor, "fixture-job", 3_000)).resolves.toBe(editor);
-    expect(nativeClick).toHaveBeenCalledWith(editor, "fixture-job", "composer_focus");
-  });
-
-  it("refuses to paste if a menu or overlay keeps the editor unfocused", async () => {
-    let now = 0;
-    const editor = { contains: () => false };
-    const focus = runInNewContext(
-      `${source.slice(
-        source.indexOf("async function focusComposerForNativeInput("),
-        source.indexOf("async function nativeSetComposerText("),
-      )}; focusComposerForNativeInput`,
-      {
-        Date: { now: () => (now += 100) },
-        document: { activeElement: {}, hasFocus: () => true },
-        nativeClick: async () => {},
-        first: () => editor,
-        SELECTORS: { composer: [] },
-        setTimeout: (callback: () => void) => callback(),
-      },
-    );
-    await expect(focus(editor, "fixture-job", 3_000)).rejects.toThrow("chatgpt_delivery_uncertain");
   });
 });

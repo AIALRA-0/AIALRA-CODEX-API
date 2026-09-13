@@ -314,25 +314,7 @@ async function waitForStableComposer(deadline, stabilityMs = 1_500) {
   throw new Error("chatgpt_page_not_ready");
 }
 
-async function focusComposerForNativeInput(composer, jobId, deadline) {
-  await nativeClick(composer, jobId, "composer_focus");
-  const focusDeadline = Math.min(deadline, Date.now() + 3_000);
-  while (Date.now() < focusDeadline) {
-    const current = first(SELECTORS.composer);
-    if (
-      current &&
-      (document.activeElement === current || current.contains(document.activeElement)) &&
-      document.hasFocus()
-    ) {
-      return current;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error("chatgpt_delivery_uncertain");
-}
-
 async function nativeSetComposerText(composer, text, jobId, deadline) {
-  composer = await focusComposerForNativeInput(composer, jobId, deadline);
   const point = nativePoint(composer);
   const accepted = await sendRuntimeMessage({
     type: "aialra.native-input",
