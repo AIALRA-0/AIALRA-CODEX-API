@@ -415,6 +415,13 @@ function selectControlPage(readyPages) {
   return failed ?? results[0];
 }
 
+function nextDiscoveredModels(current, page) {
+  if (!page?.authenticated || page.failureCode) return [];
+  // An authenticated page can briefly report no menu choices while it resets.
+  // Keep the last verified catalog; invocation still verifies the selected depth before sending.
+  return page.models?.some((model) => model.webThinkingDepths?.length) ? page.models : current;
+}
+
 async function probe(discoverModels = false) {
   await ensurePool();
   const readyPages = [];
@@ -427,7 +434,7 @@ async function probe(discoverModels = false) {
     }
   }
   const first = selectControlPage(readyPages);
-  if (first?.models) discoveredModels = first.models;
+  discoveredModels = nextDiscoveredModels(discoveredModels, first);
   controlDiagnostics = first?.diagnostics ?? null;
   pageFailureCode = first?.failureCode ?? null;
   send({

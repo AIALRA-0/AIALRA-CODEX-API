@@ -11,8 +11,23 @@ const selectionSource = source.slice(
 const selectControlPage = runInNewContext(`${selectionSource}; selectControlPage`) as (
   pages: Array<{ result: Record<string, unknown> }>,
 ) => Record<string, unknown>;
+const nextDiscoveredModels = runInNewContext(`${selectionSource}; nextDiscoveredModels`) as (
+  current: Array<{ webThinkingDepths: string[] }>,
+  page: Record<string, unknown> | null,
+) => Array<{ webThinkingDepths: string[] }>;
 
 describe("browser control-page selection", () => {
+  it("keeps verified depths through a transient empty authenticated probe", () => {
+    const known = [{ webThinkingDepths: ["Instant", "Extra High"] }];
+    expect(nextDiscoveredModels(known, { authenticated: true, models: [] })).toEqual(known);
+    expect(
+      nextDiscoveredModels(known, {
+        authenticated: true,
+        models: [{ webThinkingDepths: ["Medium"] }],
+      }),
+    ).toEqual([{ webThinkingDepths: ["Medium"] }]);
+    expect(nextDiscoveredModels(known, { authenticated: false, models: [] })).toEqual([]);
+  });
   it("preserves an expired-session failure when no authenticated page exists", () => {
     expect(
       selectControlPage([
