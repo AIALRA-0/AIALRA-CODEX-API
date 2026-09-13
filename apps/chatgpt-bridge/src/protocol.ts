@@ -236,7 +236,6 @@ export const ExtensionProgressSchema = z.object({
     "resetting",
   ]),
   diagnostics: BrowserControlDiagnosticsSchema.nullable().optional(),
-  requestId: z.string().uuid().optional(),
 });
 
 export const ExtensionCompletedSchema = z.object({
@@ -342,5 +341,4 @@ export type ControllerMessage =
   | { type: "cancel"; jobId: string }
   | { type: "probe"; discoverModels?: boolean }
   | { type: "native_reset_result"; requestId: string; ok: boolean }
-  | { type: "progress_ack"; requestId: string; jobId: string }
   | { type: "configure" };

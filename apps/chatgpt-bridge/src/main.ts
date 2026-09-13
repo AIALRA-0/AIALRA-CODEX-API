@@ -34,6 +34,7 @@ type PendingInvocation = {
   settled: boolean;
   nativeActions: Set<string>;
   lastProgressPhase: string | null;
+  submittedEventRecorded: boolean;
   lastDiagnostics: BrowserControlDiagnostics | null;
 };
 
@@ -860,6 +861,7 @@ async function main(): Promise<void> {
           settled: false,
           nativeActions: new Set(),
           lastProgressPhase: null,
+          submittedEventRecorded: false,
           lastDiagnostics: null,
         });
         phase = "preparing";
@@ -1062,21 +1064,31 @@ async function main(): Promise<void> {
       if (!entry || entry.settled) return;
       if (message.type === "progress") {
         if (message.diagnostics) entry.lastDiagnostics = message.diagnostics;
-        const acknowledgeSubmitted = () => {
-          if (message.phase !== "submitted" || !message.requestId) return;
-          websocket.send(
-            JSON.stringify({
-              type: "progress_ack",
-              requestId: message.requestId,
-              jobId: message.jobId,
-            } satisfies ControllerMessage),
-          );
-        };
+        // A verified user echo proves one submission even if its progress frame was lost.
+        // Recording this event must never delay or determine the browser invocation.
+        if (
+          message.phase === "user_echo_verified" &&
+          !entry.submittedEventRecorded &&
+          message.diagnostics?.userTurnCount === 1 &&
+          message.diagnostics.latestUserMatchesObjective === true
+        ) {
+          entry.submittedEventRecorded = true;
+          lastSubmissionAt = new Date().toISOString();
+          writeFrame(entry.response, {
+            type: "event",
+            event: {
+              type: "tool",
+              data: {
+                kind: "chatgpt_web",
+                phase: "submitted",
+                evidence: "user_echo_verified",
+                diagnosticSummary: diagnosticSummary(message.diagnostics),
+              },
+            },
+          });
+        }
+        if (message.phase === "submitted" && entry.submittedEventRecorded) return;
         if (entry.lastProgressPhase === message.phase) {
-          if (message.phase === "submitted" && message.requestId) {
-            acknowledgeSubmitted();
-            return;
-          }
           if (message.diagnostics) {
             writeFrame(entry.response, {
               type: "event",
@@ -1107,7 +1119,10 @@ async function main(): Promise<void> {
                   : "preparing";
         lastHeartbeatAt = new Date().toISOString();
         if (message.phase === "temporary_chat_verified") temporaryChatVerified = true;
-        if (message.phase === "submitted") lastSubmissionAt = lastHeartbeatAt;
+        if (message.phase === "submitted") {
+          lastSubmissionAt = lastHeartbeatAt;
+          entry.submittedEventRecorded = true;
+        }
         writeFrame(entry.response, {
           type: "event",
           event: {
@@ -1119,7 +1134,6 @@ async function main(): Promise<void> {
             },
           },
         });
-        acknowledgeSubmitted();
       } else if (message.type === "failed") {
         const code = message.code;
         lastFailureDiagnostics = message.diagnostics ?? null;

@@ -183,6 +183,34 @@ describe("ChatGPT web bridge server", () => {
     expect(controllerMessage.type).toBe("invoke");
     expect((controllerMessage.invocation as { modelLabel: string | null }).modelLabel).toBeNull();
     expect(controllerMessage.invocation).toMatchObject({ thinkingDepth: "Heavy" });
+    // The submitted progress frame may be lost while the page still confirms one user turn.
+    const verifiedEchoDiagnostics = {
+      composerFound: true,
+      temporaryChatEnabled: true,
+      temporaryChatPersonalized: false,
+      modelControlFound: true,
+      toolsControlFound: true,
+      selectedSend: null,
+      sameRowControls: [],
+      pageKind: "home",
+      surface: "chat",
+      assistantTurnCount: 0,
+      blankAssistantTurnCount: 0,
+      latestAssistantHasText: false,
+      generationActive: true,
+      userTurnCount: 1,
+      latestUserMatchesObjective: true,
+    };
+    extension.send(
+      JSON.stringify({
+        type: "progress",
+        jobId,
+        phase: "user_echo_verified",
+        diagnostics: verifiedEchoDiagnostics,
+      }),
+    );
+    // A delayed frame must not create a second submitted event or regress the phase.
+    extension.send(JSON.stringify({ type: "progress", jobId, phase: "submitted" }));
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     extension.send(
       JSON.stringify({
@@ -207,6 +235,13 @@ describe("ChatGPT web bridge server", () => {
         usage: { measurementStatus: "unavailable", subscriptionChannel: "chatgpt_pro_web" },
       },
     });
+    const submittedEvents = frames.filter(
+      (frame) =>
+        frame.event?.data?.kind === "chatgpt_web" && frame.event?.data?.phase === "submitted",
+    );
+    expect(submittedEvents).toHaveLength(1);
+    expect(submittedEvents[0].event.data.evidence).toBe("user_echo_verified");
+    expect(frames.some((frame) => frame.event?.data?.phase === "user_echo_verified")).toBe(true);
     expect(frames).toContainEqual(
       expect.objectContaining({
         type: "event",
@@ -405,13 +440,11 @@ describe("ChatGPT web bridge server", () => {
       expect((controllerMessage.invocation as { deadlineAt: number }).deadlineAt).toBeGreaterThan(
         Date.now(),
       );
-      const ackMessage = nextMessage(extension);
       extension.send(
         JSON.stringify({
           type: "progress",
           jobId,
           phase: "submitted",
-          requestId: "0190abcd-0000-7000-8000-000000000123",
           diagnostics: {
             composerFound: true,
             temporaryChatEnabled: true,
@@ -441,24 +474,6 @@ describe("ChatGPT web bridge server", () => {
           },
         }),
       );
-      expect(await ackMessage).toMatchObject({
-        type: "progress_ack",
-        jobId,
-        requestId: "0190abcd-0000-7000-8000-000000000123",
-      });
-      const duplicateAck = nextMessage(extension);
-      extension.send(
-        JSON.stringify({
-          type: "progress",
-          jobId,
-          phase: "submitted",
-          requestId: "0190abcd-0000-7000-8000-000000000123",
-        }),
-      );
-      expect(await duplicateAck).toMatchObject({
-        type: "progress_ack",
-        jobId,
-      });
 
       if (diagnosticDrift) {
         extension.send(
@@ -479,12 +494,6 @@ describe("ChatGPT web bridge server", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
-      expect(
-        frames.filter(
-          (frame) =>
-            frame.event?.data?.kind === "chatgpt_web" && frame.event.data.phase === "submitted",
-        ),
-      ).toHaveLength(1);
       expect(frames.at(-1)).toMatchObject({
         type: "error",
         error: {
