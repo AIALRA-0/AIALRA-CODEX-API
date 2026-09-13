@@ -27,6 +27,11 @@ chmod 0700 \
   /opt/aialra-browser-home/.local \
   /opt/aialra-browser-home/.vnc
 rm -f "$profile_dir/SingletonCookie" "$profile_dir/SingletonLock" "$profile_dir/SingletonSocket"
+# Chromium marks the profile as crashed while it is open. Container stops can
+# leave that marker behind and the native Restore pages bubble covers the
+# thinking-depth menu. Normalize it before starting the browser, never while
+# the profile is in use.
+node /usr/local/bin/normalize-profile-exit.mjs "$profile_dir"
 extension_token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s' "$extension_token" > "$runtime_dir/extension-token"
 chmod 0600 "$runtime_dir/extension-token"

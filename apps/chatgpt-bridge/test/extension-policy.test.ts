@@ -154,6 +154,7 @@ describe("single-page browser agent policy", () => {
     expect(entrypoint).toContain('elif [ "$extension_enabled" != "false" ]');
     expect(entrypoint).toContain("--disable-session-crashed-bubble");
     expect(entrypoint).toContain("xdotool key --clearmodifiers Escape");
+    expect(entrypoint).toContain('node /usr/local/bin/normalize-profile-exit.mjs "$profile_dir"');
     expect(entrypoint.indexOf("xdotool key --clearmodifiers Escape")).toBeLessThan(
       entrypoint.indexOf("node /app/apps/chatgpt-bridge/dist/main.js &"),
     );

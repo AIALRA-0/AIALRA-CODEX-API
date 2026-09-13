@@ -91,6 +91,7 @@ COPY --chown=browser:browser --from=build /workspace/packages ./packages
 COPY --chown=browser:browser --from=build /workspace/package.json ./package.json
 COPY --chown=browser:browser apps/chatgpt-bridge/extension /opt/aialra/chatgpt-extension
 COPY deploy/chatgpt-browser/entrypoint.sh /usr/local/bin/aialra-chatgpt-browser
+COPY deploy/chatgpt-browser/normalize-profile-exit.mjs /usr/local/bin/normalize-profile-exit.mjs
 RUN chmod 0555 /usr/local/bin/aialra-chatgpt-browser \
     && mkdir -p /run/aialra-chatgpt-bridge /run/aialra-chatgpt-extension /opt/aialra-browser-home/.config/chromium \
     && chown -R browser:browser /run/aialra-chatgpt-bridge /run/aialra-chatgpt-extension /opt/aialra-browser-home
