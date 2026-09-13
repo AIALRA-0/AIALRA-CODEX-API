@@ -116,6 +116,30 @@ chromium \
   https://chatgpt.com/ >/tmp/chromium.log 2>&1 &
 chrome_pid=$!
 
+# Chromium 152 still shows its native Restore pages bubble after some clean
+# container stops. Dismiss that browser chrome before the Bridge can advertise
+# a ready page or discover the thinking-depth control beneath it.
+browser_window=""
+attempt=0
+while [ "$attempt" -lt 200 ]; do
+  if ! kill -0 "$chrome_pid" 2>/dev/null; then
+    echo "Chromium exited before its window became ready" >&2
+    exit 1
+  fi
+  browser_window="$(xdotool search --onlyvisible --class chromium 2>/dev/null | head -n 1 || true)"
+  if [ -n "$browser_window" ]; then break; fi
+  attempt=$((attempt + 1))
+  sleep 0.1
+done
+if [ -z "$browser_window" ]; then
+  echo "Chromium window did not become ready" >&2
+  exit 1
+fi
+sleep 4
+xdotool windowactivate "$browser_window" 2>/dev/null || true
+xdotool key --clearmodifiers Escape 2>/dev/null || true
+unset browser_window attempt
+
 node /app/apps/chatgpt-bridge/dist/main.js &
 bridge_pid=$!
 
