@@ -674,6 +674,55 @@ async function readThinkingDepthChoices(menu, deadline) {
   return choices;
 }
 
+async function selectRequestedThinkingDepthSlider(menu, control, requested, deadline) {
+  const initial = thinkingDepthSlider(menu);
+  if (!initial) throw new Error("chatgpt_thinking_depth_unverified");
+  // Selecting a task's depth only needs evidence for that depth. Catalog
+  // discovery reads every position and can fail on an unrelated blank label.
+  const values = [
+    initial.value,
+    ...Array.from(
+      { length: initial.maximum - initial.minimum + 1 },
+      (_, index) => initial.minimum + index,
+    ).filter((value) => value !== initial.value),
+  ];
+  try {
+    for (const value of values) {
+      if (Date.now() >= deadline) throw new Error("chatgpt_thinking_depth_unverified");
+      const before = thinkingDepthSlider(menu);
+      const previousLabel = before ? thinkingDepthSliderLabel(menu, before, control) : null;
+      if (!(await moveThinkingDepthSlider(menu, value, deadline)))
+        throw new Error("chatgpt_thinking_depth_unverified");
+      const labelDeadline = Math.min(deadline, Date.now() + 800);
+      while (Date.now() < labelDeadline) {
+        await waitForMutation(50);
+        const current = thinkingDepthSlider(menu);
+        const label = current ? thinkingDepthSliderLabel(menu, current, control) : null;
+        if (
+          current?.value === value &&
+          label === requested &&
+          (value === before?.value || label !== previousLabel)
+        ) {
+          // A changed aria-valuenow can precede the rendered label. Check that
+          // the requested label remains attached to this position before send.
+          await waitForMutation(100);
+          const confirmed = thinkingDepthSlider(menu);
+          if (
+            confirmed?.value === value &&
+            thinkingDepthSliderLabel(menu, confirmed, control) === requested
+          )
+            return requested;
+        }
+      }
+    }
+    throw new Error("chatgpt_thinking_depth_unavailable");
+  } catch (error) {
+    if (!(await moveThinkingDepthSlider(menu, initial.value, Date.now() + 5_000)))
+      throw new Error("chatgpt_thinking_depth_unverified");
+    throw error;
+  }
+}
+
 async function clickThinkingDepthControl(control) {
   control.click();
   await waitForMutation(50);
@@ -847,6 +896,27 @@ async function configureThinkingDepth(invocation, deadline) {
     thinkingDepthDiscoveryDiagnostics = { phase: "configuring_menu" };
     menu = await openThinkingDepthMenu(control, clickThinkingDepthControl, deadline);
     thinkingDepthDiscoveryDiagnostics.phase = "reading_choices";
+    let slider = thinkingDepthSlider(menu);
+    if (menu && !slider) {
+      // The popover can open before its animated slider becomes visible.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      slider = thinkingDepthSlider(menu);
+    }
+    if (slider) {
+      if (requested) {
+        const selected = await selectRequestedThinkingDepthSlider(
+          menu,
+          control,
+          requested,
+          Math.min(deadline, Date.now() + 7_000),
+        );
+        thinkingDepthDiscoveryDiagnostics.phase = "selection_verified";
+        return selected;
+      }
+      const selected = thinkingDepthSliderLabel(menu, slider, control);
+      if (!selected) throw new Error("chatgpt_thinking_depth_unavailable");
+      return selected;
+    }
     const option = (
       await readThinkingDepthChoices(menu, Math.min(deadline, Date.now() + 5_000))
     ).find((entry) => (requested ? entry.label === requested : entry.selected));

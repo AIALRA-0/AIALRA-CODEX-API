@@ -417,16 +417,16 @@ describe("accessible thinking effort slider", () => {
     const h = sliderHarness();
     const attribute = h.slider.getAttribute;
     let pendingLabel = "Medium";
-    let delayLabel = false;
+    let delayedLabelUpdate = false;
     const dispatch = h.slider.dispatchEvent.getMockImplementation()!;
     h.slider.dispatchEvent.mockImplementation((event) => {
       dispatch(event);
       if (event.type !== "keydown") return;
       const label = h.labels[h.value()]!;
-      if (delayLabel) setTimeout(() => (pendingLabel = label), 20);
-      else pendingLabel = label;
-      // Discovery finishes by restoring Medium, then configuration selects High.
-      if (h.value() === 1 && h.slider.dispatchEvent.mock.calls.length > 10) delayLabel = true;
+      if (h.value() === 2) {
+        delayedLabelUpdate = true;
+        setTimeout(() => (pendingLabel = label), 150);
+      } else pendingLabel = label;
     });
     h.slider.getAttribute = (key) => (key === "aria-valuetext" ? pendingLabel : attribute(key));
     h.context.waitForMutation = () => new Promise((resolve) => setTimeout(resolve, 25));
@@ -434,7 +434,7 @@ describe("accessible thinking effort slider", () => {
       { thinkingDepth: "High", jobId: "test" },
       Date.now() + 5_000,
     );
-    expect(delayLabel).toBe(true);
+    expect(delayedLabelUpdate).toBe(true);
     expect(h.value()).toBe(2);
     expect(pendingLabel).toBe("High");
     expect(h.native).not.toHaveBeenCalled();
@@ -559,6 +559,44 @@ describe("accessible thinking effort slider", () => {
       expect(h.menu.visible).toBe(false);
     },
   );
+  it.each(["High", "6 Pro"])(
+    "selects %s without requiring an unrelated blank slider position",
+    async (label) => {
+      const h = sliderHarness();
+      h.labels[3] = "";
+      await expect(
+        h.api.configureThinkingDepth({ thinkingDepth: label, jobId: "test" }, Date.now() + 7_000),
+      ).resolves.toBe(label);
+      expect(h.control.innerText).toBe(label);
+      expect(h.native).not.toHaveBeenCalled();
+    },
+  );
+  it("restores the original slider position when the requested depth is absent", async () => {
+    const h = sliderHarness();
+    await expect(
+      h.api.configureThinkingDepth({ thinkingDepth: "Missing", jobId: "test" }, Date.now() + 7_000),
+    ).rejects.toThrow("chatgpt_thinking_depth_unavailable");
+    expect(h.value()).toBe(1);
+    expect(h.native).not.toHaveBeenCalled();
+  });
+  it("reads the current slider default without scanning unrelated positions", async () => {
+    const h = sliderHarness();
+    h.control.innerText = "Thinking effort";
+    h.labels[3] = "";
+    await expect(h.api.configureThinkingDepth({}, Date.now() + 5_000)).resolves.toBe("Medium");
+    expect(h.value()).toBe(1);
+    expect(h.native).not.toHaveBeenCalled();
+  });
+  it("waits for the task slider to mount before selecting the requested depth", async () => {
+    const h = sliderHarness();
+    const renderedAt = Date.now();
+    h.menu.querySelectorAll = (selector) =>
+      selector === "[role='slider']" && Date.now() - renderedAt >= 100 ? [h.slider] : [];
+    await expect(
+      h.api.configureThinkingDepth({ thinkingDepth: "High", jobId: "test" }, Date.now() + 5_000),
+    ).resolves.toBe("High");
+    expect(h.value()).toBe(2);
+  });
   it("does not advertise a slider that ignores keyboard changes", async () => {
     const h = sliderHarness();
     h.slider.dispatchEvent.mockImplementation(() => undefined);
