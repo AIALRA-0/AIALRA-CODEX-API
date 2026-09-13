@@ -27,7 +27,7 @@ describe("AIALRA Model Router API", () => {
     process.env.CHATGPT_WEB_DIAGNOSTIC_ENABLED = "true";
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication();
-    await app.init();
+    await app.listen(0, "127.0.0.1");
   });
 
   afterAll(async () => {
