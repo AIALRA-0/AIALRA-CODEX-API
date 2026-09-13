@@ -311,7 +311,18 @@ export class JobsService {
       expiresAt: new Date(now.getTime() + 86_400_000).toISOString(),
     };
 
-    await this.repository.create(job);
+    const created = await this.repository.create(job);
+    if (created.id !== job.id) {
+      if (created.requestHash !== hash) {
+        throw new ConflictException({
+          error: {
+            code: "idempotency_conflict",
+            message: "The idempotency key was already used with a different request.",
+          },
+        });
+      }
+      return created;
+    }
     await this.repository.appendAudit({
       id: randomUUID(),
       actorId: callerId,

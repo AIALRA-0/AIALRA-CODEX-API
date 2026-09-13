@@ -593,6 +593,13 @@ export class InMemoryJobRepository implements JobRepository {
   private readonly rateLimits = new Map<string, { minute: number; count: number }>();
 
   async create(job: Job): Promise<Job> {
+    if (job.idempotencyKey) {
+      const existing = [...this.jobs.values()].find(
+        (candidate) =>
+          candidate.callerId === job.callerId && candidate.idempotencyKey === job.idempotencyKey,
+      );
+      if (existing) return structuredClone(existing);
+    }
     this.jobs.set(job.id, structuredClone(job));
     return structuredClone(job);
   }
@@ -1680,7 +1687,7 @@ export class PostgresJobRepository implements JobRepository {
         error_code, error_message, usage, validation, created_at, updated_at, expires_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-      ) RETURNING *`,
+      ) ON CONFLICT (caller_id, idempotency_key) DO NOTHING RETURNING *`,
       [
         job.id,
         job.status,
@@ -1699,7 +1706,12 @@ export class PostgresJobRepository implements JobRepository {
         job.expiresAt,
       ],
     );
-    return this.rowToJob(result.rows[0]);
+    if (result.rowCount) return this.rowToJob(result.rows[0]);
+    if (job.idempotencyKey) {
+      const existing = await this.findByIdempotency(job.callerId, job.idempotencyKey);
+      if (existing) return existing;
+    }
+    throw new Error("idempotency_conflict_without_job");
   }
 
   async transitionJob(id: string, patch: Partial<Job>, audit: AuditEvent): Promise<Job> {

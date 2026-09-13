@@ -41,6 +41,20 @@ describe("AIALRA Model Router API", () => {
     });
   });
 
+  it("serves 192 health and readiness checks in six 32-request waves", async () => {
+    const paths = Array.from({ length: 192 }, (_, index) =>
+      index % 3 === 0 ? "/readyz" : "/healthz",
+    );
+    for (let offset = 0; offset < paths.length; offset += 32) {
+      const responses = await Promise.all(
+        paths.slice(offset, offset + 32).map((path) => request(app.getHttpServer()).get(path)),
+      );
+      expect(responses.map((response) => response.status).every((status) => status === 200)).toBe(
+        true,
+      );
+    }
+  });
+
   it("bootstraps an administrator key with the full execution ceiling", async () => {
     const created = await request(app.getHttpServer())
       .post("/api/v1/bootstrap/keys")
@@ -72,6 +86,101 @@ describe("AIALRA Model Router API", () => {
     expect(second.body.id).toBe(first.body.id);
     expect(first.body.status).toBe("queued");
     expect(first.body.task.permissions.preset).toBe("full");
+  });
+
+  it("creates only one job when 32 identical requests arrive together", async () => {
+    const payload = {
+      task: { objective: "Synthetic parallel idempotency check", taskKind: "bounded" },
+    };
+    const key = "synthetic-parallel-idempotency-32";
+    const repository = app.get<JobRepository>(JOB_REPOSITORY);
+    const originalLookup = repository.findByIdempotency.bind(repository);
+    let arrived = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lookup = vi
+      .spyOn(repository, "findByIdempotency")
+      .mockImplementation(async (caller, value) => {
+        const found = await originalLookup(caller, value);
+        if (value === key) {
+          arrived += 1;
+          if (arrived === 32) release();
+          await gate;
+        }
+        return found;
+      });
+    const timeout = setTimeout(release, 10_000);
+    let responses;
+    try {
+      responses = await Promise.all(
+        Array.from({ length: 32 }, () =>
+          request(app.getHttpServer())
+            .post("/api/v1/jobs")
+            .set("Idempotency-Key", key)
+            .send(payload),
+        ),
+      );
+    } finally {
+      clearTimeout(timeout);
+      lookup.mockRestore();
+    }
+    expect(arrived).toBe(32);
+    expect(responses.map((response) => response.status).every((status) => status === 201)).toBe(
+      true,
+    );
+    expect(new Set(responses.map((response) => response.body.id)).size).toBe(1);
+    const [jobId] = new Set(responses.map((response) => response.body.id));
+    expect((await repository.list(100)).filter((job) => job.id === jobId)).toHaveLength(1);
+    expect(
+      (await repository.events(jobId)).filter((event) => event.type === "status"),
+    ).toHaveLength(2);
+  });
+
+  it("returns a conflict when different payloads race with one idempotency key", async () => {
+    const key = "synthetic-parallel-conflict";
+    const repository = app.get<JobRepository>(JOB_REPOSITORY);
+    const originalLookup = repository.findByIdempotency.bind(repository);
+    let arrived = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lookup = vi
+      .spyOn(repository, "findByIdempotency")
+      .mockImplementation(async (caller, value) => {
+        const found = await originalLookup(caller, value);
+        if (value === key) {
+          arrived += 1;
+          if (arrived === 2) release();
+          await gate;
+        }
+        return found;
+      });
+    const timeout = setTimeout(release, 10_000);
+    let responses;
+    try {
+      responses = await Promise.all(
+        ["first", "second"].map((suffix) =>
+          request(app.getHttpServer())
+            .post("/api/v1/jobs")
+            .set("Idempotency-Key", key)
+            .send({ task: { objective: `Synthetic conflict ${suffix}`, taskKind: "bounded" } }),
+        ),
+      );
+    } finally {
+      clearTimeout(timeout);
+      lookup.mockRestore();
+    }
+    expect(arrived).toBe(2);
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(responses.find((response) => response.status === 409)?.body.error.code).toBe(
+      "idempotency_conflict",
+    );
+    expect((await repository.list(100)).filter((job) => job.idempotencyKey === key)).toHaveLength(
+      1,
+    );
   });
 
   it("keeps the ChatGPT web channel disabled until an administrator opens the experiment", async () => {

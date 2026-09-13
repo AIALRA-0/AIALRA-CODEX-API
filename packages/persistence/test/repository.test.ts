@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ChatGptWebQualificationRunSchema,
@@ -473,6 +473,29 @@ describe("InMemoryJobRepository", () => {
 });
 
 describe("PostgresJobRepository", () => {
+  it("returns the committed job when a concurrent insert loses the idempotency race", async () => {
+    const repository = new PostgresJobRepository(
+      "postgresql://unused:unused@127.0.0.1:1/unused",
+      Buffer.alloc(32).toString("base64"),
+    );
+    const existing = jobFixture();
+    const incoming = { ...existing, id: randomUUID() };
+    const queries: string[] = [];
+    Object.defineProperty(repository, "pool", {
+      value: {
+        query: async (sql: string) => {
+          queries.push(sql);
+          return { rowCount: 0, rows: [] };
+        },
+      },
+    });
+    const lookup = vi.spyOn(repository, "findByIdempotency").mockResolvedValue(existing);
+
+    await expect(repository.create(incoming)).resolves.toEqual(existing);
+    expect(queries[0]).toContain("ON CONFLICT (caller_id, idempotency_key) DO NOTHING RETURNING *");
+    expect(lookup).toHaveBeenCalledWith("caller", "key");
+  });
+
   it("migrates existing API keys to explicit channel permissions without escalation", () => {
     expect(DATABASE_MIGRATION_SQL).toContain("ADD COLUMN IF NOT EXISTS execution_channels");
     expect(DATABASE_MIGRATION_SQL).toContain(
