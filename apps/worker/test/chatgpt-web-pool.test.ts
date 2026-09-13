@@ -237,6 +237,69 @@ describe("ChatGptWebPoolProvider", () => {
     ).toBe(true);
   });
 
+  it("uses the other account when a catalog request fails before any submission", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    const catalogRequests: string[] = [];
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = String(input);
+        const id = url.includes("account-b") ? "account-b" : "account-a";
+        if (url.endsWith("/healthz")) return Response.json(health(id));
+        if (url.endsWith("/models")) {
+          catalogRequests.push(id);
+          if (id === "account-a") throw new Error("catalog timed out");
+          return Response.json(depthCatalog(["High"]));
+        }
+        sent.push(id);
+        return response([
+          { type: "result", result: { output: "OK", outputText: "OK", threadId: null, usage } },
+        ]);
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    const task = invocation();
+    task.task.chatgptWeb!.thinkingDepth = "High";
+    await expect(pool.invoke(task)).resolves.toMatchObject({ outputText: "OK" });
+    expect(catalogRequests).toEqual(["account-a", "account-b"]);
+    expect(sent).toEqual(["account-b"]);
+    expect(
+      (await repository.listChatGptWebAccounts()).every(
+        (account) => !account.activeJobId && account.qualified,
+      ),
+    ).toBe(true);
+  });
+
+  it("reports catalog failure accurately when all accounts fail before submission", async () => {
+    const { repository, configs } = await readyRepository();
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = String(input);
+        if (url.endsWith("/healthz")) return Response.json(health("synthetic"));
+        if (url.endsWith("/models")) throw new Error("catalog timed out");
+        sent.push(url);
+        throw new Error("Unexpected submission");
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    const task = invocation();
+    task.task.chatgptWeb!.thinkingDepth = "High";
+    await expect(pool.invoke(task)).rejects.toMatchObject({
+      code: "chatgpt_browser_unavailable",
+      submissionState: "not_submitted",
+    });
+    expect(sent).toEqual([]);
+    expect(
+      (await repository.listChatGptWebAccounts()).every((account) => !account.activeJobId),
+    ).toBe(true);
+  });
+
   it("preserves the requested-depth error when no other qualified account remains", async () => {
     const { repository, configs } = await readyRepository();
     await repository.updateChatGptWebAccount("account-a", { priority: 100 });

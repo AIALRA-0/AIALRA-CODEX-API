@@ -587,12 +587,13 @@ export class ChatGptWebPoolProvider implements ModelProvider {
           }
         } catch {
           await this.release(account, invocation.jobId, { state: "ready" });
-          throw new ChatGptWebPoolError(
-            "chatgpt_thinking_depth_unavailable",
-            "Could not verify the account's thinking menu before submission.",
+          lastPreSubmitError = new ChatGptWebPoolError(
+            "chatgpt_browser_unavailable",
+            "Could not read the account's thinking menu before submission.",
             "not_submitted",
             account.accountId,
           );
+          continue;
         }
       }
       if (!client) {

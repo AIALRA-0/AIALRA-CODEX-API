@@ -261,7 +261,9 @@ export class RunnerQuotaClient {
   async listModels(): Promise<ModelCatalogSnapshot> {
     const response = await fetch(new URL("/models", this.baseUrl), {
       headers: this.headers(),
-      signal: AbortSignal.timeout(10_000),
+      // The browser bridge can spend up to 10 seconds discovering the menu.
+      // Leave room for the response to reach the worker after that wait.
+      signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`runner_models_unavailable:${response.status}`);
     return ModelCatalogSnapshotSchema.parse(await response.json());
