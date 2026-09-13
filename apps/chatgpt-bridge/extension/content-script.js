@@ -588,7 +588,8 @@ async function moveThinkingDepthSlider(menu, target, deadline) {
     slider.element.focus();
     slider.element.dispatchEvent(new KeyboardEvent("keydown", { key, code: key, bubbles: true }));
     slider.element.dispatchEvent(new KeyboardEvent("keyup", { key, code: key, bubbles: true }));
-    const end = Math.min(deadline, Date.now() + 500);
+    // The page can acknowledge a key press after the slider animation settles.
+    const end = Math.min(deadline, Date.now() + 1_000);
     while (Date.now() < end && thinkingDepthSlider(menu)?.value === slider.value)
       await waitForMutation(25);
     const current = thinkingDepthSlider(menu);
@@ -616,11 +617,28 @@ async function readThinkingDepthChoices(menu, deadline) {
   let restored = false;
   try {
     for (let value = initial.minimum; value <= initial.maximum; value += 1) {
+      const before = thinkingDepthSlider(menu);
+      const previousLabel = before ? thinkingDepthSliderLabel(menu, before, control) : null;
       if (!(await moveThinkingDepthSlider(menu, value, deadline))) return [];
-      await waitForMutation(50);
-      const current = thinkingDepthSlider(menu);
-      const label = current ? thinkingDepthSliderLabel(menu, current, control) : null;
-      if (!label || choices.some((entry) => entry.label === label)) return [];
+      const labelDeadline = Math.min(deadline, Date.now() + 500);
+      let label = null;
+      while (Date.now() < labelDeadline) {
+        await waitForMutation(50);
+        const current = thinkingDepthSlider(menu);
+        label = current ? thinkingDepthSliderLabel(menu, current, control) : null;
+        if (
+          label &&
+          (value === before?.value || !previousLabel || label !== previousLabel) &&
+          !choices.some((entry) => entry.label === label)
+        )
+          break;
+      }
+      if (
+        !label ||
+        (value !== before?.value && label === previousLabel) ||
+        choices.some((entry) => entry.label === label)
+      )
+        return [];
       choices.push({ label, selected: value === initial.value, sliderValue: value });
     }
   } finally {
@@ -628,7 +646,7 @@ async function readThinkingDepthChoices(menu, deadline) {
     // reading a later position fails. Restoration has its own bounded budget.
     if (thinkingDepthDiscoveryDiagnostics?.phase === "reading_choices")
       thinkingDepthDiscoveryDiagnostics.phase = "restoring_selection";
-    restored = await moveThinkingDepthSlider(menu, initial.value, Date.now() + 2_000);
+    restored = await moveThinkingDepthSlider(menu, initial.value, Date.now() + 5_000);
     if (!restored) throw new Error("chatgpt_thinking_depth_unverified");
   }
   return choices;

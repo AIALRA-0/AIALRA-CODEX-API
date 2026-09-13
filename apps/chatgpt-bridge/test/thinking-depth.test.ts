@@ -517,6 +517,35 @@ describe("accessible thinking effort slider", () => {
     expect(h.menu.visible).toBe(false);
     expect(h.native).not.toHaveBeenCalled();
   });
+  it("waits for a delayed slider response and restores the original selection", async () => {
+    const h = sliderHarness();
+    const dispatch = h.slider.dispatchEvent.getMockImplementation()!;
+    h.slider.dispatchEvent.mockImplementation((event) => {
+      if (event.type === "keydown") setTimeout(() => dispatch(event), 750);
+    });
+    h.context.waitForMutation = () => new Promise((resolve) => setTimeout(resolve, 25));
+    const models = await h.api.discoverThinkingDepths();
+    expect(models[0].webThinkingDepths).toEqual(h.labels);
+    expect(h.value()).toBe(1);
+    expect(h.native).not.toHaveBeenCalled();
+  }, 12_000);
+
+  it("waits for a stale slider label to match the changed position", async () => {
+    const h = sliderHarness();
+    const attribute = h.slider.getAttribute;
+    const dispatch = h.slider.dispatchEvent.getMockImplementation()!;
+    let label = "Medium";
+    h.slider.getAttribute = (key) => (key === "aria-valuetext" ? label : attribute(key));
+    h.slider.dispatchEvent.mockImplementation((event) => {
+      dispatch(event);
+      if (event.type === "keydown") setTimeout(() => (label = h.labels[h.value()]!), 150);
+    });
+    h.context.waitForMutation = () => new Promise((resolve) => setTimeout(resolve, 25));
+    const models = await h.api.discoverThinkingDepths();
+    expect(models[0].webThinkingDepths).toEqual(h.labels);
+    expect(h.value()).toBe(1);
+    expect(h.native).not.toHaveBeenCalled();
+  }, 10_000);
   it.each(["Instant", "Medium", "High", "Extra High", "6 Pro"])(
     "selects and verifies %s",
     async (label) => {
