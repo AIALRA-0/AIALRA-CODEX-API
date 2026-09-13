@@ -14,6 +14,10 @@ function harness() {
     void args;
   });
   const stopClipboard = vi.fn(async () => {});
+  const startClipboard = vi.fn(async (value: string) => {
+    void value;
+    return clipboard;
+  });
   const paste = runInNewContext(
     `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2023 } }).outputText}; pasteX11Text`,
     {
@@ -23,12 +27,12 @@ function harness() {
         y: point.y + 20,
       }),
       runXdotool,
-      startX11Clipboard: async () => clipboard,
+      startX11Clipboard: startClipboard,
       stopX11Clipboard: stopClipboard,
       setTimeout: (callback: () => void) => callback(),
     },
   );
-  return { paste, runXdotool, clipboard, stopClipboard };
+  return { paste, runXdotool, clipboard, startClipboard, stopClipboard };
 }
 
 describe("native input diagnostics", () => {
@@ -116,5 +120,35 @@ describe("native input diagnostics", () => {
     await expect(h.paste("fixture", 10, 20, null, vi.fn())).rejects.toThrow("native failure");
     expect(h.clipboard.kill).toHaveBeenCalledWith("SIGKILL");
     expect(h.runXdotool).toHaveBeenCalledTimes(2);
+  });
+  it("pastes longer text as ordered Unicode-safe chunks into one editor", async () => {
+    const h = harness();
+    const text = "🙂".repeat(3_100);
+    const trace = vi.fn();
+    await h.paste(text, 10, 20, null, trace);
+    const chunks = h.startClipboard.mock.calls.map(([value]) => value);
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((value) => Array.from(value).length)).toEqual([3_000, 100]);
+    expect(chunks.join("")).toBe(text);
+    expect(h.runXdotool.mock.calls.flat(2).filter((value) => value === "ctrl+v")).toHaveLength(2);
+    expect(h.runXdotool.mock.calls[1]?.[0]).toContain("ctrl+a");
+    expect(h.runXdotool.mock.calls[2]?.[0]).toContain("ctrl+End");
+    expect(h.runXdotool.mock.calls[2]?.[0]).not.toContain("ctrl+a");
+    expect(h.stopClipboard).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(trace.mock.calls)).not.toContain(text);
+  });
+  it("does not repeat an earlier chunk when a later native paste fails", async () => {
+    const h = harness();
+    h.runXdotool
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("second paste failed"));
+    await expect(h.paste("x".repeat(3_100), 10, 20, null, vi.fn())).rejects.toThrow(
+      "second paste failed",
+    );
+    expect(h.startClipboard).toHaveBeenCalledTimes(2);
+    expect(h.runXdotool).toHaveBeenCalledTimes(3);
+    expect(h.stopClipboard).toHaveBeenCalledOnce();
+    expect(h.clipboard.kill).toHaveBeenCalledWith("SIGKILL");
   });
 });

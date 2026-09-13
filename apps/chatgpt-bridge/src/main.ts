@@ -360,40 +360,50 @@ async function pasteX11Text(
   trace("point_translated", translated);
   await runXdotool(["windowactivate", "--sync", windowId]);
   await new Promise((resolve) => setTimeout(resolve, 200));
-  const clipboard = await startX11Clipboard(value);
-  trace("clipboard_started");
-  try {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    await runXdotool([
-      "mousemove",
-      String(translated.x),
-      String(translated.y),
-      "sleep",
-      "0.05",
-      "click",
-      "1",
-      "sleep",
-      "0.15",
-      "key",
-      "--clearmodifiers",
-      "ctrl+a",
-      "key",
-      "BackSpace",
-      "key",
-      "--clearmodifiers",
-      "ctrl+v",
-    ]);
-    trace("paste_keys_completed");
-    // Chromium requests clipboard metadata before it requests the text. Keep
-    // the X11 selection owner alive through the complete native paste, then
-    // remove the task text before the extension verifies the editor value.
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-    await stopX11Clipboard(clipboard);
-    trace("clipboard_released");
-  } catch (error) {
-    clipboard.kill("SIGKILL");
-    throw error;
+  // Large native pastes become attachments in ChatGPT. Small chunks keep the
+  // complete text in the editor; the extension verifies it before submission.
+  const points = Array.from(value);
+  const chunks: string[] = [];
+  for (let index = 0; index < points.length; index += 3_000) {
+    chunks.push(points.slice(index, index + 3_000).join(""));
   }
+  if (!chunks.length) chunks.push("");
+  for (let index = 0; index < chunks.length; index += 1) {
+    const clipboard = await startX11Clipboard(chunks[index]!);
+    if (index === 0) trace("clipboard_started");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const focus =
+        index === 0
+          ? [
+              "mousemove",
+              String(translated.x),
+              String(translated.y),
+              "sleep",
+              "0.05",
+              "click",
+              "1",
+              "sleep",
+              "0.15",
+              "key",
+              "--clearmodifiers",
+              "ctrl+a",
+              "key",
+              "BackSpace",
+            ]
+          : ["key", "--clearmodifiers", "ctrl+End"];
+      await runXdotool([...focus, "key", "--clearmodifiers", "ctrl+v"]);
+      if (index === chunks.length - 1) trace("paste_keys_completed");
+      // Chromium requests metadata before text. Keep each selection owner
+      // alive through its paste, then clear it before the next chunk.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await stopX11Clipboard(clipboard);
+    } catch (error) {
+      clipboard.kill("SIGKILL");
+      throw error;
+    }
+  }
+  trace("clipboard_released");
 }
 
 async function clearX11Clipboard(): Promise<void> {

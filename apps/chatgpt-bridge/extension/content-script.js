@@ -325,7 +325,11 @@ async function nativeSetComposerText(composer, text, jobId, deadline) {
     text,
   });
   if (!accepted?.ok) throw new Error("chatgpt_delivery_uncertain");
-  const inputDeadline = Math.min(deadline, Date.now() + 30_000);
+  const pasteAllowance = Math.max(
+    30_000,
+    Math.ceil(Array.from(text).length / 3_000) * 1_800 + 10_000,
+  );
+  const inputDeadline = Math.min(deadline, Date.now() + pasteAllowance);
   let stableReads = 0;
   let stableSince = 0;
   while (Date.now() < inputDeadline) {
