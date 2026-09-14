@@ -30,6 +30,31 @@ describe("thinking surface stability", () => {
     expect(page.reads()).toBeGreaterThan(3);
   });
 
+  it("allows a slow but eventually ready Temporary Chat control before sending", async () => {
+    const page = harness(120);
+    await expect(page.wait(100_000)).resolves.toBeUndefined();
+    expect(page.reads()).toBeGreaterThan(120);
+  });
+
+  it("does not require a depth control for Auto chat", async () => {
+    const requestedSource = source.slice(
+      source.indexOf("async function waitForRequestedThinkingDepthSurface("),
+      source.indexOf("function thinkingDepthControl("),
+    );
+    let waits = 0;
+    const wait = runInNewContext(`${requestedSource}; waitForRequestedThinkingDepthSurface`, {
+      waitForStableThinkingDepthSurface: async () => {
+        waits += 1;
+      },
+    }) as (invocation: { mode: string; thinkingDepth?: string }, deadline: number) => Promise<void>;
+    await expect(wait({ mode: "chat" }, Date.now() + 1_000)).resolves.toBeUndefined();
+    expect(waits).toBe(0);
+    await expect(
+      wait({ mode: "chat", thinkingDepth: "High" }, Date.now() + 1_000),
+    ).resolves.toBeUndefined();
+    expect(waits).toBe(1);
+  });
+
   it("fails before any submission if the chat menu never becomes stable", async () => {
     await expect(harness(1_000).wait(100_000)).rejects.toThrow("chatgpt_page_not_ready");
   });

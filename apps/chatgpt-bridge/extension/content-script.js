@@ -422,7 +422,7 @@ async function ensureChatSurface(deadline, jobId = null) {
 }
 
 async function waitForStableThinkingDepthSurface(deadline) {
-  const end = Math.min(deadline, Date.now() + 10_000);
+  const end = Math.min(deadline, Date.now() + 20_000);
   let stableSince = 0;
   let stableReads = 0;
   while (Date.now() < end) {
@@ -437,6 +437,14 @@ async function waitForStableThinkingDepthSurface(deadline) {
     await waitForMutation(100);
   }
   throw new Error("chatgpt_page_not_ready");
+}
+
+async function waitForRequestedThinkingDepthSurface(invocation, deadline) {
+  // Auto has no depth to select. A Temporary Chat without a depth control can
+  // still answer it; explicit depths must continue to verify before input.
+  if (invocation.mode === "chat" && invocation.thinkingDepth) {
+    await waitForStableThinkingDepthSurface(deadline);
+  }
 }
 
 function thinkingDepthControl() {
@@ -2088,7 +2096,7 @@ async function invoke(invocation) {
       await reportProgress(invocation.jobId, "persistent_chat_verified");
     }
     await configureMode(invocation.mode, invocation.jobId, deadline);
-    if (invocation.mode === "chat") await waitForStableThinkingDepthSurface(deadline);
+    await waitForRequestedThinkingDepthSurface(invocation, deadline);
     resolvedThinkingDepth = await configureThinkingDepth(invocation, deadline);
     await reportProgress(invocation.jobId, "mode_selected", controlDiagnostics());
     composer = await waitForStableComposer(deadline);
