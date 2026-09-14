@@ -1,5 +1,6 @@
 import {
   ChatGptWebAccountSchema,
+  ChatGptWebAccountQuotaSchema,
   ChatGptWebDiagnosticSummarySchema,
   ChatGptWebFailurePhaseSchema,
   ChatGptWebStatusSchema,
@@ -75,6 +76,11 @@ function safeFailurePhase(value: unknown): ChatGptWebAccount["failurePhase"] {
 
 function safeDiagnosticSummary(value: unknown): ChatGptWebAccount["diagnosticSummary"] {
   const parsed = ChatGptWebDiagnosticSummarySchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function safeAccountQuota(value: unknown): ChatGptWebAccount["quota"] | null {
+  const parsed = ChatGptWebAccountQuotaSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -255,6 +261,7 @@ function accountPublicPatch(
     lastFailureAt: failureCode ? now.toISOString() : current.lastFailureAt,
     failurePhase: safeFailurePhase(health.failurePhase) ?? current.failurePhase,
     diagnosticSummary: safeDiagnosticSummary(health.diagnosticSummary) ?? current.diagnosticSummary,
+    quota: safeAccountQuota(health.quota) ?? current.quota,
     updatedAt: now.toISOString(),
   };
 }

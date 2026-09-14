@@ -33,6 +33,25 @@ export const BrowserModelSchema = z.object({
   webThinkingDepths: z.array(z.string().min(1).max(64)).max(32).optional(),
   defaultWebThinkingDepth: z.string().min(1).max(64).nullable().optional(),
 });
+
+export const BrowserAccountQuotaSchema = z.object({
+  status: z.enum(["fresh", "stale", "unavailable"]),
+  source: z.literal("chatgpt-usage"),
+  fetchedAt: z.string().datetime().nullable(),
+  windows: z
+    .array(
+      z.object({
+        kind: z.enum(["primary", "secondary"]),
+        usedPercent: z.number().min(0).max(100).nullable(),
+        remainingPercent: z.number().min(0).max(100).nullable(),
+        windowDurationMinutes: z.number().int().positive().nullable(),
+        resetsAt: z.string().datetime().nullable(),
+      }),
+    )
+    .max(2),
+  errorCode: z.string().max(64).nullable(),
+});
+export type BrowserAccountQuota = z.infer<typeof BrowserAccountQuotaSchema>;
 export type BrowserModel = z.infer<typeof BrowserModelSchema>;
 
 const BrowserControlSchema = z.object({
@@ -212,6 +231,7 @@ export const ExtensionHelloSchema = z.object({
   pageReady: z.boolean(),
   authenticated: z.boolean(),
   models: z.array(BrowserModelSchema).max(64),
+  quota: BrowserAccountQuotaSchema.optional(),
   activeTabs: z.number().int().nonnegative(),
   slots: z.array(BrowserSlotSchema).max(4).default([]),
   quarantinedTabs: z.number().int().nonnegative().default(0),
@@ -279,6 +299,7 @@ export const ExtensionModelsSchema = z.object({
   pageReady: z.boolean(),
   authenticated: z.boolean(),
   models: z.array(BrowserModelSchema).max(64),
+  quota: BrowserAccountQuotaSchema.optional(),
   activeTabs: z.number().int().nonnegative(),
   slots: z.array(BrowserSlotSchema).max(4).default([]),
   quarantinedTabs: z.number().int().nonnegative().default(0),

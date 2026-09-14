@@ -17,6 +17,13 @@ let socket = null;
 let reconnectTimer = null;
 let keepaliveTimer = null;
 let discoveredModels = [];
+let accountQuota = {
+  status: "unavailable",
+  source: "chatgpt-usage",
+  fetchedAt: null,
+  windows: [],
+  errorCode: null,
+};
 let controlDiagnostics = null;
 let pageFailureCode = null;
 let restored = false;
@@ -382,7 +389,11 @@ async function ensurePool() {
 }
 
 async function probeSlot(slot, discoverModels) {
-  const page = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: false }, 2);
+  const page = await sendToTab(
+    slot.tabId,
+    { type: "aialra.probe", discoverModels: false, discoverQuota: true },
+    2,
+  );
   if (slot.state === "login_required" || slot.state === "quarantined") {
     const emptyHome =
       page?.pageReady &&
@@ -502,6 +513,7 @@ async function probe(discoverModels = false) {
   }
   const first = selectControlPage(readyPages);
   discoveredModels = nextDiscoveredModels(discoveredModels, first);
+  if (first?.quota) accountQuota = first.quota;
   controlDiagnostics = first?.diagnostics ?? null;
   pageFailureCode = first?.failureCode ?? null;
   send({
@@ -509,6 +521,7 @@ async function probe(discoverModels = false) {
     pageReady: Boolean(first?.pageReady),
     authenticated: Boolean(first?.authenticated),
     models: discoveredModels,
+    quota: accountQuota,
     activeTabs: activeTabCount(),
     slots: publicSlots(),
     quarantinedTabs: 0,
@@ -758,6 +771,7 @@ function connect() {
       pageReady: Boolean(result?.pageReady),
       authenticated: Boolean(result?.authenticated),
       models: discoveredModels,
+      quota: accountQuota,
       activeTabs: activeTabCount(),
       slots: publicSlots(),
       quarantinedTabs: 0,

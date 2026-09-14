@@ -186,7 +186,20 @@ interface ChatGptWebAccount {
   slot: "a" | "b" | "c" | "d";
   label: string;
   plan: "plus" | "pro" | "unknown";
-  priority?: number;
+  routingWeight: number;
+  quota: {
+    status: "fresh" | "stale" | "unavailable";
+    source: "chatgpt-usage";
+    fetchedAt: string | null;
+    windows: Array<{
+      kind: "primary" | "secondary";
+      usedPercent: number | null;
+      remainingPercent: number | null;
+      windowDurationMinutes: number | null;
+      resetsAt: string | null;
+    }>;
+    errorCode: string | null;
+  };
   enabled: boolean;
   qualified: boolean;
   state:
@@ -661,6 +674,7 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
             <th>调用</th>
             <th>状态</th>
             <th>执行通道与模型</th>
+            <th>执行账号</th>
             <th>类型</th>
             <th>API 等效成本</th>
             <th>单次额度变化</th>
@@ -670,7 +684,7 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
         <tbody>
           {jobs.length === 0 ? (
             <tr>
-              <td colSpan={7} className="muted">
+              <td colSpan={8} className="muted">
                 当前没有调用记录
               </td>
             </tr>
@@ -717,6 +731,11 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
                       <>Codex · {job.route?.model ?? job.task.model}</>
                     )}
                   </td>
+                  <td>
+                    {job.task.executionChannel === "chatgpt_web"
+                      ? (job.webExecution?.accountId ?? "尚未记录")
+                      : "Codex 授权"}
+                  </td>
                   <td>{TASK_KIND_LABEL[job.task.taskKind] ?? job.task.taskKind}</td>
                   <td>
                     {job.usage.measurementStatus === "unavailable"
@@ -743,23 +762,27 @@ function Overview() {
   const syntheticDemo = process.env.NEXT_PUBLIC_SYNTHETIC_DEMO === "true";
   const [jobs, setJobs] = useState<Job[]>([]);
   const [quota, setQuota] = useState<Quota | null>(null);
+  const [webAccounts, setWebAccounts] = useState<ChatGptWebAccount[]>([]);
   const [error, setError] = useState("");
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
       if (syntheticDemo) {
         setJobs([]);
         setQuota(null);
+        setWebAccounts([]);
         setError("");
         return;
       }
       try {
-        const [jobResult, quotaResult] = await Promise.all([
+        const [jobResult, quotaResult, webStatus] = await Promise.all([
           routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12", { signal }),
           routerFetch<Quota>("/api/v1/quota", { signal }),
+          routerFetch<ChatGptWebStatus>("/api/v1/chatgpt-web/status", { signal }),
         ]);
         if (signal?.aborted) return;
         setJobs(jobResult.data);
         setQuota(quotaResult);
+        setWebAccounts(webStatus.accounts);
         setError("");
       } catch (cause) {
         if (signal?.aborted) return;
@@ -827,6 +850,41 @@ function Overview() {
           <span className="muted">基于最近 {jobs.length} 次调用</span>
         </article>
       </section>
+      {webAccounts.length ? (
+        <section className="console-section">
+          <div className="row">
+            <h3>网页账号订阅额度</h3>
+            <span className="muted">只显示浏览器读取的脱敏额度窗口</span>
+          </div>
+          <div className="metrics account-quota-grid">
+            {webAccounts.map((account) => {
+              const primary = account.quota.windows.find((window) => window.kind === "primary");
+              const remaining = primary?.remainingPercent ?? null;
+              return (
+                <article className="metric" key={account.accountId}>
+                  <small>
+                    {account.label} · {account.accountId}
+                  </small>
+                  <strong>{remaining == null ? "—" : `${Math.round(remaining)}%`}</strong>
+                  <div className="progress">
+                    <span style={{ width: `${remaining ?? 0}%` }} />
+                  </div>
+                  <span className="muted">Codex 订阅剩余额度 · 权重 {account.routingWeight}%</span>
+                  <span className="muted">
+                    {account.quota.status === "fresh"
+                      ? primary?.resetsAt
+                        ? `重置于 ${formatDate(primary.resetsAt)}`
+                        : "额度数据已更新"
+                      : account.quota.status === "stale"
+                        ? "额度数据已过期"
+                        : "当前无法读取额度"}
+                  </span>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       <section className="console-section">
         <div className="row">
           <h3>最近调用</h3>
@@ -2028,6 +2086,8 @@ function ChatGptWebChannel() {
   const [confirmAccountId, setConfirmAccountId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [weightDraft, setWeightDraft] = useState<Record<string, number>>({});
+  const [weightsDirty, setWeightsDirty] = useState(false);
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const [currentStatus, currentRuns] = await Promise.all([
@@ -2047,6 +2107,17 @@ function ChatGptWebChannel() {
   }, []);
   useVisiblePolling(refresh, 5_000);
   const activeRun = runs.find((run) => ["accepted", "running"].includes(run.status));
+  useEffect(() => {
+    if (!status || weightsDirty) return;
+    setWeightDraft(
+      Object.fromEntries(
+        status.accounts.map((account) => [account.accountId, account.routingWeight]),
+      ),
+    );
+  }, [status, weightsDirty]);
+  const weightTotal = status
+    ? status.accounts.reduce((total, account) => total + (weightDraft[account.accountId] ?? 0), 0)
+    : 0;
 
   async function startQualification() {
     if (!confirmSuite) return;
@@ -2072,7 +2143,7 @@ function ChatGptWebChannel() {
 
   async function updateAccount(
     account: ChatGptWebAccount,
-    patch: Partial<Pick<ChatGptWebAccount, "plan" | "enabled" | "label" | "priority">>,
+    patch: Partial<Pick<ChatGptWebAccount, "plan" | "enabled" | "label">>,
   ) {
     setBusy(true);
     try {
@@ -2088,13 +2159,47 @@ function ChatGptWebChannel() {
     }
   }
 
+  function resetEvenWeights() {
+    if (!status?.accounts.length) return;
+    const base = Math.floor(100 / status.accounts.length);
+    let remainder = 100 - base * status.accounts.length;
+    setWeightDraft(
+      Object.fromEntries(
+        status.accounts.map((account) => [account.accountId, base + (remainder-- > 0 ? 1 : 0)]),
+      ),
+    );
+    setWeightsDirty(true);
+  }
+
+  async function saveRoutingWeights() {
+    if (!status || weightTotal !== 100) return;
+    setBusy(true);
+    try {
+      await routerFetch<{ data: ChatGptWebAccount[] }>("/api/v1/chatgpt-web/routing-weights", {
+        method: "PUT",
+        body: JSON.stringify({
+          weights: status.accounts.map((account) => ({
+            accountId: account.accountId,
+            weight: weightDraft[account.accountId] ?? 0,
+          })),
+        }),
+      });
+      setWeightsDirty(false);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "路由权重保存失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!status) {
     return (
       <>
         <PageHeading
           eyebrow="实验执行通道"
           title="ChatGPT 网页通道"
-          copy="管理网页账号、分配优先级并检查可用性。账号通过单次探针后才能接单。"
+          copy="管理网页账号、分配路由权重并检查可用性。账号通过单次探针后才能接单。"
         />
         <ErrorNotice message={error} />
         <section className="card" role="status" aria-live="polite">
@@ -2147,7 +2252,7 @@ function ChatGptWebChannel() {
       <PageHeading
         eyebrow="实验执行通道"
         title="ChatGPT 网页通道"
-        copy="管理网页账号、分配优先级并检查可用性。账号通过单次探针后才能接单。"
+        copy="管理网页账号、分配路由权重并检查可用性。账号通过单次探针后才能接单。"
         action={
           <a
             className="button"
@@ -2249,12 +2354,55 @@ function ChatGptWebChannel() {
           </div>
           <span className="muted">每个槽位最多一个并发；套餐为人工标签</span>
         </div>
+        <div className="routing-weight-editor" aria-label="账号路由权重">
+          <div className="routing-weight-fields">
+            {status.accounts.map((account) => (
+              <label key={account.accountId}>
+                <span>{account.label}</span>
+                <span className="weight-input">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={weightDraft[account.accountId] ?? 0}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const next = Math.max(0, Math.min(100, Number(event.target.value) || 0));
+                      setWeightDraft((current) => ({ ...current, [account.accountId]: next }));
+                      setWeightsDirty(true);
+                    }}
+                    aria-label={`${account.accountId} 路由权重`}
+                  />
+                  <span>%</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="row action-row">
+            <span className={weightTotal === 100 ? "success" : "danger"}>总计 {weightTotal}%</span>
+            <button className="button compact" disabled={busy} onClick={resetEvenWeights}>
+              平均分配
+            </button>
+            <button
+              className="button primary compact"
+              disabled={busy || !weightsDirty || weightTotal !== 100}
+              onClick={() => void saveRoutingWeights()}
+            >
+              保存权重
+            </button>
+          </div>
+          <p className="muted">
+            权重表示健康账号的长期流量占比；账号忙碌、冷却或掉线时会自动排除，消息提交后不会换号重发
+          </p>
+        </div>
         <div className="table-wrap">
           <table className="accounts-table">
             <thead>
               <tr>
                 <th>槽位</th>
                 <th>套餐</th>
+                <th>路由权重</th>
                 <th>状态</th>
                 <th>运行/登录</th>
                 <th>探针</th>
@@ -2270,22 +2418,6 @@ function ChatGptWebChannel() {
                       <div className="account-cell">
                         <strong>{account.label}</strong>
                         <code>{account.accountId}</code>
-                        <select
-                          aria-label={`${account.accountId} 调度优先级`}
-                          value={account.priority ?? 0}
-                          disabled={busy}
-                          onChange={(event) =>
-                            void updateAccount(account, { priority: Number(event.target.value) })
-                          }
-                        >
-                          <option value={0}>均衡账号</option>
-                          <option value={100}>主力账号</option>
-                          {account.priority != null &&
-                            account.priority !== 0 &&
-                            account.priority !== 100 && (
-                              <option value={account.priority}>优先级 {account.priority}</option>
-                            )}
-                        </select>
                       </div>
                     </td>
                     <td data-label="套餐">
@@ -2308,6 +2440,7 @@ function ChatGptWebChannel() {
                         )}
                       </select>
                     </td>
+                    <td data-label="路由权重">{account.routingWeight}%</td>
                     <td data-label="状态">
                       {ACCOUNT_STATE_LABELS[account.state]}
                       <br />
@@ -2378,7 +2511,7 @@ function ChatGptWebChannel() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={8} className="muted">
                     账号池尚未同步
                   </td>
                 </tr>

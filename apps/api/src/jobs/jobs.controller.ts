@@ -58,11 +58,16 @@ export class JobsController {
     @Req() request: AuthenticatedRequest,
     @Query("limit", new ParseIntPipe({ optional: true })) limit?: number,
   ) {
+    const actorId = request.callerId ?? "unknown";
+    const isAdmin = request.isAdmin === true;
+    const jobs = await this.jobs.listForActor(actorId, isAdmin, limit);
+    const webJobs = jobs.filter((job) => job.task.executionChannel === "chatgpt_web");
+    const eventsByJob = await this.jobs.eventsForJobs(webJobs);
     return {
-      data: await this.jobs.listForActor(
-        request.callerId ?? "unknown",
-        request.isAdmin === true,
-        limit,
+      data: jobs.map((job) =>
+        job.task.executionChannel === "chatgpt_web"
+          ? { ...job, webExecution: summarizeWebExecution(job, eventsByJob.get(job.id) ?? []) }
+          : job,
       ),
     };
   }

@@ -20,6 +20,7 @@ import {
   ExtensionMessageSchema,
   type BridgeInvocation,
   type BrowserControlDiagnostics,
+  type BrowserAccountQuota,
   type BrowserPageFailureCode,
   type BrowserSlot,
   type BrowserModel,
@@ -488,6 +489,13 @@ async function main(): Promise<void> {
   let pageReady = false;
   let authenticated = false;
   let discoveredModels: BrowserModel[] = [];
+  let accountQuota: BrowserAccountQuota = {
+    status: "unavailable",
+    source: "chatgpt-usage",
+    fetchedAt: null,
+    windows: [],
+    errorCode: null,
+  };
   let modelCatalogRevision = 0;
   const modelCatalogWaiters = new Set<(revision: number) => void>();
   let activeTabs = 0;
@@ -635,6 +643,7 @@ async function main(): Promise<void> {
         extensionConnected: Boolean(extension),
         pageReady,
         authenticated,
+        quota: accountQuota,
         activeTabs,
         slots: browserSlots,
         quarantinedTabs,
@@ -1040,6 +1049,7 @@ async function main(): Promise<void> {
       }
       if (message.type === "hello" || message.type === "models") {
         discoveredModels = message.authenticated ? message.models : [];
+        if (message.quota) accountQuota = message.quota;
         if (message.type === "models") {
           modelCatalogRevision += 1;
           for (const waiter of modelCatalogWaiters) waiter(modelCatalogRevision);

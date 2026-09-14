@@ -75,9 +75,103 @@ let cancelled = false;
 let depthDiscovery = null;
 let depthCatalog = [];
 let depthCatalogAt = 0;
+let accountQuota = {
+  status: "unavailable",
+  source: "chatgpt-usage",
+  fetchedAt: null,
+  windows: [],
+  errorCode: null,
+};
+let accountQuotaAt = 0;
+let accountQuotaDiscovery = null;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
 const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000;
 const TERMINAL_RESULT_CONFIRM_MS = 15_000;
+const ACCOUNT_QUOTA_TTL_MS = 5 * 60_000;
+
+function safeQuotaWindow(kind, value) {
+  if (!value || typeof value !== "object") return null;
+  const used = Number(value.used_percent);
+  const durationSeconds = Number(value.limit_window_seconds);
+  const resetAtSeconds = Number(value.reset_at);
+  const resetAfterSeconds = Number(value.reset_after_seconds);
+  const usedPercent = Number.isFinite(used) ? Math.max(0, Math.min(100, used)) : null;
+  const resetsAt = Number.isFinite(resetAtSeconds)
+    ? new Date(resetAtSeconds * 1_000).toISOString()
+    : Number.isFinite(resetAfterSeconds)
+      ? new Date(Date.now() + resetAfterSeconds * 1_000).toISOString()
+      : null;
+  return {
+    kind,
+    usedPercent,
+    remainingPercent: usedPercent == null ? null : Math.max(0, 100 - usedPercent),
+    windowDurationMinutes:
+      Number.isFinite(durationSeconds) && durationSeconds > 0
+        ? Math.round(durationSeconds / 60)
+        : null,
+    resetsAt,
+  };
+}
+
+async function discoverAccountQuota() {
+  if (Date.now() - accountQuotaAt < ACCOUNT_QUOTA_TTL_MS) return accountQuota;
+  if (accountQuotaDiscovery) return accountQuotaDiscovery;
+  accountQuotaDiscovery = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const sessionResponse = await fetch("/api/auth/session", {
+        credentials: "include",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!sessionResponse.ok) throw new Error("session_unavailable");
+      const session = await sessionResponse.json();
+      const accessToken = typeof session?.accessToken === "string" ? session.accessToken : null;
+      const upstreamAccountId =
+        typeof session?.account?.id === "string" ? session.account.id : null;
+      if (!accessToken || !upstreamAccountId) throw new Error("session_incomplete");
+      const usageResponse = await fetch("/backend-api/wham/usage", {
+        credentials: "include",
+        cache: "no-store",
+        signal: controller.signal,
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${accessToken}`,
+          "chatgpt-account-id": upstreamAccountId,
+          "openai-beta": "codex-1",
+          "oai-language": "zh-CN",
+          originator: "Codex Desktop",
+        },
+      });
+      if (!usageResponse.ok) throw new Error(`usage_http_${usageResponse.status}`);
+      const usage = await usageResponse.json();
+      const windows = [
+        safeQuotaWindow("primary", usage?.rate_limit?.primary_window),
+        safeQuotaWindow("secondary", usage?.rate_limit?.secondary_window),
+      ].filter(Boolean);
+      accountQuota = {
+        status: "fresh",
+        source: "chatgpt-usage",
+        fetchedAt: new Date().toISOString(),
+        windows,
+        errorCode: null,
+      };
+    } catch (error) {
+      accountQuota = {
+        ...accountQuota,
+        status: accountQuota.windows.length ? "stale" : "unavailable",
+        errorCode: String(error?.message ?? "quota_unavailable").slice(0, 64),
+      };
+    } finally {
+      clearTimeout(timer);
+      accountQuotaAt = Date.now();
+      accountQuotaDiscovery = null;
+    }
+    return accountQuota;
+  })();
+  return accountQuotaDiscovery;
+}
 const TERMINAL_BLANK_CONFIRM_MS = 15_000;
 
 async function sendRuntimeMessage(message, timeoutMs = 5_000) {
@@ -2182,7 +2276,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!primaryContentScript) return false;
   if (message.type === "aialra.probe") {
     const failureCode = failureState();
-    if (!authenticated()) depthCatalog = [];
+    const pageAuthenticated = authenticated();
+    if (!pageAuthenticated) {
+      depthCatalog = [];
+      accountQuota = {
+        status: "unavailable",
+        source: "chatgpt-usage",
+        fetchedAt: null,
+        windows: [],
+        errorCode: "login_required",
+      };
+      accountQuotaAt = Date.now();
+    }
     if (
       message.discoverModels &&
       !activeJobId &&
@@ -2201,11 +2306,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           depthDiscovery = null;
         });
     }
-    void Promise.resolve(depthDiscovery).then(() =>
+    const quotaDiscovery =
+      message.discoverQuota && !activeJobId && pageAuthenticated
+        ? discoverAccountQuota()
+        : Promise.resolve(accountQuota);
+    void Promise.all([Promise.resolve(depthDiscovery), quotaDiscovery]).then(() =>
       sendResponse({
         pageReady: Boolean(first(SELECTORS.composer)),
-        authenticated: authenticated(),
+        authenticated: pageAuthenticated,
         models: depthCatalog,
+        quota: accountQuota,
         diagnostics: controlDiagnostics(),
         documentToken: DOCUMENT_TOKEN,
         failureCode,

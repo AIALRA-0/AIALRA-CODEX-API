@@ -12,9 +12,11 @@ import {
 import {
   configuredChatGptWebAccountConfigs,
   DATABASE_MIGRATION_SQL,
+  equalChatGptWebRoutingWeights,
   InMemoryJobRepository,
   PostgresJobRepository,
   reconstructHistoricalJobEventData,
+  selectWeightedChatGptWebAccount,
 } from "../src/index.js";
 
 function jobFixture(): Job {
@@ -64,6 +66,58 @@ function sessionThreadFixture(overrides: Partial<SessionThread> = {}): SessionTh
 }
 
 describe("InMemoryJobRepository", () => {
+  it("loads call attribution events for a job list in one batch", async () => {
+    const repository = new InMemoryJobRepository();
+    const first = jobFixture();
+    const second = { ...jobFixture(), id: randomUUID() };
+    await repository.create(first);
+    await repository.create(second);
+    await repository.appendEvent(first.id, "tool", {
+      kind: "chatgpt_web_account_assigned",
+      accountId: "account-a",
+    });
+    const events = await repository.eventsForJobs([first.id, second.id]);
+    expect(events.get(first.id)?.[0]?.data).toMatchObject({ accountId: "account-a" });
+    expect(events.get(second.id)).toEqual([]);
+  });
+
+  it("creates exact equal weights and rejects a total other than 100", async () => {
+    expect(equalChatGptWebRoutingWeights(["account-a", "account-b", "account-c"])).toEqual({
+      "account-a": 34,
+      "account-b": 33,
+      "account-c": 33,
+    });
+    const repository = new InMemoryJobRepository();
+    await repository.syncChatGptWebAccounts(configuredChatGptWebAccountConfigs("a,b"));
+    await expect(
+      repository.updateChatGptWebRoutingWeights({ "account-a": 70, "account-b": 20 }),
+    ).rejects.toThrow("chatgpt_web_routing_weight_total_invalid");
+    await expect(
+      repository.updateChatGptWebRoutingWeights({ "account-a": 80, "account-b": 20 }),
+    ).resolves.toMatchObject([{ routingWeight: 80 }, { routingWeight: 20 }]);
+  });
+
+  it("uses deterministic weighted routing and never selects a zero-weight account", async () => {
+    const repository = new InMemoryJobRepository();
+    await repository.syncChatGptWebAccounts(configuredChatGptWebAccountConfigs("a,b"));
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 80, "account-b": 20 });
+    const accounts = await repository.listChatGptWebAccounts();
+    const selections = Array.from(
+      { length: 2_000 },
+      (_, index) => selectWeightedChatGptWebAccount(`job-${index}`, accounts)?.accountId,
+    );
+    const aShare = selections.filter((accountId) => accountId === "account-a").length / 2_000;
+    expect(aShare).toBeGreaterThan(0.76);
+    expect(aShare).toBeLessThan(0.84);
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
+    const zeroWeight = await repository.listChatGptWebAccounts();
+    expect(
+      Array.from(
+        { length: 100 },
+        (_, index) => selectWeightedChatGptWebAccount(`zero-${index}`, zeroWeight)?.accountId,
+      ),
+    ).toEqual(Array(100).fill("account-a"));
+  });
   it("keeps account plans manual and leases each account at most once", async () => {
     const repository = new InMemoryJobRepository();
     const configs = configuredChatGptWebAccountConfigs("a,b");
@@ -533,6 +587,6 @@ describe("PostgresJobRepository", () => {
 
     const pacingQuery = queries.find((query) => query.includes("lastSubmissionAt"));
     expect(pacingQuery).toContain("$2::timestamptz - INTERVAL '90 seconds'");
-    expect(pacingQuery).toContain("COALESCE((status->>'priority')::integer, 0) DESC");
+    expect(pacingQuery).toContain("ORDER BY slot");
   });
 });

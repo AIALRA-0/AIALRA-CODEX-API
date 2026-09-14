@@ -395,6 +395,33 @@ describe("AIALRA Model Router API", () => {
       enabled: true,
       state: "ready",
     });
+
+    const invalidWeights = await request(app.getHttpServer())
+      .put("/api/v1/chatgpt-web/routing-weights")
+      .set("Authorization", `Bearer ${bootstrapKey}`)
+      .send({
+        weights: [
+          { accountId: "account-a", weight: 60 },
+          { accountId: "account-b", weight: 30 },
+        ],
+      })
+      .expect(400);
+    expect(invalidWeights.body.error.code).toBe("chatgpt_web_routing_weight_total_invalid");
+
+    const weights = await request(app.getHttpServer())
+      .put("/api/v1/chatgpt-web/routing-weights")
+      .set("Authorization", `Bearer ${bootstrapKey}`)
+      .send({
+        weights: [
+          { accountId: "account-a", weight: 50 },
+          { accountId: "account-b", weight: 50 },
+        ],
+      })
+      .expect(200);
+    expect(weights.body.data).toMatchObject([
+      { accountId: "account-a", routingWeight: 50 },
+      { accountId: "account-b", routingWeight: 50 },
+    ]);
   });
 
   it("creates a secret-free ChatGPT web qualification run idempotently", async () => {

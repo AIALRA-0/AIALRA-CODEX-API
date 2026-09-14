@@ -458,12 +458,37 @@ export const ChatGptWebAccountStateSchema = z.enum([
 ]);
 export type ChatGptWebAccountState = z.infer<typeof ChatGptWebAccountStateSchema>;
 
+export const ChatGptWebAccountQuotaWindowSchema = z.object({
+  kind: z.enum(["primary", "secondary"]),
+  usedPercent: z.number().min(0).max(100).nullable(),
+  remainingPercent: z.number().min(0).max(100).nullable(),
+  windowDurationMinutes: z.number().int().positive().nullable(),
+  resetsAt: z.string().datetime().nullable(),
+});
+export type ChatGptWebAccountQuotaWindow = z.infer<typeof ChatGptWebAccountQuotaWindowSchema>;
+
+export const ChatGptWebAccountQuotaSchema = z.object({
+  status: z.enum(["fresh", "stale", "unavailable"]),
+  source: z.literal("chatgpt-usage"),
+  fetchedAt: z.string().datetime().nullable(),
+  windows: z.array(ChatGptWebAccountQuotaWindowSchema).max(2),
+  errorCode: z.string().max(64).nullable(),
+});
+export type ChatGptWebAccountQuota = z.infer<typeof ChatGptWebAccountQuotaSchema>;
+
 export const ChatGptWebAccountSchema = z.object({
   accountId: z.string().regex(/^account-[a-d]$/),
   slot: z.enum(["a", "b", "c", "d"]),
   label: z.string().min(1).max(64),
   plan: ChatGptWebAccountPlanSchema,
-  priority: z.number().int().min(0).max(100).default(0),
+  routingWeight: z.number().int().min(0).max(100).default(0),
+  quota: ChatGptWebAccountQuotaSchema.default({
+    status: "unavailable",
+    source: "chatgpt-usage",
+    fetchedAt: null,
+    windows: [],
+    errorCode: null,
+  }),
   enabled: z.boolean(),
   qualified: z.boolean(),
   state: ChatGptWebAccountStateSchema,

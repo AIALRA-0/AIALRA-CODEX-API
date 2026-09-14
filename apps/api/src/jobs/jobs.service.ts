@@ -419,6 +419,10 @@ export class JobsService {
     return isAdmin ? jobs : jobs.filter((job) => job.callerId === actorId);
   }
 
+  async eventsForJobs(jobs: Job[]): Promise<Map<string, JobEvent[]>> {
+    return this.repository.eventsForJobs(jobs.map((job) => job.id));
+  }
+
   private assertAccess(job: Job, actorId: string, isAdmin: boolean): void {
     if (!isAdmin && job.callerId !== actorId) {
       throw new ForbiddenException({

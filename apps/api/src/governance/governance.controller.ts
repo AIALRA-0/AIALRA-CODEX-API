@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
 } from "@nestjs/common";
@@ -335,7 +336,6 @@ export class GovernanceController {
       .object({
         label: z.string().trim().min(1).max(64).optional(),
         plan: ChatGptWebAccountPlanSchema.optional(),
-        priority: z.number().int().min(0).max(100).optional(),
         enabled: z.boolean().optional(),
       })
       .strict()
@@ -386,6 +386,70 @@ export class GovernanceController {
       createdAt: new Date().toISOString(),
     });
     return publicAccount(updated);
+  }
+
+  @Put("chatgpt-web/routing-weights")
+  @RequireScopes("admin")
+  async updateChatGptWebRoutingWeights(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    const parsed = z
+      .object({
+        weights: z
+          .array(
+            z.object({
+              accountId: z.string().regex(/^account-[a-d]$/),
+              weight: z.number().int().min(0).max(100),
+            }),
+          )
+          .min(1)
+          .max(4),
+      })
+      .strict()
+      .safeParse(body);
+    if (!parsed.success) throw zodHttpError(parsed.error);
+    const weights = Object.fromEntries(
+      parsed.data.weights.map(({ accountId, weight }) => [accountId, weight]),
+    );
+    if (
+      Object.keys(weights).length !== parsed.data.weights.length ||
+      parsed.data.weights.reduce((total, item) => total + item.weight, 0) !== 100
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: "chatgpt_web_routing_weight_total_invalid",
+          message: "账号路由权重必须完整、不可重复，并且总和必须为 100%。",
+        },
+      });
+    }
+    let updated: ChatGptWebAccount[];
+    try {
+      updated = await this.repository.updateChatGptWebRoutingWeights(weights);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        [
+          "chatgpt_web_routing_accounts_mismatch",
+          "chatgpt_web_routing_weight_total_invalid",
+        ].includes(error.message)
+      ) {
+        throw new BadRequestException({
+          error: { code: error.message, message: "必须为全部账号设置权重，且总和为 100%。" },
+        });
+      }
+      throw error;
+    }
+    await this.repository.appendAudit({
+      id: randomUUID(),
+      actorId: request.callerId ?? "unknown",
+      action: "chatgpt_web.routing_weights_updated",
+      resourceType: "chatgpt_web_account_pool",
+      resourceId: "default",
+      metadata: { weights },
+      createdAt: new Date().toISOString(),
+    });
+    return { data: updated.map(publicAccount) };
   }
 
   @Post("chatgpt-web/qualification-runs")

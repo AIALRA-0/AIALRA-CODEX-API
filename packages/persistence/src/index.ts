@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   ChatGptWebAccountSchema,
@@ -85,6 +85,66 @@ export type ChatGptWebAccountRecord = ChatGptWebAccount & { bridgeUrl: string };
 export type ChatGptWebAccountPatch = Partial<ChatGptWebAccount>;
 
 const CHATGPT_WEB_ACCOUNT_SLOTS = ["a", "b", "c", "d"] as const;
+
+export function equalChatGptWebRoutingWeights(accountIds: string[]): Record<string, number> {
+  const sorted = [...new Set(accountIds)].sort();
+  if (!sorted.length) return {};
+  const base = Math.floor(100 / sorted.length);
+  let remainder = 100 - base * sorted.length;
+  return Object.fromEntries(
+    sorted.map((accountId) => [accountId, base + (remainder-- > 0 ? 1 : 0)]),
+  );
+}
+
+export function selectWeightedChatGptWebAccount(
+  jobId: string,
+  candidates: ChatGptWebAccountRecord[],
+): ChatGptWebAccountRecord | null {
+  return rankWeightedChatGptWebAccounts(jobId, candidates)[0] ?? null;
+}
+
+function rankWeightedChatGptWebAccounts(
+  jobId: string,
+  candidates: ChatGptWebAccountRecord[],
+): ChatGptWebAccountRecord[] {
+  const score = (candidate: ChatGptWebAccountRecord) => {
+    const hash = createHash("sha256").update(`${jobId}:${candidate.accountId}`).digest();
+    const uniform = (hash.readUInt32BE(0) + 1) / 4_294_967_297;
+    return -Math.log(uniform) / Math.max(1, candidate.routingWeight);
+  };
+  const sortByScore = (left: ChatGptWebAccountRecord, right: ChatGptWebAccountRecord) =>
+    score(left) - score(right) || left.slot.localeCompare(right.slot);
+  const positive = candidates.filter((candidate) => candidate.routingWeight > 0).sort(sortByScore);
+  const fallback = candidates
+    .filter((candidate) => candidate.routingWeight === 0)
+    .sort(sortByScore);
+  return positive.length ? [...positive, ...fallback] : fallback;
+}
+
+function assertRoutingWeights(
+  accounts: ChatGptWebAccountRecord[],
+  weights: Record<string, number>,
+): void {
+  const expected = accounts.map((account) => account.accountId).sort();
+  const received = Object.keys(weights).sort();
+  if (
+    expected.length !== received.length ||
+    expected.some((accountId, index) => accountId !== received[index])
+  ) {
+    throw new Error("chatgpt_web_routing_accounts_mismatch");
+  }
+  if (
+    received.some(
+      (accountId) =>
+        !Number.isInteger(weights[accountId]) ||
+        (weights[accountId] ?? -1) < 0 ||
+        (weights[accountId] ?? 101) > 100,
+    ) ||
+    received.reduce((total, accountId) => total + (weights[accountId] ?? 0), 0) !== 100
+  ) {
+    throw new Error("chatgpt_web_routing_weight_total_invalid");
+  }
+}
 
 export function configuredChatGptWebAccountConfigs(
   raw = process.env.CHATGPT_WEB_POOL_SLOTS,
@@ -467,6 +527,7 @@ export interface JobRepository {
     data: Record<string, unknown>,
   ): Promise<JobEvent>;
   events(jobId: string, afterSequence?: number): Promise<JobEvent[]>;
+  eventsForJobs(jobIds: string[]): Promise<Map<string, JobEvent[]>>;
   saveQuotaSnapshot(snapshot: QuotaSnapshot): Promise<void>;
   latestQuotaSnapshot(): Promise<QuotaSnapshot | null>;
   saveModelCatalog(snapshot: ModelCatalogSnapshot): Promise<void>;
@@ -480,6 +541,9 @@ export interface JobRepository {
     accountId: string,
     patch: ChatGptWebAccountPatch,
   ): Promise<ChatGptWebAccountRecord>;
+  updateChatGptWebRoutingWeights(
+    weights: Record<string, number>,
+  ): Promise<ChatGptWebAccountRecord[]>;
   acquireChatGptWebAccountLease(
     jobId: string,
     accountIds: string[],
@@ -667,6 +731,15 @@ export class InMemoryJobRepository implements JobRepository {
       .map((event) => structuredClone(event));
   }
 
+  async eventsForJobs(jobIds: string[]): Promise<Map<string, JobEvent[]>> {
+    return new Map(
+      jobIds.map((jobId) => [
+        jobId,
+        (this.eventMap.get(jobId) ?? []).map((event) => structuredClone(event)),
+      ]),
+    );
+  }
+
   async saveQuotaSnapshot(snapshot: QuotaSnapshot): Promise<void> {
     this.quotaSnapshot = structuredClone(snapshot);
   }
@@ -715,6 +788,12 @@ export class InMemoryJobRepository implements JobRepository {
         bridgeUrl: config.bridgeUrl,
       });
     }
+    const configured = await this.listChatGptWebAccounts();
+    if (configured.length && configured.every((account) => account.routingWeight === 0)) {
+      await this.updateChatGptWebRoutingWeights(
+        equalChatGptWebRoutingWeights(configured.map((account) => account.accountId)),
+      );
+    }
   }
 
   async updateChatGptWebAccount(
@@ -734,6 +813,26 @@ export class InMemoryJobRepository implements JobRepository {
     const record = { ...updated, bridgeUrl: current.bridgeUrl };
     this.chatGptWebAccounts.set(accountId, record);
     return structuredClone(record);
+  }
+
+  async updateChatGptWebRoutingWeights(
+    weights: Record<string, number>,
+  ): Promise<ChatGptWebAccountRecord[]> {
+    const accounts = await this.listChatGptWebAccounts();
+    assertRoutingWeights(accounts, weights);
+    const now = new Date().toISOString();
+    for (const account of accounts) {
+      const updated = ChatGptWebAccountSchema.parse({
+        ...account,
+        routingWeight: weights[account.accountId],
+        updatedAt: now,
+      });
+      this.chatGptWebAccounts.set(account.accountId, {
+        ...updated,
+        bridgeUrl: account.bridgeUrl,
+      });
+    }
+    return this.listChatGptWebAccounts();
   }
 
   async acquireChatGptWebAccountLease(
@@ -766,27 +865,19 @@ export class InMemoryJobRepository implements JobRepository {
           });
         }
       }
-      const candidates = (await this.listChatGptWebAccounts())
-        .filter(
-          (account) =>
-            accountIds.includes(account.accountId) &&
-            account.enabled &&
-            account.qualified &&
-            account.state === "ready" &&
-            account.activeJobId === null &&
-            account.rateLimitState !== "cooldown" &&
-            account.rateLimitState !== "recovery_probe" &&
-            (!account.lastSubmissionAt ||
-              new Date(account.lastSubmissionAt).getTime() <= now.getTime() - 90_000),
-        )
-        .sort(
-          (left, right) =>
-            right.priority - left.priority ||
-            (left.lastSubmissionAt ? new Date(left.lastSubmissionAt).getTime() : 0) -
-              (right.lastSubmissionAt ? new Date(right.lastSubmissionAt).getTime() : 0) ||
-            left.slot.localeCompare(right.slot),
-        );
-      const selected = candidates[0];
+      const candidates = (await this.listChatGptWebAccounts()).filter(
+        (account) =>
+          accountIds.includes(account.accountId) &&
+          account.enabled &&
+          account.qualified &&
+          account.state === "ready" &&
+          account.activeJobId === null &&
+          account.rateLimitState !== "cooldown" &&
+          account.rateLimitState !== "recovery_probe" &&
+          (!account.lastSubmissionAt ||
+            new Date(account.lastSubmissionAt).getTime() <= now.getTime() - 90_000),
+      );
+      const selected = selectWeightedChatGptWebAccount(jobId, candidates);
       if (!selected) return null;
       const leased = ChatGptWebAccountSchema.parse({
         ...selected,
@@ -1667,6 +1758,28 @@ export class PostgresJobRepository implements JobRepository {
         }
         await client.query("INSERT INTO schema_migrations (version) VALUES (5)");
       }
+      const routingWeightMigration = await client.query(
+        "SELECT 1 FROM schema_migrations WHERE version=6",
+      );
+      if (!routingWeightMigration.rowCount) {
+        const rows = await client.query("SELECT * FROM chatgpt_web_accounts ORDER BY slot ASC");
+        const weights = equalChatGptWebRoutingWeights(
+          rows.rows.map((row) => String(row.account_id)),
+        );
+        for (const row of rows.rows) {
+          const account = this.rowToChatGptWebAccount(row);
+          const updated = ChatGptWebAccountSchema.parse({
+            ...account,
+            routingWeight: weights[account.accountId] ?? 0,
+            updatedAt: new Date().toISOString(),
+          });
+          await client.query(
+            "UPDATE chatgpt_web_accounts SET status=$2, updated_at=$3 WHERE account_id=$1",
+            [updated.accountId, accountStatusWithoutBridge(updated), updated.updatedAt],
+          );
+        }
+        await client.query("INSERT INTO schema_migrations (version) VALUES (6)");
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -1872,6 +1985,27 @@ export class PostgresJobRepository implements JobRepository {
     }));
   }
 
+  async eventsForJobs(jobIds: string[]): Promise<Map<string, JobEvent[]>> {
+    if (!jobIds.length) return new Map();
+    const result = await this.pool.query(
+      "SELECT * FROM job_events WHERE job_id=ANY($1::uuid[]) ORDER BY job_id, sequence ASC",
+      [jobIds],
+    );
+    const eventsByJob = new Map<string, JobEvent[]>(jobIds.map((jobId) => [jobId, []]));
+    for (const row of result.rows) {
+      const event: JobEvent = {
+        id: row.id,
+        jobId: row.job_id,
+        sequence: row.sequence,
+        type: row.type,
+        data: this.decrypt(row.data, `job:${row.job_id}:event:${row.sequence}:v2`),
+        createdAt: new Date(row.created_at).toISOString(),
+      };
+      eventsByJob.get(event.jobId)?.push(event);
+    }
+    return eventsByJob;
+  }
+
   async saveQuotaSnapshot(snapshot: QuotaSnapshot): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -2062,6 +2196,39 @@ export class PostgresJobRepository implements JobRepository {
     }
   }
 
+  async updateChatGptWebRoutingWeights(
+    weights: Record<string, number>,
+  ): Promise<ChatGptWebAccountRecord[]> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        "SELECT * FROM chatgpt_web_accounts ORDER BY slot FOR UPDATE",
+      );
+      const accounts = result.rows.map((row) => this.rowToChatGptWebAccount(row));
+      assertRoutingWeights(accounts, weights);
+      const now = new Date().toISOString();
+      for (const account of accounts) {
+        const updated = ChatGptWebAccountSchema.parse({
+          ...account,
+          routingWeight: weights[account.accountId],
+          updatedAt: now,
+        });
+        await client.query(
+          "UPDATE chatgpt_web_accounts SET status=$2, updated_at=$3 WHERE account_id=$1",
+          [account.accountId, accountStatusWithoutBridge(updated), now],
+        );
+      }
+      await client.query("COMMIT");
+      return this.listChatGptWebAccounts();
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async acquireChatGptWebAccountLease(
     jobId: string,
     accountIds: string[],
@@ -2102,19 +2269,50 @@ export class PostgresJobRepository implements JobRepository {
            AND enabled=true AND qualified=true AND status->>'state'='ready'
            AND lease_job_id IS NULL
            AND COALESCE(status->>'rateLimitState','clear') NOT IN ('cooldown','recovery_probe')
-           AND (status->>'lastSubmissionAt' IS NULL OR
+         AND (status->>'lastSubmissionAt' IS NULL OR
                 (status->>'lastSubmissionAt')::timestamptz <=
                   $2::timestamptz - INTERVAL '90 seconds')
-         ORDER BY COALESCE((status->>'priority')::integer, 0) DESC,
-           COALESCE((status->>'lastSubmissionAt')::timestamptz, 'epoch'::timestamptz), slot
-         LIMIT 1 FOR UPDATE SKIP LOCKED`,
+         ORDER BY slot`,
         [accountIds, now],
       );
       if (!result.rowCount) {
         await client.query("COMMIT");
         return null;
       }
-      const current = this.rowToChatGptWebAccount(result.rows[0]);
+      const candidates = rankWeightedChatGptWebAccounts(
+        jobId,
+        result.rows.map((row) => this.rowToChatGptWebAccount(row)),
+      );
+      let current: ChatGptWebAccountRecord | null = null;
+      for (const candidate of candidates) {
+        const locked = await client.query(
+          `SELECT * FROM chatgpt_web_accounts
+           WHERE account_id=$1
+           FOR UPDATE SKIP LOCKED`,
+          [candidate.accountId],
+        );
+        if (!locked.rowCount) continue;
+        const latest = this.rowToChatGptWebAccount(locked.rows[0]);
+        if (
+          !accountIds.includes(latest.accountId) ||
+          !latest.enabled ||
+          !latest.qualified ||
+          latest.state !== "ready" ||
+          latest.activeJobId !== null ||
+          latest.rateLimitState === "cooldown" ||
+          latest.rateLimitState === "recovery_probe" ||
+          (latest.lastSubmissionAt &&
+            new Date(latest.lastSubmissionAt).getTime() > now.getTime() - 90_000)
+        ) {
+          continue;
+        }
+        current = latest;
+        break;
+      }
+      if (!current) {
+        await client.query("COMMIT");
+        return null;
+      }
       const leased = ChatGptWebAccountSchema.parse({
         ...current,
         state: "busy",

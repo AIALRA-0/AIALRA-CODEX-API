@@ -72,6 +72,10 @@ describe("single-page browser agent policy", () => {
     expect(contentScript).not.toContain("regenerate_blank");
     expect(contentScript).not.toContain("recovering_blank_copy");
     expect(contentScript).not.toContain('type: "aialra.native-copy"');
+    expect(contentScript).toContain('fetch("/api/auth/session"');
+    expect(contentScript).toContain('fetch("/backend-api/wham/usage"');
+    expect(contentScript).toContain('source: "chatgpt-usage"');
+    expect(serviceWorker).toContain("quota: accountQuota");
 
     expect(serviceWorker).toContain("while (slots.size < 1)");
     expect(serviceWorker).toContain("navigateToFreshChat");

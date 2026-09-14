@@ -83,4 +83,35 @@ describe("ChatGPT web bridge core", () => {
       }).success,
     ).toBe(true);
   });
+
+  it("accepts only sanitized per-account quota fields", () => {
+    const parsed = ExtensionMessageSchema.parse({
+      type: "models",
+      pageReady: true,
+      authenticated: true,
+      models: [],
+      activeTabs: 0,
+      quota: {
+        status: "fresh",
+        source: "chatgpt-usage",
+        fetchedAt: "2026-09-14T12:00:00.000Z",
+        windows: [
+          {
+            kind: "primary",
+            usedPercent: 15,
+            remainingPercent: 85,
+            windowDurationMinutes: 300,
+            resetsAt: "2026-09-14T17:00:00.000Z",
+          },
+        ],
+        errorCode: null,
+        accessToken: "must-not-cross-the-bridge",
+      },
+    });
+    expect(parsed.type === "models" ? parsed.quota : null).toMatchObject({
+      status: "fresh",
+      windows: [{ remainingPercent: 85 }],
+    });
+    expect(JSON.stringify(parsed)).not.toContain("must-not-cross-the-bridge");
+  });
 });

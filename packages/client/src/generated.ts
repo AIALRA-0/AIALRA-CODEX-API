@@ -293,6 +293,22 @@ export interface paths {
     patch: operations["updateChatGptWebAccount"];
     trace?: never;
   };
+  "/api/v1/chatgpt-web/routing-weights": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations["updateChatGptWebRoutingWeights"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/chatgpt-web/qualification-runs": {
     parameters: {
       query?: never;
@@ -975,7 +991,8 @@ export interface components {
       /** @enum {string} */
       plan: "plus" | "pro" | "unknown";
       /** @default 0 */
-      priority: number;
+      routingWeight: number;
+      quota: components["schemas"]["ChatGptWebAccountQuota"];
       enabled: boolean;
       qualified: boolean;
       /** @enum {string} */
@@ -1021,6 +1038,24 @@ export interface components {
       vncPath: string;
       /** Format: date-time */
       updatedAt: string;
+    };
+    ChatGptWebAccountQuota: {
+      /** @enum {string} */
+      status: "fresh" | "stale" | "unavailable";
+      /** @constant */
+      source: "chatgpt-usage";
+      /** Format: date-time */
+      fetchedAt: string | null;
+      windows: {
+        /** @enum {string} */
+        kind: "primary" | "secondary";
+        usedPercent: number | null;
+        remainingPercent: number | null;
+        windowDurationMinutes: number | null;
+        /** Format: date-time */
+        resetsAt: string | null;
+      }[];
+      errorCode: string | null;
     };
     ChatGptWebQualificationItem: {
       index: number;
@@ -1794,7 +1829,6 @@ export interface operations {
           label?: string;
           /** @enum {string} */
           plan?: "plus" | "pro" | "unknown";
-          priority?: number;
           enabled?: boolean;
         };
       };
@@ -1807,6 +1841,37 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ChatGptWebAccount"];
+        };
+      };
+    };
+  };
+  updateChatGptWebRoutingWeights: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          weights: {
+            accountId: string;
+            weight: number;
+          }[];
+        };
+      };
+    };
+    responses: {
+      /** @description Atomically updated account routing weights whose total is 100 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            data: components["schemas"]["ChatGptWebAccount"][];
+          };
         };
       };
     };

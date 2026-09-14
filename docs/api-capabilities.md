@@ -8,7 +8,9 @@ API keys carry two independent controls. `executionChannels` allows `codex`, `ch
 
 Codex uses the Runner's configured Codex credential directory. The `chatgpt_web` account pool uses separate browser profiles. Changing a browser account does **not** change Codex credentials. Multiple web accounts do not constitute a multi-account Codex pool.
 
-Web administrators can PATCH an account's `priority` (integer 0–100, default 0). Higher priority is preferred **only among eligible accounts**. Busy, unqualified, disabled, cooling-down, or pacing-blocked accounts are excluded. Equal-priority accounts retain oldest-submission-first scheduling. Set the primary to 100 and overflow accounts to 0. Priority is not a subscription label and never bypasses cooldown or qualification.
+Web administrators set all account routing weights atomically with `PUT /api/v1/chatgpt-web/routing-weights`. Integer weights must include every configured slot and total exactly 100. New pools are divided evenly, with any remainder assigned by slot order. Routing first excludes busy, unqualified, disabled, cooling-down, or pacing-blocked accounts, then applies deterministic weighted selection among positive-weight accounts. A zero-weight healthy account receives no routine traffic but remains a fallback when no positive-weight account is eligible. A weight is a long-run traffic share among eligible accounts, not a subscription label and not a promise that every small batch has the exact ratio.
+
+`GET /api/v1/chatgpt-web/accounts` returns each anonymous slot's routing weight and a sanitized Codex subscription quota snapshot. The snapshot contains only percentages, window duration, reset time, freshness, and a safe error code. Tokens, cookies, upstream account IDs, email addresses, and raw upstream responses never leave the account's browser container. Job list and detail responses include `webExecution.accountId` when a web account was assigned.
 
 Login is manual. A login or verification failure cannot safely be repaired by replaying a submitted task or copying another account's browser profile.
 

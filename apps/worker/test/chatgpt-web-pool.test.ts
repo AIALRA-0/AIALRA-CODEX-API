@@ -109,7 +109,7 @@ describe("ChatGptWebPoolProvider", () => {
     "preserves ordinary-chat qualification only for verified pre-send mode absence: %s",
     async (failurePhase) => {
       const { repository, configs } = await readyRepository();
-      await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+      await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
       let calls = 0;
       vi.stubGlobal(
         "fetch",
@@ -176,7 +176,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("merges actual account depths and dispatches only to an account that supports the selection", async () => {
     const { repository, configs } = await readyRepository();
-    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 90, "account-b": 10 });
     const sent: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -210,7 +210,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("rereads a transiently empty depth catalog before rejecting a real request", async () => {
     const { repository, configs } = await readyRepository();
-    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     let accountAReads = 0;
     const sent: string[] = [];
     vi.stubGlobal(
@@ -242,7 +242,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("defers an empty catalog to Browser verification instead of rejecting it as unsupported", async () => {
     const { repository, configs } = await readyRepository();
-    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     let catalogReads = 0;
     const sent: string[] = [];
     vi.stubGlobal(
@@ -301,7 +301,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("uses the other account when a catalog request fails before any submission", async () => {
     const { repository, configs } = await readyRepository();
-    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     const catalogRequests: string[] = [];
     const sent: string[] = [];
     vi.stubGlobal(
@@ -364,7 +364,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("preserves the requested-depth error when no other qualified account remains", async () => {
     const { repository, configs } = await readyRepository();
-    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     const sent: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -396,8 +396,8 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("prefers the primary account but lends overflow to another idle account", async () => {
     const { repository } = await readyRepository();
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     await repository.updateChatGptWebAccount("account-a", {
-      priority: 100,
       lastSubmissionAt: new Date(Date.now() - 120_000).toISOString(),
     });
     const first = await repository.acquireChatGptWebAccountLease(
@@ -495,6 +495,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("fails over only when the first account rejected the request before submission", async () => {
     const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     let accountAInvocations = 0;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
@@ -529,6 +530,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("never fails over after the bridge has reported submission", async () => {
     const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
       const accountId = url.includes("account-b") ? "account-b" : "account-a";
@@ -564,7 +566,7 @@ describe("ChatGptWebPoolProvider", () => {
 
   it("fails a source-required task once without quarantining the healthy account", async () => {
     const { repository, configs } = await readyRepository();
-    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    await repository.updateChatGptWebRoutingWeights({ "account-a": 100, "account-b": 0 });
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
       const accountId = url.includes("account-b") ? "account-b" : "account-a";

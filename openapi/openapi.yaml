@@ -413,7 +413,6 @@ paths:
               properties:
                 label: { type: string, minLength: 1, maxLength: 64 }
                 plan: { type: string, enum: [plus, pro, unknown] }
-                priority: { type: integer, minimum: 0, maximum: 100 }
                 enabled: { type: boolean }
       responses:
         "200":
@@ -421,6 +420,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ChatGptWebAccount" }
+  /api/v1/chatgpt-web/routing-weights:
+    put:
+      operationId: updateChatGptWebRoutingWeights
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [weights]
+              properties:
+                weights:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [accountId, weight]
+                    properties:
+                      accountId: { type: string, pattern: "^account-[a-d]$" }
+                      weight: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        "200":
+          description: Atomically updated account routing weights whose total is 100
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChatGptWebAccount" }
   /api/v1/chatgpt-web/qualification-runs:
     get:
       operationId: listChatGptWebQualificationRuns
@@ -1614,6 +1648,8 @@ components:
           slot,
           label,
           plan,
+          routingWeight,
+          quota,
           enabled,
           qualified,
           state,
@@ -1645,7 +1681,9 @@ components:
         slot: { type: string, enum: [a, b, c, d] }
         label: { type: string, minLength: 1, maxLength: 64 }
         plan: { type: string, enum: [plus, pro, unknown] }
-        priority: { type: integer, minimum: 0, maximum: 100, default: 0 }
+        routingWeight: { type: integer, minimum: 0, maximum: 100, default: 0 }
+        quota:
+          $ref: "#/components/schemas/ChatGptWebAccountQuota"
         enabled: { type: boolean }
         qualified: { type: boolean }
         state:
@@ -1673,6 +1711,27 @@ components:
         diagnosticSummary: { type: [object, "null"], additionalProperties: false }
         vncPath: { type: string, pattern: "^/chatgpt-browser(?:-[b-d])?/$" }
         updatedAt: { type: string, format: date-time }
+    ChatGptWebAccountQuota:
+      type: object
+      required: [status, source, fetchedAt, windows, errorCode]
+      properties:
+        status: { type: string, enum: [fresh, stale, unavailable] }
+        source: { type: string, const: chatgpt-usage }
+        fetchedAt: { type: [string, "null"], format: date-time }
+        windows:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, usedPercent, remainingPercent, windowDurationMinutes, resetsAt]
+            properties:
+              kind: { type: string, enum: [primary, secondary] }
+              usedPercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+              remainingPercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+              windowDurationMinutes: { type: [integer, "null"], minimum: 1 }
+              resetsAt: { type: [string, "null"], format: date-time }
+        errorCode: { type: [string, "null"], maxLength: 64 }
     ChatGptWebQualificationItem:
       type: object
       required:

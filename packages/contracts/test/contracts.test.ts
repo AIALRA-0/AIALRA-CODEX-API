@@ -62,8 +62,12 @@ describe("ChatGPT web qualification contract", () => {
         diagnosticSummary: null,
         vncPath: "/chatgpt-browser/",
         updatedAt: "2026-09-01T00:00:00.000Z",
-      }).maxConcurrency,
-    ).toBe(1);
+      }),
+    ).toMatchObject({
+      maxConcurrency: 1,
+      routingWeight: 0,
+      quota: { status: "unavailable", source: "chatgpt-usage", windows: [] },
+    });
   });
 
   it("accepts the single probe suite and defaults its verification field", () => {
