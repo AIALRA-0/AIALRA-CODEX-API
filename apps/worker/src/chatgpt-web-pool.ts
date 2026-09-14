@@ -574,21 +574,21 @@ export class ChatGptWebPoolProvider implements ModelProvider {
         try {
           const quotaClient = this.quotaClients.get(account.accountId);
           let supportsDepth = false;
+          let depthAvailabilityKnown = false;
           for (let read = 0; read < 2; read += 1) {
             const catalog = await quotaClient?.listModels();
-            supportsDepth =
-              catalog?.models.some(
-                (model) =>
-                  model.id === invocation.route.model &&
-                  model.available &&
-                  model.webThinkingDepths?.includes(requestedDepth),
-              ) === true;
+            const model = catalog?.models.find((entry) => entry.id === invocation.route.model);
+            const depths = model?.webThinkingDepths ?? [];
+            depthAvailabilityKnown ||= model?.available === false || depths.length > 0;
+            supportsDepth = model?.available === true && depths.includes(requestedDepth);
             if (supportsDepth) break;
             // A fresh Temporary Chat can briefly return an empty menu. Retry
             // the read only; no invocation or message has been sent yet.
             if (read === 0) await new Promise((resolve) => setTimeout(resolve, 1_000));
           }
-          if (!supportsDepth) {
+          // An empty menu is an unknown observation, not proof that the depth
+          // is unsupported. The Browser verifies the exact depth before input.
+          if (depthAvailabilityKnown && !supportsDepth) {
             await this.release(account, invocation.jobId, { state: "ready" });
             lastPreSubmitError = new ChatGptWebPoolError(
               "chatgpt_thinking_depth_unavailable",
