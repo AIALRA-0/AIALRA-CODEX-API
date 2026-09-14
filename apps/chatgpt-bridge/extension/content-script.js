@@ -421,6 +421,24 @@ async function ensureChatSurface(deadline, jobId = null) {
   throw new Error("chatgpt_ui_changed");
 }
 
+async function waitForStableThinkingDepthSurface(deadline) {
+  const end = Math.min(deadline, Date.now() + 10_000);
+  let stableSince = 0;
+  let stableReads = 0;
+  while (Date.now() < end) {
+    if (currentSurface() === "chat" && thinkingDepthControl()) {
+      stableSince ||= Date.now();
+      stableReads += 1;
+      if (stableReads >= 3 && Date.now() - stableSince >= 500) return;
+    } else {
+      stableSince = 0;
+      stableReads = 0;
+    }
+    await waitForMutation(100);
+  }
+  throw new Error("chatgpt_page_not_ready");
+}
+
 function thinkingDepthControl() {
   const composer = first(SELECTORS.composer);
   const root = composer ? composerControlRoot(composer) : null;
@@ -706,8 +724,11 @@ async function selectRequestedThinkingDepthSlider(menu, control, requested, dead
       if (Date.now() >= deadline) throw new Error("chatgpt_thinking_depth_unverified");
       const before = thinkingDepthSlider(menu);
       const previousLabel = before ? thinkingDepthSliderLabel(menu, before, control) : null;
+      thinkingDepthDiscoveryDiagnostics.phase = "moving_selection";
+      thinkingDepthDiscoveryDiagnostics.sliderValue = value;
       if (!(await moveThinkingDepthSlider(menu, value, deadline)))
         throw new Error("chatgpt_thinking_depth_unverified");
+      thinkingDepthDiscoveryDiagnostics.phase = "verifying_selection";
       const labelDeadline = Math.min(deadline, Date.now() + 800);
       while (Date.now() < labelDeadline) {
         await waitForMutation(50);
@@ -725,8 +746,10 @@ async function selectRequestedThinkingDepthSlider(menu, control, requested, dead
           if (
             confirmed?.value === value &&
             thinkingDepthSliderLabel(menu, confirmed, control) === requested
-          )
+          ) {
+            thinkingDepthDiscoveryDiagnostics.phase = "selection_verified";
             return requested;
+          }
         }
       }
     }
@@ -2058,6 +2081,7 @@ async function invoke(invocation) {
       await reportProgress(invocation.jobId, "persistent_chat_verified");
     }
     await configureMode(invocation.mode, invocation.jobId, deadline);
+    if (invocation.mode === "chat") await waitForStableThinkingDepthSurface(deadline);
     resolvedThinkingDepth = await configureThinkingDepth(invocation, deadline);
     await reportProgress(invocation.jobId, "mode_selected", controlDiagnostics());
     composer = await waitForStableComposer(deadline);
