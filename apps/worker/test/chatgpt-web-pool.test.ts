@@ -208,6 +208,38 @@ describe("ChatGptWebPoolProvider", () => {
     ).toBe(true);
   });
 
+  it("rereads a transiently empty depth catalog before rejecting a real request", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { priority: 100 });
+    let accountAReads = 0;
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = String(input);
+        const accountId = url.includes("account-b") ? "account-b" : "account-a";
+        if (url.endsWith("/healthz")) return Response.json(health(accountId));
+        if (url.endsWith("/models")) {
+          if (accountId === "account-a") accountAReads += 1;
+          return Response.json(
+            depthCatalog(accountId === "account-a" && accountAReads > 1 ? ["Heavy"] : []),
+          );
+        }
+        sent.push(accountId);
+        return response([
+          { type: "result", result: { output: "OK", outputText: "OK", threadId: null, usage } },
+        ]);
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    const task = invocation();
+    task.task.chatgptWeb!.thinkingDepth = "Heavy";
+    await expect(pool.invoke(task)).resolves.toMatchObject({ outputText: "OK" });
+    expect(accountAReads).toBe(2);
+    expect(sent).toEqual(["account-a"]);
+  });
+
   it("does not submit or leak a lease when every account lacks a requested depth", async () => {
     const { repository, configs } = await readyRepository();
     const sent: string[] = [];

@@ -910,7 +910,14 @@ async function discoverThinkingDepths() {
 
 async function configureThinkingDepth(invocation, deadline) {
   const requested = invocation.thinkingDepth;
-  const control = thinkingDepthControl();
+  let control = thinkingDepthControl();
+  if (!control && requested) {
+    thinkingDepthDiscoveryDiagnostics = { phase: "control_missing" };
+    // The control may briefly disappear while Temporary Chat hydrates.
+    // This is still before input and submission, so wait for a stable page.
+    await waitForStableThinkingDepthSurface(Math.min(deadline, Date.now() + 5_000)).catch(() => {});
+    control = thinkingDepthControl();
+  }
   if (!control) {
     if (requested) throw new Error("chatgpt_thinking_depth_unavailable");
     return null;

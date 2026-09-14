@@ -572,15 +572,23 @@ export class ChatGptWebPoolProvider implements ModelProvider {
       const requestedDepth = invocation.task.chatgptWeb?.thinkingDepth;
       if (requestedDepth) {
         try {
-          const catalog = await this.quotaClients.get(account.accountId)?.listModels();
-          if (
-            !catalog?.models.some(
-              (model) =>
-                model.id === invocation.route.model &&
-                model.available &&
-                model.webThinkingDepths?.includes(requestedDepth),
-            )
-          ) {
+          const quotaClient = this.quotaClients.get(account.accountId);
+          let supportsDepth = false;
+          for (let read = 0; read < 2; read += 1) {
+            const catalog = await quotaClient?.listModels();
+            supportsDepth =
+              catalog?.models.some(
+                (model) =>
+                  model.id === invocation.route.model &&
+                  model.available &&
+                  model.webThinkingDepths?.includes(requestedDepth),
+              ) === true;
+            if (supportsDepth) break;
+            // A fresh Temporary Chat can briefly return an empty menu. Retry
+            // the read only; no invocation or message has been sent yet.
+            if (read === 0) await new Promise((resolve) => setTimeout(resolve, 1_000));
+          }
+          if (!supportsDepth) {
             await this.release(account, invocation.jobId, { state: "ready" });
             lastPreSubmitError = new ChatGptWebPoolError(
               "chatgpt_thinking_depth_unavailable",
