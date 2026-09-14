@@ -2287,6 +2287,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         errorCode: "login_required",
       };
       accountQuotaAt = Date.now();
+    } else if (accountQuota.errorCode === "login_required") {
+      accountQuotaAt = 0;
     }
     if (
       message.discoverModels &&

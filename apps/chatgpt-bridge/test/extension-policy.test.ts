@@ -75,6 +75,7 @@ describe("single-page browser agent policy", () => {
     expect(contentScript).toContain('fetch("/api/auth/session"');
     expect(contentScript).toContain('fetch("/backend-api/wham/usage"');
     expect(contentScript).toContain('source: "chatgpt-usage"');
+    expect(contentScript).toContain('accountQuota.errorCode === "login_required"');
     expect(serviceWorker).toContain("quota: accountQuota");
 
     expect(serviceWorker).toContain("while (slots.size < 1)");
