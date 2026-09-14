@@ -20,15 +20,20 @@ const { userMessageText, userMessageMatchesObjective } = runInNewContext(
   userMessageMatchesObjective: (element: unknown, objective: string) => boolean;
 };
 
-function userTurn(body: string, control = "", identifiableBody = true) {
+function userTurn(body: string | string[], control = "", identifiableBody = true) {
+  const bodyParts = Array.isArray(body) ? body : [body];
   const button = { innerText: control };
-  const messageBody = { innerText: body, closest: () => null };
+  const messageBodies = bodyParts.map((part) => ({
+    innerText: part,
+    closest: () => null,
+    contains: () => false,
+  }));
   return {
-    innerText: control ? `${body} ${control}` : body,
+    innerText: control ? `${bodyParts.join("\n")} ${control}` : bodyParts.join("\n"),
     querySelectorAll(selector: string) {
       return selector.includes("whitespace-pre-wrap")
         ? identifiableBody
-          ? [messageBody]
+          ? messageBodies
           : []
         : control
           ? [button]
@@ -50,6 +55,14 @@ describe("long user message ownership", () => {
     expect(userMessageMatchesObjective(userTurn(objective, "Show more", false), objective)).toBe(
       true,
     );
+  });
+
+  it("reconstructs a multi-block user turn without including its controls", () => {
+    const parts = ["Synthetic heading", "First paragraph", "Second paragraph"];
+    const expected = parts.join("\n\n");
+    const turn = userTurn(parts, "Edit message");
+    expect(userMessageText(turn)).toBe(parts.join("\n"));
+    expect(userMessageMatchesObjective(turn, expected)).toBe(true);
   });
 
   it("rejects changed content and unexplained extra text", () => {

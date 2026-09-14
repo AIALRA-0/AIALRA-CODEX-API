@@ -164,6 +164,45 @@ describe("InMemoryJobRepository", () => {
     ).toBe(true);
   });
 
+  it("does not use Codex subscription quota to block a web chat lease", async () => {
+    const repository = new InMemoryJobRepository();
+    const [config] = configuredChatGptWebAccountConfigs("a");
+    await repository.syncChatGptWebAccounts([config!]);
+    await repository.updateChatGptWebAccount("account-a", {
+      enabled: true,
+      qualified: true,
+      state: "ready",
+      authenticated: true,
+      extensionConnected: true,
+      pageReady: true,
+      sandboxVerified: true,
+      quota: {
+        status: "fresh",
+        source: "chatgpt-usage",
+        fetchedAt: "2026-09-14T12:00:00.000Z",
+        windows: [
+          {
+            kind: "primary",
+            usedPercent: 100,
+            remainingPercent: 0,
+            windowDurationMinutes: 10_080,
+            resetsAt: "2026-09-19T12:00:00.000Z",
+          },
+        ],
+        errorCode: null,
+      },
+    });
+
+    await expect(
+      repository.acquireChatGptWebAccountLease(
+        "00000000-0000-4000-8000-000000000099",
+        ["account-a"],
+        new Date("2026-09-14T12:00:00.000Z"),
+        900_000,
+      ),
+    ).resolves.toMatchObject({ accountId: "account-a" });
+  });
+
   it("quarantines an expired lease instead of reusing it", async () => {
     const repository = new InMemoryJobRepository();
     const [config] = configuredChatGptWebAccountConfigs("a");

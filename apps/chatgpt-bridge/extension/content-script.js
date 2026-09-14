@@ -279,7 +279,14 @@ function userMessageText(element) {
   const bodies = [...(element.querySelectorAll?.("[class~='whitespace-pre-wrap']") ?? [])].filter(
     (node) => !node.closest?.("button, [role='button']"),
   );
-  return bodies.length === 1 ? visibleText(bodies[0]) : visibleText(element);
+  const bodyRoots = bodies.filter(
+    (node) => !bodies.some((candidate) => candidate !== node && candidate.contains?.(node)),
+  );
+  const bodyText = bodyRoots
+    .map((node) => visibleText(node))
+    .filter(Boolean)
+    .join("\n");
+  return bodyText || visibleText(element);
 }
 
 function userMessageMatchesObjective(element, objective) {

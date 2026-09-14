@@ -761,27 +761,23 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
 function Overview() {
   const syntheticDemo = process.env.NEXT_PUBLIC_SYNTHETIC_DEMO === "true";
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [quota, setQuota] = useState<Quota | null>(null);
   const [webAccounts, setWebAccounts] = useState<ChatGptWebAccount[]>([]);
   const [error, setError] = useState("");
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
       if (syntheticDemo) {
         setJobs([]);
-        setQuota(null);
         setWebAccounts([]);
         setError("");
         return;
       }
       try {
-        const [jobResult, quotaResult, webStatus] = await Promise.all([
+        const [jobResult, webStatus] = await Promise.all([
           routerFetch<{ data: Job[] }>("/api/v1/jobs?limit=12", { signal }),
-          routerFetch<Quota>("/api/v1/quota", { signal }),
           routerFetch<ChatGptWebStatus>("/api/v1/chatgpt-web/status", { signal }),
         ]);
         if (signal?.aborted) return;
         setJobs(jobResult.data);
-        setQuota(quotaResult);
         setWebAccounts(webStatus.accounts);
         setError("");
       } catch (cause) {
@@ -796,12 +792,6 @@ function Overview() {
   const succeeded = jobs.filter((job) => job.status === "succeeded").length;
   const completed = jobs.filter((job) => TERMINAL.has(job.status)).length;
   const completionRate = completed ? Math.round((succeeded / completed) * 1000) / 10 : 0;
-  const primaryQuota = quota?.windows.find((window) => window.kind === "primary");
-  const overviewUsedPercent = primaryQuota?.usedPercent ?? quota?.usedPercent ?? null;
-  const overviewRemainingPercent = getRemainingPercent(
-    primaryQuota?.remainingPercent ?? null,
-    overviewUsedPercent,
-  );
   return (
     <>
       {syntheticDemo ? (
@@ -811,11 +801,11 @@ function Overview() {
       ) : null}
       <PageHeading
         eyebrow="运行状态"
-        title="Codex 容量总览"
+        title="模型路由运行状态"
         copy={
           syntheticDemo
             ? "用于公开截图的合成控制台，不连接真实运行数据"
-            : "这里读取真实队列、额度周期和最近调用，不使用合成数据"
+            : "这里读取真实队列、账号 Codex 订阅额度和最近调用，不使用合成数据"
         }
         action={
           <button className="button" onClick={() => void refresh()}>
@@ -825,18 +815,6 @@ function Overview() {
       />
       <ErrorNotice message={error} />
       <section className="metrics" aria-label="运行指标">
-        <article className="metric">
-          <small>Codex 剩余额度</small>
-          <strong>{overviewRemainingPercent == null ? "—" : `${overviewRemainingPercent}%`}</strong>
-          <div className="progress">
-            <span style={{ width: `${overviewRemainingPercent ?? 0}%` }} />
-          </div>
-          <span className="muted">
-            {overviewUsedPercent == null ? "已使用 —" : `已使用 ${overviewUsedPercent}%`} · 来源{" "}
-            {quota?.source === "app-server" ? "Codex App Server" : "暂不可用"}
-            {quota?.stale ? " · 数据已过期" : ""}
-          </span>
-        </article>
         <article className="metric">
           <small>当前活动调用</small>
           <strong>{active}</strong>
@@ -853,8 +831,8 @@ function Overview() {
       {webAccounts.length ? (
         <section className="console-section">
           <div className="row">
-            <h3>网页账号订阅额度</h3>
-            <span className="muted">只显示浏览器读取的脱敏额度窗口</span>
+            <h3>账号 Codex 订阅额度</h3>
+            <span className="muted">仅供参考，不参与网页聊天路由，也不会阻断 Chat 调用</span>
           </div>
           <div className="metrics account-quota-grid">
             {webAccounts.map((account) => {
@@ -869,7 +847,9 @@ function Overview() {
                   <div className="progress">
                     <span style={{ width: `${remaining ?? 0}%` }} />
                   </div>
-                  <span className="muted">Codex 订阅剩余额度 · 权重 {account.routingWeight}%</span>
+                  <span className="muted">
+                    Codex 剩余额度 · Chat 不受此数值限制 · 权重 {account.routingWeight}%
+                  </span>
                   <span className="muted">
                     {account.quota.status === "fresh"
                       ? primary?.resetsAt
