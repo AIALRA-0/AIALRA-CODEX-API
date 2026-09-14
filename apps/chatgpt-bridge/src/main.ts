@@ -504,6 +504,8 @@ async function main(): Promise<void> {
     | "generating"
     | "completed"
     | "failed"
+    | "login_required"
+    | "quarantined"
     | "resetting" = "idle";
   let activeJobId: string | null = null;
   let activeAttempt: number | null = null;
@@ -1057,6 +1059,11 @@ async function main(): Promise<void> {
           phase = "idle";
         } else if (slotState === "starting") {
           phase = "resetting";
+        } else if (
+          !activeJobId &&
+          (slotState === "login_required" || slotState === "quarantined")
+        ) {
+          phase = slotState;
         }
         return;
       }

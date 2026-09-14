@@ -7,6 +7,8 @@ const STORAGE_KEY = "aialra.chatgpt.single-page-v1.slot";
 const ADAPTER_VERSION = "single-page-v1";
 const READY_STABILITY_MS = 2_000;
 const READY_STABLE_READS = 5;
+const RESET_BACKOFF_INITIAL_MS = 30_000;
+const RESET_BACKOFF_MAX_MS = 5 * 60_000;
 const ACTIVE_STATES = new Set(["preparing", "ready", "submitted", "generating"]);
 const slots = new Map();
 const activeJobs = new Map();
@@ -49,6 +51,8 @@ async function persistSlots() {
       submitted: Boolean(slot.submitted),
       jobHash: slot.jobHash ?? null,
       quarantinedUntil: slot.quarantinedUntil ?? null,
+      resetFailureCount: slot.resetFailureCount ?? 0,
+      resetBackoffUntil: slot.resetBackoffUntil ?? null,
       updatedAt: slot.updatedAt,
     })),
   });
@@ -135,6 +139,8 @@ async function createSlot() {
     submitted: false,
     jobHash: null,
     quarantinedUntil: null,
+    resetFailureCount: 0,
+    resetBackoffUntil: null,
     updatedAt: new Date().toISOString(),
   };
   slots.set(slot.slotId, slot);
@@ -144,11 +150,15 @@ async function createSlot() {
 
 async function navigateToFreshChat(slot, active, targetUrl = CHATGPT_URL) {
   const tab = await chrome.tabs.get(slot.tabId);
+  if (tab.url?.startsWith("https://") && !tab.url.startsWith(CHATGPT_URL))
+    throw new Error("chatgpt_login_required");
   const currentPage = await sendToTab(
     slot.tabId,
     { type: "aialra.probe", discoverModels: false },
     2,
   ).catch(() => null);
+  if (currentPage?.failureCode && manualRecoveryState(currentPage.failureCode))
+    throw new Error(currentPage.failureCode);
   const previousDocumentToken = currentPage?.diagnostics?.documentToken ?? null;
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -203,13 +213,24 @@ async function restoreSlots() {
   for (const candidate of Array.isArray(stored) ? stored : []) {
     if (!candidate?.slotId || !Number.isInteger(candidate?.tabId)) continue;
     const tab = await chrome.tabs.get(candidate.tabId).catch(() => null);
-    if (!tab?.url?.startsWith(CHATGPT_URL)) continue;
+    if (
+      !tab?.url?.startsWith(CHATGPT_URL) &&
+      !(
+        ["login_required", "quarantined"].includes(candidate.state) &&
+        tab?.url?.startsWith("https://")
+      )
+    )
+      continue;
     slots.set(candidate.slotId, {
       ...candidate,
-      state: "starting",
+      state: ["login_required", "quarantined"].includes(candidate.state)
+        ? candidate.state
+        : "starting",
       documentToken: null,
       submitted: false,
       quarantinedUntil: null,
+      resetFailureCount: candidate.resetFailureCount ?? 0,
+      resetBackoffUntil: candidate.resetBackoffUntil ?? null,
       updatedAt: new Date().toISOString(),
     });
     break;
@@ -239,69 +260,99 @@ async function closeRedundantPristineTabs() {
   }
 }
 
-async function resetSlot(slot) {
-  await patchSlot(slot, {
-    state: "starting",
-    documentToken: null,
-    submitted: false,
-    jobHash: null,
-    quarantinedUntil: null,
-  });
-  const previousDocumentToken = await navigateToFreshChat(slot, false);
-  // A browser can restore an unsent draft after a clean restart. First bind to
-  // the otherwise empty document, then clear only that managed composer and
-  // require the normal fully blank invariant before returning the slot to use.
-  let page = await waitForReadyPage(
-    slot.tabId,
-    80,
-    previousDocumentToken,
-    Number.POSITIVE_INFINITY,
-    false,
-  );
-  let diagnostics = page.diagnostics ?? {};
-  if (diagnostics.composerTextLength > 0) {
-    await chrome.tabs.update(slot.tabId, { active: true });
-    await clearComposerDraft(slot);
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      page = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: false }, 2);
-      diagnostics = page?.diagnostics ?? {};
-      if (diagnostics.composerTextLength === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-  if (
-    diagnostics.pageKind !== "home" ||
-    diagnostics.userTurnCount !== 0 ||
-    diagnostics.assistantTurnCount !== 0 ||
-    diagnostics.composerTextLength !== 0 ||
-    diagnostics.generationActive
-  ) {
-    throw new Error("chatgpt_ui_changed");
-  }
-  await patchSlot(slot, {
-    state: "idle",
-    documentToken: diagnostics.documentToken ?? null,
-    submitted: false,
-    jobHash: null,
-  });
-  return page;
+function manualRecoveryState(error) {
+  const code = String(error?.message ?? error);
+  if (code === "chatgpt_login_required") return "login_required";
+  if (code === "chatgpt_verification_required" || code === "chatgpt_rate_limited")
+    return "quarantined";
+  return null;
 }
 
-async function resetSlotUntilReady(slot, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = null;
-  while (Date.now() < deadline) {
+async function resetSlot(slot) {
+  if (slot.resetPromise) return slot.resetPromise;
+  const resetting = (async () => {
+    await patchSlot(slot, {
+      state: "starting",
+      documentToken: null,
+      submitted: false,
+      jobHash: null,
+      quarantinedUntil: null,
+    });
     try {
-      await resetSlot(slot);
-      return true;
+      const previousDocumentToken = await navigateToFreshChat(slot, false);
+      // A browser can restore an unsent draft after a clean restart. First bind to
+      // the otherwise empty document, then clear only that managed composer and
+      // require the normal fully blank invariant before returning the slot to use.
+      let page = await waitForReadyPage(
+        slot.tabId,
+        80,
+        previousDocumentToken,
+        Number.POSITIVE_INFINITY,
+        false,
+      );
+      let diagnostics = page.diagnostics ?? {};
+      if (diagnostics.composerTextLength > 0) {
+        await chrome.tabs.update(slot.tabId, { active: true });
+        await clearComposerDraft(slot);
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          page = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: false }, 2);
+          diagnostics = page?.diagnostics ?? {};
+          if (diagnostics.composerTextLength === 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+      if (
+        diagnostics.pageKind !== "home" ||
+        diagnostics.userTurnCount !== 0 ||
+        diagnostics.assistantTurnCount !== 0 ||
+        diagnostics.composerTextLength !== 0 ||
+        diagnostics.generationActive
+      ) {
+        throw new Error("chatgpt_ui_changed");
+      }
+      await patchSlot(slot, {
+        state: "idle",
+        documentToken: diagnostics.documentToken ?? null,
+        submitted: false,
+        jobHash: null,
+        resetFailureCount: 0,
+        resetBackoffUntil: null,
+      });
+      return page;
     } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const state = manualRecoveryState(error);
+      const failures = state ? 0 : Math.min((slot.resetFailureCount ?? 0) + 1, 8);
+      const backoff = state
+        ? null
+        : new Date(
+            Date.now() +
+              Math.min(RESET_BACKOFF_MAX_MS, RESET_BACKOFF_INITIAL_MS * 2 ** (failures - 1)),
+          ).toISOString();
+      await patchSlot(slot, {
+        state: state ?? "starting",
+        documentToken: null,
+        resetFailureCount: failures,
+        resetBackoffUntil: backoff,
+      });
+      throw error;
     }
+  })();
+  slot.resetPromise = resetting;
+  try {
+    return await resetting;
+  } finally {
+    slot.resetPromise = null;
   }
-  await patchSlot(slot, { state: "starting", documentToken: null });
-  if (lastError) console.warn("fresh_chat_reset_failed");
-  return false;
+}
+
+async function resetSlotUntilReady(slot) {
+  try {
+    await resetSlot(slot);
+    return true;
+  } catch (error) {
+    if (!manualRecoveryState(error)) console.warn("fresh_chat_reset_deferred");
+    return false;
+  }
 }
 
 async function ensurePool() {
@@ -315,10 +366,13 @@ async function ensurePool() {
         await chrome.tabs.remove(extra.tabId).catch(() => undefined);
       }
       for (const slot of slots.values()) {
-        if (slot.state === "starting") {
-          // No task is bound yet, so a slow startup navigation has no failure
-          // scene to preserve. Leave the slot in `starting` and retry on the
-          // next pool probe instead of blocking the browser for ten minutes.
+        if (
+          slot.state === "starting" &&
+          !slot.resetPromise &&
+          (!slot.resetBackoffUntil || Date.now() >= Date.parse(slot.resetBackoffUntil))
+        ) {
+          // A failed reset gets one fresh attempt after its bounded backoff.
+          // onUpdated probes must never trigger a navigation storm.
           await resetSlot(slot).catch(() => undefined);
         }
       }
@@ -329,6 +383,19 @@ async function ensurePool() {
 
 async function probeSlot(slot, discoverModels) {
   const page = await sendToTab(slot.tabId, { type: "aialra.probe", discoverModels: false }, 2);
+  if (slot.state === "login_required" || slot.state === "quarantined") {
+    const emptyHome =
+      page?.pageReady &&
+      page.authenticated &&
+      !page.failureCode &&
+      page.diagnostics?.pageKind === "home" &&
+      page.diagnostics.userTurnCount === 0 &&
+      page.diagnostics.assistantTurnCount === 0 &&
+      page.diagnostics.composerTextLength === 0 &&
+      !page.diagnostics.generationActive;
+    if (!emptyHome || activeJobs.size || slot.resetPromise) return page;
+    return resetSlot(slot).catch(() => page);
+  }
   if (
     !discoverModels ||
     activeJobs.size ||

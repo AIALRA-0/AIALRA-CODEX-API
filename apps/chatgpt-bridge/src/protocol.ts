@@ -186,6 +186,7 @@ export type BrowserPageFailureCode = z.infer<typeof BrowserPageFailureCodeSchema
 
 export const BrowserSlotStateSchema = z.enum([
   "starting",
+  "login_required",
   "idle",
   "preparing",
   "ready",
