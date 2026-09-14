@@ -191,8 +191,12 @@ function accountPublicPatch(
   let lastRateLimitAt = current.lastRateLimitAt;
   let consecutiveRateLimits = current.consecutiveRateLimits;
 
-  if (!current.enabled) state = "disabled";
-  else if (current.activeJobId) state = "busy";
+  if (!current.enabled) {
+    state = "disabled";
+    // A disabled account can regain its already-proven qualification after a
+    // browser restart without submitting another real probe.
+    if (safelyRecovered) qualified = true;
+  } else if (current.activeJobId) state = "busy";
   else if (rateLimited) {
     state = "cooldown";
     rateLimitState = "cooldown";
@@ -214,8 +218,9 @@ function accountPublicPatch(
     qualified = false;
     state = failureCode === "chatgpt_login_required" ? "login_required" : "quarantined";
   } else if (!authenticated) {
-    qualified = false;
-    state = "login_required";
+    // A startup snapshot without an explicit login failure is inconclusive.
+    // Keep the prior proof but do not admit tasks until the browser is ready.
+    state = "stale";
   } else if (heartbeatStale || !extensionConnected || !pageReady || !sandboxVerified) {
     state = "stale";
   } else if (current.qualified || current.lastProbePassed === true) {

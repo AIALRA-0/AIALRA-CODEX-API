@@ -567,8 +567,8 @@ describe("ChatGptWebPoolProvider", () => {
 
     await pool.syncAccounts();
     expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
-      qualified: false,
-      state: "login_required",
+      qualified: true,
+      state: "stale",
       lastProbePassed: true,
     });
 
@@ -577,6 +577,52 @@ describe("ChatGptWebPoolProvider", () => {
       qualified: true,
       state: "ready",
       lastProbePassed: true,
+    });
+  });
+
+  it("restores prior qualification while an authenticated account remains disabled", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-b", {
+      enabled: false,
+      qualified: false,
+      state: "disabled",
+      lastProbePassed: true,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) =>
+        Response.json(health(String(input).includes("account-b") ? "account-b" : "account-a")),
+      ),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    expect(await repository.findChatGptWebAccount("account-b")).toMatchObject({
+      enabled: false,
+      qualified: true,
+      state: "disabled",
+      lastProbePassed: true,
+    });
+  });
+
+  it("still revokes qualification on an explicit login failure", async () => {
+    const { repository, configs } = await readyRepository();
+    await repository.updateChatGptWebAccount("account-a", { lastProbePassed: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const accountId = String(input).includes("account-b") ? "account-b" : "account-a";
+        return Response.json(
+          accountId === "account-a"
+            ? { ...health(accountId), authenticated: false, failureCode: "chatgpt_login_required" }
+            : health(accountId),
+        );
+      }),
+    );
+    const pool = new ChatGptWebPoolProvider(repository, configs, "synthetic-token", true);
+    await pool.syncAccounts();
+    expect(await repository.findChatGptWebAccount("account-a")).toMatchObject({
+      qualified: false,
+      state: "login_required",
     });
   });
 
