@@ -426,7 +426,9 @@ async function waitForStableThinkingDepthSurface(deadline) {
   let stableSince = 0;
   let stableReads = 0;
   while (Date.now() < end) {
-    if (currentSurface() === "chat" && thinkingDepthControl()) {
+    // Temporary Chat can omit Chat/Work tabs entirely. Its composer-scoped
+    // depth control is still valid; an explicitly selected Work tab is not.
+    if (currentSurface() !== "work" && thinkingDepthControl()) {
       stableSince ||= Date.now();
       stableReads += 1;
       if (stableReads >= 3 && Date.now() - stableSince >= 500) return;

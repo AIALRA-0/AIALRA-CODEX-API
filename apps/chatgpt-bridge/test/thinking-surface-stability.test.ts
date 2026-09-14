@@ -36,6 +36,28 @@ describe("thinking surface stability", () => {
     expect(page.reads()).toBeGreaterThan(120);
   });
 
+  it("accepts a Temporary Chat depth control when Chat/Work tabs are absent", async () => {
+    let now = 0;
+    const wait = runInNewContext(`${helperSource}; waitForStableThinkingDepthSurface`, {
+      Date: { now: () => (now += 100) },
+      currentSurface: () => "unknown",
+      thinkingDepthControl: () => ({ label: "Extra High" }),
+      waitForMutation: async () => {},
+    }) as (deadline: number) => Promise<void>;
+    await expect(wait(100_000)).resolves.toBeUndefined();
+  });
+
+  it("does not treat a selected Work tab as a Chat depth surface", async () => {
+    let now = 0;
+    const wait = runInNewContext(`${helperSource}; waitForStableThinkingDepthSurface`, {
+      Date: { now: () => (now += 100) },
+      currentSurface: () => "work",
+      thinkingDepthControl: () => ({ label: "Extra High" }),
+      waitForMutation: async () => {},
+    }) as (deadline: number) => Promise<void>;
+    await expect(wait(100_000)).rejects.toThrow("chatgpt_page_not_ready");
+  });
+
   it("does not require a depth control for Auto chat", async () => {
     const requestedSource = source.slice(
       source.indexOf("async function waitForRequestedThinkingDepthSurface("),
