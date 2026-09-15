@@ -99,6 +99,9 @@ describe("active generation control detection", () => {
     height = 20,
     display = "block",
     visibility = "visible",
+    opacity = "1",
+    pointerEvents = "auto",
+    checkVisibility = true,
   }: {
     testId?: string | null;
     label?: string;
@@ -107,17 +110,21 @@ describe("active generation control detection", () => {
     height?: number;
     display?: string;
     visibility?: string;
+    opacity?: string;
+    pointerEvents?: string;
+    checkVisibility?: boolean;
   } = {}) {
     const element = {
       getBoundingClientRect: () => ({ width, height }),
       getAttribute: (name: string) =>
         name === "data-testid" ? testId : name === "aria-label" ? label : null,
+      checkVisibility: () => checkVisibility,
     };
     const context = {
       document: {},
       SELECTORS: { stop: [] },
       all: () => [element],
-      getComputedStyle: () => ({ display, visibility }),
+      getComputedStyle: () => ({ display, visibility, opacity, pointerEvents }),
       normalizedText: (value: string) => value.replace(/\s+/g, " ").trim(),
       visibleText: () => text,
     };
@@ -136,6 +143,9 @@ describe("active generation control detection", () => {
   it("ignores hidden stale stop controls", () => {
     expect(detect({ width: 0 })).toBeNull();
     expect(detect({ display: "none" })).toBeNull();
+    expect(detect({ opacity: "0" })).toBeNull();
+    expect(detect({ pointerEvents: "none" })).toBeNull();
+    expect(detect({ checkVisibility: false })).toBeNull();
   });
 
   it("ignores voice and dictation stop controls", () => {

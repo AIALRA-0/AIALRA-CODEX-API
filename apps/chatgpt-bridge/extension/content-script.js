@@ -1776,7 +1776,11 @@ function activeGenerationControl(root = document) {
       rectangle.width <= 0 ||
       rectangle.height <= 0 ||
       style.display === "none" ||
-      style.visibility === "hidden"
+      style.visibility === "hidden" ||
+      style.opacity === "0" ||
+      style.pointerEvents === "none" ||
+      (typeof element.checkVisibility === "function" &&
+        !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
     ) {
       continue;
     }
