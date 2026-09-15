@@ -1768,6 +1768,34 @@ function firstVisible(selectors, root = document) {
   return null;
 }
 
+function activeGenerationControl(root = document) {
+  for (const element of all(SELECTORS.stop, root)) {
+    const rectangle = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    if (
+      rectangle.width <= 0 ||
+      rectangle.height <= 0 ||
+      style.display === "none" ||
+      style.visibility === "hidden"
+    ) {
+      continue;
+    }
+    if (element.getAttribute("data-testid") === "stop-button") return element;
+    const label = normalizedText(
+      `${element.getAttribute("aria-label") ?? ""} ${visibleText(element)}`,
+    );
+    if (/dictation|voice|recording|microphone|语音|听写|录音|麦克风/i.test(label)) continue;
+    if (
+      /^(?:stop(?: generating| generation| response| responding| answer| answering)?|停止(?:生成|回答|回复|响应)?)$/i.test(
+        label,
+      )
+    ) {
+      return element;
+    }
+  }
+  return null;
+}
+
 function sendControlFor(composer) {
   const root = composerControlRoot(composer);
   const local = root?.isConnected ? firstVisible(SELECTORS.send, root) : null;
@@ -1940,7 +1968,7 @@ function hasTerminalCopyAction(element) {
 
 function hasTerminalComposerState() {
   const composer = firstVisible(SELECTORS.composer);
-  if (!composer || first(SELECTORS.stop)) return false;
+  if (!composer || activeGenerationControl()) return false;
   const root = composerControlRoot(composer);
   return Boolean(sendControlFor(composer) || visibleEnabledButtons(root ?? document).length);
 }
@@ -2084,7 +2112,7 @@ function controlDiagnostics(expectedObjective = null) {
     assistantTurnCount: assistantTurns.length,
     blankAssistantTurnCount: assistantTurns.filter((element) => !visibleText(element)).length,
     latestAssistantHasText: Boolean(latestAssistant && visibleText(latestAssistant)),
-    generationActive: Boolean(first(SELECTORS.stop)),
+    generationActive: Boolean(activeGenerationControl()),
     userTurnCount: users.length,
     latestUserTextLength: latestUserText.length,
     expectedUserTextLength: expectedUserText?.length ?? null,
@@ -2101,7 +2129,7 @@ function controlDiagnostics(expectedObjective = null) {
       users.length === 0 &&
       assistantTurns.length === 0 &&
       canonicalEditorText(composerPlainText(composer)).length === 0 &&
-      !first(SELECTORS.stop),
+      !activeGenerationControl(),
     terminalActionCount: terminalActionsFor(latestAssistant).length,
     terminalActions: terminalActionsFor(latestAssistant).map(describeControl).filter(Boolean),
     visibleErrorCount: visiblePageErrors().length,
@@ -2281,7 +2309,7 @@ async function waitForStableResult(
       }
       const channels = assistantTextChannels(newest);
       const sample = channels.extracted;
-      const generating = Boolean(first(SELECTORS.stop));
+      const generating = Boolean(activeGenerationControl());
       if (generating) {
         terminalSince = 0;
         if (sample && sample === lastText) {
@@ -2573,7 +2601,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type === "aialra.cancel" && activeJobId === message.jobId) {
     cancelled = true;
-    first(SELECTORS.stop)?.click();
+    activeGenerationControl()?.click();
     sendResponse({ ok: true });
   }
   return false;

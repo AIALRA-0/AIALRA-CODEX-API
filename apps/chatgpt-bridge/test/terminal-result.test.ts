@@ -30,7 +30,7 @@ function harness({
     assistantTextChannels: () => ({
       extracted: changes && now >= 10_000 ? "later answer" : "exact answer",
     }),
-    first: () => (generating ? {} : null),
+    activeGenerationControl: () => (generating ? {} : null),
     SELECTORS: { stop: [] },
     hasTerminalCopyAction: () => copy,
     hasTerminalComposerState: () => terminalComposer,
@@ -88,6 +88,60 @@ describe("validated visible completion", () => {
       await expect(harness(options).run()).rejects.toThrow("chatgpt_delivery_uncertain");
     },
   );
+});
+
+describe("active generation control detection", () => {
+  function detect({
+    testId = null,
+    label = "Stop generating",
+    text = "",
+    width = 20,
+    height = 20,
+    display = "block",
+    visibility = "visible",
+  }: {
+    testId?: string | null;
+    label?: string;
+    text?: string;
+    width?: number;
+    height?: number;
+    display?: string;
+    visibility?: string;
+  } = {}) {
+    const element = {
+      getBoundingClientRect: () => ({ width, height }),
+      getAttribute: (name: string) =>
+        name === "data-testid" ? testId : name === "aria-label" ? label : null,
+    };
+    const context = {
+      document: {},
+      SELECTORS: { stop: [] },
+      all: () => [element],
+      getComputedStyle: () => ({ display, visibility }),
+      normalizedText: (value: string) => value.replace(/\s+/g, " ").trim(),
+      visibleText: () => text,
+    };
+    const activeGenerationControl = runInNewContext(
+      `${source.slice(source.indexOf("function activeGenerationControl("), source.indexOf("function sendControlFor("))}; activeGenerationControl`,
+      context,
+    );
+    return activeGenerationControl();
+  }
+
+  it("accepts a visible generation stop control", () => {
+    expect(detect()).not.toBeNull();
+    expect(detect({ testId: "stop-button", label: "" })).not.toBeNull();
+  });
+
+  it("ignores hidden stale stop controls", () => {
+    expect(detect({ width: 0 })).toBeNull();
+    expect(detect({ display: "none" })).toBeNull();
+  });
+
+  it("ignores voice and dictation stop controls", () => {
+    expect(detect({ label: "Stop dictation" })).toBeNull();
+    expect(detect({ label: "停止语音输入" })).toBeNull();
+  });
 });
 
 it("extracts and deduplicates linked and plain-text public sources from the owned answer", () => {
