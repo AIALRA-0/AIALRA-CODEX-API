@@ -96,7 +96,7 @@ That dated result is historical evidence, not proof that either account is curre
 
 The current release has completed a real Search call with verifiable sources and a real streaming Chat call. Those successes do not establish reliability for larger inputs or future page changes; inspect current jobs and account state before relying on the channel.
 
-The web channel currently limits a single `objective` to 4,000 characters. Longer native pastes have made Chromium unresponsive or become ChatGPT pasted-text attachments, which the bridge cannot verify as an exact user message. An oversized request returns HTTP 422 with `chatgpt_web_input_too_long`, `maxCharacters`, and `actualCharacters` before creating a job or touching the browser. This limit does not apply to Codex tasks.
+The web channel currently limits the complete task text serialized for the page to 4,000 characters, including the objective, context, constraints, expected output, and validation rules. Longer native pastes have made Chromium unresponsive or become ChatGPT pasted-text attachments, which the bridge cannot verify as an exact user message. An oversized request returns HTTP 422 with `chatgpt_web_input_too_long`, `maxCharacters`, and `actualCharacters` before creating a job or touching the browser. This limit does not apply to Codex tasks.
 
 Sign-out, verification, account warnings, UI drift, and rate limits automatically remove the affected account. An uncertain post-submission task never moves to another account and is never resent. A recovered account must pass a fresh readiness check and single probe.
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TaskContractSchema } from "@aialra/contracts";
+import { serializeTaskPrompt, TaskContractSchema } from "@aialra/contracts";
 import { InMemoryJobRepository } from "@aialra/persistence";
 
 import { JobsService } from "../src/jobs/jobs.service.js";
@@ -17,15 +17,20 @@ describe("job object authorization", () => {
       } as never,
       { read: async () => null } as never,
     );
+    const task = TaskContractSchema.parse({
+      objective: "Review the supplied synthetic context.",
+      requiredContext: ["## Generated context\n\n" + "- synthetic fact\n".repeat(300)],
+      executionChannel: "chatgpt_web",
+      model: "chatgpt-web.auto",
+      chatgptWeb: { mode: "chat" },
+    });
+    const actualCharacters = serializeTaskPrompt(task).length;
+    expect(task.objective.length).toBeLessThan(4_000);
+    expect(actualCharacters).toBeGreaterThan(4_000);
     await expect(
       service.create(
         {
-          task: TaskContractSchema.parse({
-            objective: "x".repeat(4_001),
-            executionChannel: "chatgpt_web",
-            model: "chatgpt-web.auto",
-            chatgptWeb: { mode: "chat" },
-          }),
+          task,
           metadata: {},
         },
         "admin",
@@ -39,7 +44,7 @@ describe("job object authorization", () => {
         error: {
           code: "chatgpt_web_input_too_long",
           maxCharacters: 4_000,
-          actualCharacters: 4_001,
+          actualCharacters,
         },
       },
     });

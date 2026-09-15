@@ -261,6 +261,24 @@ export const TaskContractSchema = z
   });
 export type TaskContract = z.infer<typeof TaskContractSchema>;
 
+export function serializeTaskPrompt(task: TaskContract): string {
+  const contract = {
+    objective: task.objective,
+    required_context: task.requiredContext,
+    constraints: task.constraints,
+    expected_output: task.expectedOutput,
+    validation_checks: task.validation.checks,
+    acceptance_tests: task.validation.acceptanceTests,
+    permissions: task.permissions,
+  };
+
+  return [
+    "Complete the following task contract and return only the final deliverable.",
+    "Do not delegate this task to another agent.",
+    JSON.stringify(contract, null, 2),
+  ].join("\n\n");
+}
+
 export const CreateJobRequestSchema = z.object({
   task: TaskContractSchema,
   metadata: z.record(z.string(), z.string().max(2_000)).default({}),

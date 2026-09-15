@@ -14,6 +14,7 @@ import type {
   TaskContract,
   UsageLedger,
 } from "@aialra/contracts";
+import { serializeTaskPrompt } from "@aialra/contracts";
 import { redact } from "@aialra/security";
 
 export interface ProviderEvent {
@@ -93,23 +94,7 @@ export const CODEX_API_USD_RATE_CARD = {
   },
 } as const;
 
-export function buildTaskPrompt(task: TaskContract): string {
-  const contract = {
-    objective: task.objective,
-    required_context: task.requiredContext,
-    constraints: task.constraints,
-    expected_output: task.expectedOutput,
-    validation_checks: task.validation.checks,
-    acceptance_tests: task.validation.acceptanceTests,
-    permissions: task.permissions,
-  };
-
-  return [
-    "Complete the following task contract and return only the final deliverable.",
-    "Do not delegate this task to another agent.",
-    JSON.stringify(contract, null, 2),
-  ].join("\n\n");
-}
+export const buildTaskPrompt = serializeTaskPrompt;
 
 export function calculateCodexCredits(
   model: string,

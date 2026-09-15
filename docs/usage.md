@@ -449,7 +449,7 @@ Codex 通道任务由 Codex 模型执行；只有调用方显式选择、密钥�
 | `chatgpt_verification_required`    | 网页要求验证码或人工验证                 | 管理员在可见页面处理；系统不会绕过                 |
 | `chatgpt_ui_changed`               | 必要页面元素无法识别                     | 关闭网页通道并重新验证页面契约                     |
 | `chatgpt_delivery_uncertain`       | 无法证明网页消息是否已经发送             | 保持失败并检查页面；系统不会自动重发               |
-| `chatgpt_web_input_too_long`       | 网页输入超过当前 4000 字符安全上限       | 缩短输入；API 返回 422 且不会创建任务或发送消息    |
+| `chatgpt_web_input_too_long`       | 完整网页任务文本超过 4000 字符安全上限   | 缩短目标、上下文或规则；API 不会创建任务或发送消息 |
 | `chatgpt_output_incomplete`        | 无法证明最终正文已经稳定                 | 检查可见页面和扩展健康状态                         |
 | `chatgpt_sources_missing`          | 回答完成但没有提供可验证的公网来源       | 调整来源要求；账号不会因此被隔离                   |
 
