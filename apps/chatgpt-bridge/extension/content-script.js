@@ -289,10 +289,193 @@ function userMessageText(element) {
   return bodyText || visibleText(element);
 }
 
+function userMessageDomText(element, expectedMarkup = null) {
+  // A collapsed turn can omit body text from innerText while retaining the
+  // exact received text in DOM text nodes. Never strip content or accept a
+  // prefix: the alternate extraction must still match the entire objective.
+  if (!element) return "";
+  const codeSpans =
+    expectedMarkup === null
+      ? []
+      : [...expectedMarkup.matchAll(/(?<!`)(`+)([\s\S]*?)\1(?!`)/g)].map((match) => ({
+          delimiter: match[1],
+          body: normalizedText(match[2]),
+          leadingSpace: /^\s/.test(match[2]),
+          trailingSpace: /\s$/.test(match[2]),
+        }));
+  let codeCursor = 0;
+  const read = (node) => {
+    if (node.nodeType === 3) return node.nodeValue ?? "";
+    if (node.nodeType === 11) return [...node.childNodes].map(read).join("");
+    if (node.nodeType !== 1) return "";
+    if (
+      ["BUTTON", "SVG", "SCRIPT", "STYLE"].includes(node.tagName) ||
+      node.getAttribute?.("role") === "button"
+    )
+      return "";
+    if (node.tagName === "BR") return "\n";
+    if (node.tagName === "PRE") {
+      const code = node.querySelector?.("code");
+      if (code) return read(code) + "\n";
+    }
+    const text = [...(node.childNodes ?? [])].map(read).join("");
+    if (expectedMarkup !== null && node.tagName === "CODE") {
+      // Restore only actual DOM code markup, using a delimiter whose enclosed
+      // text matches exactly. Never remove ticks from arbitrary plain text or
+      // substitute expected content for observed content.
+      const body = normalizedText(text);
+      const index = codeSpans.findIndex((span, i) => i >= codeCursor && span.body === body);
+      if (index >= 0) {
+        codeCursor = index + 1;
+        const span = codeSpans[index];
+        // Renderers trim code-span boundary whitespace. Restore only that
+        // formatting boundary after matching the entire observed code body;
+        // no source character is substituted for an observed body character.
+        return (
+          span.delimiter +
+          (span.leadingSpace ? " " : "") +
+          text +
+          (span.trailingSpace ? " " : "") +
+          span.delimiter
+        );
+      }
+    }
+    return [
+      "P",
+      "DIV",
+      "PRE",
+      "LI",
+      "SECTION",
+      "H1",
+      "H2",
+      "H3",
+      "H4",
+      "H5",
+      "H6",
+      "UL",
+      "OL",
+      "TABLE",
+      "TR",
+      "TD",
+      "TH",
+      "BLOCKQUOTE",
+    ].includes(node.tagName)
+      ? text + "\n"
+      : text;
+  };
+  return read(element).trim();
+}
+
+function userMessageRenderedMatches(element, objective) {
+  // Parse markup in a detached inert template. No resource is fetched or source
+  // script executed. Only a full, exact rendered-text match is accepted.
+  if (typeof marked === "undefined" || typeof document === "undefined") return false;
+  try {
+    const targets = (root) =>
+      [...(root?.querySelectorAll?.("a[href], img[src]") ?? [])]
+        .filter((node) => !node.closest?.("button, [role='button']"))
+        .map((node) => [
+          node.tagName,
+          node.getAttribute("href") ?? node.getAttribute("src"),
+          node.getAttribute("alt") ?? "",
+        ]);
+    const observedTargets = JSON.stringify(targets(element));
+    const observed = [
+      userMessageDomText(element),
+      userMessageText(element),
+      visibleText(element),
+    ].map(normalizedText);
+    // User bubbles can use inline Markdown while assistant turns use block
+    // Markdown. Both comparisons still require every rendered character and URL.
+    return [marked.parse, marked.parseInline].some((parse) => {
+      const template = document.createElement("template");
+      template.innerHTML = parse(objective, { gfm: true, async: false });
+      const expected = normalizedText(userMessageDomText(template.content));
+      return (
+        expected &&
+        JSON.stringify(targets(template.content)) === observedTargets &&
+        observed.includes(expected)
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
+function userMessageComparison(element, objective) {
+  const expected = normalizedText(objective ?? "");
+  const visible = normalizedText(userMessageText(element));
+  const dom = normalizedText(userMessageDomText(element));
+  const markup = normalizedText(userMessageDomText(element, objective ?? ""));
+  let markupIndex = 0;
+  while (
+    markupIndex < Math.min(expected.length, markup.length) &&
+    expected[markupIndex] === markup[markupIndex]
+  )
+    markupIndex++;
+  const markupDifference = {
+    index: markupIndex,
+    expected: [...expected.slice(Math.max(0, markupIndex - 8), markupIndex + 16)].map((c) =>
+      c.codePointAt(0),
+    ),
+    observed: [...markup.slice(Math.max(0, markupIndex - 8), markupIndex + 16)].map((c) =>
+      c.codePointAt(0),
+    ),
+  };
+  let renderedTextLength = null;
+  let renderedDifference = null;
+  if (typeof marked !== "undefined" && typeof document !== "undefined") {
+    try {
+      const template = document.createElement("template");
+      template.innerHTML = marked.parse(objective ?? "", { gfm: true, async: false });
+      const rendered = normalizedText(userMessageDomText(template.content));
+      renderedTextLength = rendered.length;
+      let index = 0;
+      while (index < Math.min(rendered.length, dom.length) && rendered[index] === dom[index])
+        index++;
+      renderedDifference = {
+        index,
+        expected: [...rendered.slice(index, index + 12)].map((c) => c.codePointAt(0)),
+        observed: [...dom.slice(index, index + 12)].map((c) => c.codePointAt(0)),
+      };
+    } catch {
+      /* Diagnostic only; ownership still requires a complete match. */
+    }
+  }
+  let prefix = 0;
+  while (prefix < Math.min(expected.length, visible.length) && expected[prefix] === visible[prefix])
+    prefix++;
+  let suffix = 0;
+  while (
+    suffix < Math.min(expected.length, visible.length) - prefix &&
+    expected[expected.length - suffix - 1] === visible[visible.length - suffix - 1]
+  )
+    suffix++;
+  return {
+    domTextLength: dom.length,
+    domMatches: dom === expected,
+    markupTextLength: markup.length,
+    markupMatches: markup === expected,
+    markupDifference,
+    renderedMatches: userMessageRenderedMatches(element, objective ?? ""),
+    renderedTextLength,
+    renderedDifference,
+    visibleMatches: visible === expected,
+    commonPrefixLength: prefix,
+    commonSuffixLength: suffix,
+    expectedMiddleLength: expected.length - prefix - suffix,
+    visibleMiddleLength: visible.length - prefix - suffix,
+  };
+}
+
 function userMessageMatchesObjective(element, objective) {
   const expected = normalizedText(objective);
   if (normalizedText(userMessageText(element)) === expected) return true;
   const full = normalizedText(visibleText(element));
+  if (full === expected) return true;
+  if (normalizedText(userMessageDomText(element)) === expected) return true;
+  if (normalizedText(userMessageDomText(element, objective)) === expected) return true;
+  if (userMessageRenderedMatches(element, objective)) return true;
   if (!full.startsWith(`${expected} `)) return false;
   const suffix = full.slice(expected.length).trim();
   return [...(element?.querySelectorAll?.("button, [role='button']") ?? [])].some(
@@ -1897,6 +2080,8 @@ function controlDiagnostics(expectedObjective = null) {
     userTurnCount: users.length,
     latestUserTextLength: latestUserText.length,
     expectedUserTextLength: expectedUserText?.length ?? null,
+    userMessageComparison:
+      expectedObjective === null ? null : userMessageComparison(users.at(-1), expectedObjective),
     latestUserMatchesObjective:
       expectedUserText === null
         ? null
@@ -1950,8 +2135,34 @@ function hasForeignCompletionMarker(outputText, completionMarker) {
   return markers.some((marker) => marker !== completionMarker);
 }
 
+function structuredCodeResult(element, completionMarker) {
+  const root = assistantTurnContainer(element);
+  const codes = [...(root?.querySelectorAll?.("pre code") ?? [])];
+  if (codes.length !== 1 || !completionMarker || !root?.cloneNode) return null;
+  const rawWithMarker = (codes[0].textContent ?? "").trim();
+  if (hasForeignCompletionMarker(rawWithMarker, completionMarker)) return null;
+  const raw = withoutCompletionMarker(rawWithMarker, completionMarker).trim();
+  try {
+    if (typeof JSON.parse(raw) !== "object" || JSON.parse(raw) === null) return null;
+  } catch {
+    return null;
+  }
+  const remaining = root.cloneNode(true);
+  for (const node of remaining.querySelectorAll("pre,button,[role='button'],svg")) {
+    node.replaceWith(root.ownerDocument.createTextNode(" "));
+  }
+  const remainder = normalizedText(
+    withoutCompletionMarker(remaining.textContent ?? "", completionMarker),
+  );
+  // Only a language label and this job's completion marker may surround the
+  // single JSON code block. Additional prose is retained by the normal path.
+  if (!["", "json", "JSON"].includes(remainder)) return null;
+  return raw;
+}
+
 function extractResult(element, completionMarker = null) {
-  const rawOutputText = assistantTextChannels(element).extracted;
+  const rawOutputText =
+    structuredCodeResult(element, completionMarker) ?? assistantTextChannels(element).extracted;
   const outputText = completionMarker
     ? withoutCompletionMarker(rawOutputText, completionMarker)
     : rawOutputText;

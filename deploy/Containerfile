@@ -11,6 +11,8 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS web
+ARG AIALRA_RELEASE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$AIALRA_RELEASE_REVISION
 ENV NODE_ENV=production
 ENV PORT=13211
 ENV HOSTNAME=0.0.0.0
@@ -22,6 +24,8 @@ EXPOSE 13211
 CMD ["node", "apps/web/server.js"]
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS api
+ARG AIALRA_RELEASE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$AIALRA_RELEASE_REVISION
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /workspace/node_modules ./node_modules
@@ -34,6 +38,8 @@ EXPOSE 13210
 CMD ["node", "apps/api/dist/main.js"]
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS worker
+ARG AIALRA_RELEASE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$AIALRA_RELEASE_REVISION
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /workspace/node_modules ./node_modules
@@ -45,6 +51,8 @@ EXPOSE 13212
 CMD ["node", "apps/worker/dist/main.js"]
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runner
+ARG AIALRA_RELEASE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$AIALRA_RELEASE_REVISION
 ENV NODE_ENV=production
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
@@ -61,6 +69,8 @@ EXPOSE 13214
 CMD ["node", "apps/runner/dist/main.js"]
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS chatgpt-browser
+ARG AIALRA_RELEASE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$AIALRA_RELEASE_REVISION
 ENV NODE_ENV=production
 ENV HOME=/opt/aialra-browser-home
 RUN apt-get update \
@@ -100,6 +110,8 @@ EXPOSE 13216 6080
 ENTRYPOINT ["/usr/local/bin/aialra-chatgpt-browser"]
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS chatgpt-egress-proxy
+ARG AIALRA_RELEASE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$AIALRA_RELEASE_REVISION
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends squid ca-certificates \
     && rm -rf /var/lib/apt/lists/*

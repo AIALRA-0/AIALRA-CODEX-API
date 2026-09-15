@@ -44,6 +44,11 @@ License: MIT License
 Zod, Ajv, Vitest, Turbo, tsup, TypeScript, ESLint, and Prettier
 Licenses: MIT License or the license declared by each upstream package
 
+Marked
+Source: https://github.com/markedjs/marked
+License: MIT License
+The vendored browser bundle and its full license text are stored with the extension
+
 PostgreSQL container image
 Source: https://github.com/docker-library/postgres
 Database license: PostgreSQL License

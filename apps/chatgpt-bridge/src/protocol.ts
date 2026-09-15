@@ -166,6 +166,37 @@ export const BrowserControlDiagnosticsSchema = z.object({
   latestUserTextLength: z.number().int().nonnegative().default(0),
   expectedUserTextLength: z.number().int().nonnegative().nullable().default(null),
   latestUserMatchesObjective: z.boolean().nullable().default(null),
+  userMessageComparison: z
+    .object({
+      domTextLength: z.number().int().nonnegative(),
+      domMatches: z.boolean(),
+      markupTextLength: z.number().int().nonnegative().optional(),
+      markupMatches: z.boolean().optional(),
+      markupDifference: z
+        .object({
+          index: z.number().int().nonnegative(),
+          expected: z.array(z.number().int().nonnegative()).max(24),
+          observed: z.array(z.number().int().nonnegative()).max(24),
+        })
+        .optional(),
+      renderedMatches: z.boolean().optional(),
+      renderedTextLength: z.number().int().nonnegative().nullable().optional(),
+      renderedDifference: z
+        .object({
+          index: z.number().int().nonnegative(),
+          expected: z.array(z.number().int().nonnegative()).max(12),
+          observed: z.array(z.number().int().nonnegative()).max(12),
+        })
+        .nullable()
+        .optional(),
+      visibleMatches: z.boolean(),
+      commonPrefixLength: z.number().int().nonnegative(),
+      commonSuffixLength: z.number().int().nonnegative(),
+      expectedMiddleLength: z.number().int().nonnegative(),
+      visibleMiddleLength: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .default(null),
   composerTextLength: z.number().int().nonnegative().default(0),
   documentToken: z.string().uuid().nullable().default(null),
   freshConversation: z.boolean().default(false),

@@ -33,6 +33,8 @@ services:
       context: ..
       dockerfile: deploy/Containerfile
       target: api
+      args:
+        AIALRA_RELEASE_REVISION: ${AIALRA_RELEASE_REVISION:-unknown}
     restart: unless-stopped
     user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
     environment:
@@ -97,6 +99,8 @@ services:
       context: ..
       dockerfile: deploy/Containerfile
       target: web
+      args:
+        AIALRA_RELEASE_REVISION: ${AIALRA_RELEASE_REVISION:-unknown}
     restart: unless-stopped
     user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
     environment:
@@ -143,6 +147,8 @@ services:
       context: ..
       dockerfile: deploy/Containerfile
       target: worker
+      args:
+        AIALRA_RELEASE_REVISION: ${AIALRA_RELEASE_REVISION:-unknown}
     restart: unless-stopped
     user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
     environment:
@@ -205,6 +211,8 @@ services:
       context: ..
       dockerfile: deploy/Containerfile
       target: runner
+      args:
+        AIALRA_RELEASE_REVISION: ${AIALRA_RELEASE_REVISION:-unknown}
     restart: unless-stopped
     user: "${ROUTER_UID:-1000}:${ROUTER_GID:-1000}"
     environment:
@@ -254,6 +262,8 @@ services:
       context: ..
       dockerfile: deploy/Containerfile
       target: chatgpt-browser
+      args:
+        AIALRA_RELEASE_REVISION: ${AIALRA_RELEASE_REVISION:-unknown}
     restart: unless-stopped
     stop_grace_period: 30s
     group_add:
@@ -360,6 +370,8 @@ services:
       context: ..
       dockerfile: deploy/Containerfile
       target: chatgpt-egress-proxy
+      args:
+        AIALRA_RELEASE_REVISION: ${AIALRA_RELEASE_REVISION:-unknown}
     restart: unless-stopped
     networks:
       - chatgpt_proxy

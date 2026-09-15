@@ -577,8 +577,9 @@ function formatDate(value: string | null): string {
     : "—";
 }
 
-function statusClass(status: JobStatus): string {
+function statusClass(status: JobStatus, errorCode?: string | null): string {
   if (status === "succeeded") return "success";
+  if (status === "failed" && errorCode === "validation_failed") return "warning";
   if (["failed", "cancelled", "expired"].includes(status)) return "danger";
   return "warning";
 }
@@ -714,7 +715,7 @@ function JobTable({ jobs, onSelect }: { jobs: Job[]; onSelect?: (job: Job) => vo
                     )}
                   </td>
                   <td>
-                    <span className={`status-indicator ${statusClass(job.status)}`}>
+                    <span className={`status-indicator ${statusClass(job.status, job.errorCode)}`}>
                       {resultSummary?.label ?? JOB_STATUS_LABEL[job.status]}
                     </span>
                   </td>
@@ -789,9 +790,14 @@ function Overview() {
   );
   useVisiblePolling(refresh, 5_000);
   const active = jobs.filter((job) => !TERMINAL.has(job.status)).length;
-  const succeeded = jobs.filter((job) => job.status === "succeeded").length;
   const completed = jobs.filter((job) => TERMINAL.has(job.status)).length;
-  const completionRate = completed ? Math.round((succeeded / completed) * 1000) / 10 : 0;
+  const answered = jobs.filter((job) => TERMINAL.has(job.status) && job.output != null).length;
+  const answerRate = completed ? Math.round((answered / completed) * 1000) / 10 : 0;
+  const validated = jobs.filter((job) => job.validation != null);
+  const validationPassed = validated.filter((job) => job.validation?.passed).length;
+  const validationRate = validated.length
+    ? Math.round((validationPassed / validated.length) * 1000) / 10
+    : 0;
   return (
     <>
       {syntheticDemo ? (
@@ -823,9 +829,18 @@ function Overview() {
           </span>
         </article>
         <article className="metric">
-          <small>最近调用成功率</small>
-          <strong>{completed ? `${completionRate}%` : "—"}</strong>
-          <span className="muted">基于最近 {jobs.length} 次调用</span>
+          <small>最近调用结果返回率</small>
+          <strong>{completed ? `${answerRate}%` : "—"}</strong>
+          <span className="muted">
+            已返回答案 {answered}/{completed}，不把规则未通过误算成调用崩溃
+          </span>
+        </article>
+        <article className="metric">
+          <small>结果规则通过率</small>
+          <strong>{validated.length ? `${validationRate}%` : "—"}</strong>
+          <span className="muted">
+            已通过自动检查 {validationPassed}/{validated.length}
+          </span>
         </article>
       </section>
       {webAccounts.length ? (
@@ -1304,7 +1319,11 @@ function Playground() {
         <section className="card result-panel" aria-live="polite">
           <div className="row">
             <h3>执行结果</h3>
-            <span className={`pill status-indicator ${job ? statusClass(job.status) : "neutral"}`}>
+            <span
+              className={`pill status-indicator ${
+                job ? statusClass(job.status, job.errorCode) : "neutral"
+              }`}
+            >
               {job ? JOB_STATUS_LABEL[job.status] : "等待提交"}
             </span>
           </div>

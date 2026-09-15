@@ -8,9 +8,16 @@ set -euo pipefail
 [[ -f "$RELEASE_DIR/deploy/compose.yaml" ]] || { echo "Release directory is incomplete" >&2; exit 1; }
 [[ -f "$PRODUCTION_ENV" ]] || { echo "Production environment is missing" >&2; exit 1; }
 
+source "$(dirname "$0")/lib/deploy-lock.sh"
+AIALRA_DEPLOY_OPERATION=install-compose-release acquire_aialra_deploy_lock
+
 cd "$RELEASE_DIR"
 release_tag="$(basename "$RELEASE_DIR")"
-[[ "$release_tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Release directory name is not a valid image tag" >&2; exit 1; }
+[[ "$release_tag" =~ ^[a-f0-9]{40}$ ]] || {
+  echo "Release directory must be named with the exact 40-character Git commit" >&2
+  exit 1
+}
+export AIALRA_RELEASE_REVISION="$release_tag"
 
 export API_IMAGE="aialra-model-router-api:$release_tag"
 export WEB_IMAGE="aialra-model-router-web:$release_tag"

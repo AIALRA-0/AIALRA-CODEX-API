@@ -11,6 +11,7 @@ import {
   isSafeChatGptWebRetry,
   isSafeCodexRetry,
   nextChatGptWebStatus,
+  normalizeStructuredProviderOutput,
   validateOutput,
   WorkerService,
 } from "../src/worker.service.js";
@@ -101,6 +102,37 @@ describe("validation", () => {
     const failed = validateOutput(job, "ROUTER_E2E_BAD");
     expect(failed.passed).toBe(false);
     expect(failed.messages[0]).toContain('expected="ROUTER_E2E_OK"');
+  });
+
+  it.each([
+    ['{"category":"direct"}', "direct"],
+    ['JSON\n{"category":"labelled"}', "labelled"],
+    ['```json\n{"category":"fenced"}\n```', "fenced"],
+  ])("normalizes strict ChatGPT Web JSON wrappers", (output, category) => {
+    const job = makeJob();
+    const normalized = normalizeStructuredProviderOutput(job, "chatgpt_web", output);
+    expect(normalized).toEqual({ category });
+    expect(validateOutput(job, normalized).passed).toBe(true);
+  });
+
+  it.each([
+    'Here is the result:\n{"category":"extra-prose"}',
+    '{"category":"broken\nvalue"}',
+    '```json\n{"category":"missing-fence"}',
+  ])("does not guess or repair malformed structured output", (output) => {
+    const job = makeJob();
+    expect(normalizeStructuredProviderOutput(job, "chatgpt_web", output)).toBe(output);
+    expect(validateOutput(job, output).passed).toBe(false);
+  });
+
+  it("does not rewrite Codex or unstructured provider output", () => {
+    const structured = makeJob();
+    const unstructured = makeJob({
+      task: TaskContractSchema.parse({ objective: "Return prose" }),
+    });
+    const labelled = 'JSON\n{"category":"unchanged"}';
+    expect(normalizeStructuredProviderOutput(structured, "codex", labelled)).toBe(labelled);
+    expect(normalizeStructuredProviderOutput(unstructured, "chatgpt_web", labelled)).toBe(labelled);
   });
 });
 
@@ -386,6 +418,79 @@ describe("WorkerService", () => {
     expect(completed?.status).toBe("succeeded");
     expect(completed?.usage.measurementStatus).toBe("unavailable");
     expect(completed?.usage.sourceCount).toBe(1);
+  });
+
+  it("completes a production-shaped long High review with a JSON Schema once", async () => {
+    const repository = new InMemoryJobRepository();
+    const longMarkdown = Array.from(
+      { length: 1_050 },
+      (_, index) =>
+        `## Section ${index}\n\n- Verify **field ${index}**\n- Source: https://example.test/${index}\n\n\`inline-${index}\``,
+    ).join("\n\n");
+    expect(longMarkdown.length).toBeGreaterThan(90_000);
+    expect(longMarkdown.length).toBeLessThanOrEqual(100_000);
+    const job = makeJob({
+      task: TaskContractSchema.parse({
+        objective: longMarkdown,
+        taskKind: "review",
+        executionChannel: "chatgpt_web",
+        model: "chatgpt-web.auto",
+        chatgptWeb: {
+          mode: "chat",
+          temporaryChat: true,
+          requireSources: false,
+          thinkingDepth: "High",
+        },
+        validation: {
+          responseSchema: {
+            type: "object",
+            properties: { category: { type: "string" } },
+            required: ["category"],
+            additionalProperties: false,
+          },
+        },
+        deadlineMs: 600_000,
+        budget: { maxOutputTokens: 8_192, maxAttempts: 2 },
+      }),
+    });
+    await repository.create(job);
+    await repository.saveChatGptWebStatus({
+      ...defaultChatGptWebStatus(),
+      configuredEnabled: true,
+      effectiveConcurrency: 1,
+      circuitState: "closed",
+      circuitReason: null,
+      lastQualificationPassed: true,
+    });
+    await repository.setModelEnabled("chatgpt-web.auto", true, "test");
+    const webInvoke = vi.fn<ModelProvider["invoke"]>(async () => ({
+      output: 'JSON\n{"category":"reviewed"}',
+      outputText: 'JSON\n{"category":"reviewed"}',
+      threadId: null,
+      usage: {
+        ...makeJob().usage,
+        measurementStatus: "unavailable",
+        subscriptionChannel: "chatgpt_pro_web",
+        durationMs: 500,
+      },
+    }));
+    const worker = new WorkerService({
+      repository,
+      provider: { name: "codex", invoke: vi.fn() },
+      chatgptProvider: { name: "chatgpt_web", workspaceMode: "provider", invoke: webInvoke },
+      quotaClient: { read: async () => Promise.reject(new Error("offline")) },
+    });
+
+    await worker.processJob(job.id);
+
+    const completed = await repository.findById(job.id);
+    expect(webInvoke).toHaveBeenCalledOnce();
+    expect(completed).toMatchObject({
+      status: "succeeded",
+      output: { category: "reviewed" },
+      validation: { passed: true, schemaPassed: true },
+      usage: { attemptCount: 1, retryCount: 0 },
+    });
   });
 
   it("does not resend a web task after a blank response", async () => {

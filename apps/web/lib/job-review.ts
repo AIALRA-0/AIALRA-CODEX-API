@@ -50,8 +50,8 @@ export function getJobResultSummary(job: SummarizedJob): JobResultSummary | null
   if (job.status === "failed" && job.errorCode === "validation_failed" && job.validation) {
     const details = job.validation.messages.map(explainValidationMessage);
     return {
-      label: "规则检查失败",
-      title: "输出不符合规则",
+      label: "答案已返回，规则未通过",
+      title: "答案已返回，但格式或规则未通过",
       description: "模型已经返回结果，但结果没有通过请求中声明的自动检查",
       details: details.length ? details : ["自动检查未通过，但没有返回具体说明"],
       action: "修改输入或验收规则后重新发起调用",

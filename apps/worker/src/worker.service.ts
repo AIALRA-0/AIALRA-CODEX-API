@@ -147,6 +147,37 @@ export function validateOutput(job: Job, output: unknown): ValidationResult {
   };
 }
 
+/**
+ * ChatGPT's rendered answer can expose a JSON language label as the first line
+ * even when the underlying answer is a single JSON object. Only remove that
+ * exact UI wrapper (or one complete fenced block); never repair malformed JSON
+ * or discard surrounding prose.
+ */
+export function normalizeStructuredProviderOutput(
+  job: Job,
+  provider: RouteDecision["provider"],
+  output: unknown,
+): unknown {
+  if (
+    provider !== "chatgpt_web" ||
+    !job.task.validation.responseSchema ||
+    typeof output !== "string"
+  ) {
+    return output;
+  }
+
+  let candidate = output.trim();
+  const fenced = candidate.match(/^```(?:json)?[\t ]*\r?\n([\s\S]*?)\r?\n```$/i);
+  if (fenced) candidate = fenced[1]!.trim();
+  candidate = candidate.replace(/^json[\t ]*\r?\n/i, "").trim();
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return output;
+  }
+}
+
 export function attachQuotaWindowDelta(
   usage: UsageLedger,
   before: QuotaSnapshot,
@@ -654,7 +685,12 @@ export class WorkerService {
             },
           });
 
-          const outputScan = scanForExternalData(result.output);
+          const normalizedOutput = normalizeStructuredProviderOutput(
+            job,
+            route.provider,
+            result.output,
+          );
+          const outputScan = scanForExternalData(normalizedOutput);
           if (!outputScan.allowed) {
             await this.repository.appendEvent(jobId, "error", {
               code: "secret_output_blocked",
@@ -698,14 +734,14 @@ export class WorkerService {
             });
           }
           await this.transition(jobId, { status: "validating" }, "worker.validating");
-          const validation = validateOutput(current, result.output);
+          const validation = validateOutput(current, normalizedOutput);
           await this.repository.appendEvent(jobId, "validation", validation);
           const terminalStatus = validation.passed ? "succeeded" : "failed";
           await this.transition(
             jobId,
             {
               status: terminalStatus,
-              output: result.output,
+              output: normalizedOutput,
               usage,
               validation,
               errorCode: validation.passed ? null : "validation_failed",

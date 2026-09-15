@@ -9,6 +9,9 @@ set -euo pipefail
 [[ "$EUID" -eq 0 ]] || { echo "Run this script as root" >&2; exit 1; }
 [[ -f "$PRODUCTION_ENV" ]] || { echo "Production environment is missing" >&2; exit 1; }
 
+source "$(dirname "$0")/lib/deploy-lock.sh"
+AIALRA_DEPLOY_OPERATION="chatgpt-web-${ACTION}" acquire_aialra_deploy_lock
+
 cd "$RELEASE_DIR"
 compose=(docker compose --env-file "$PRODUCTION_ENV" --file deploy/compose.yaml --profile codex --profile chatgpt-web)
 

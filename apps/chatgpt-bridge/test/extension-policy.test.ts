@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
 type ExtensionManifest = {
   permissions: string[];
   host_permissions: string[];
+  content_scripts: Array<{ js: string[] }>;
 };
 
 describe("single-page browser agent policy", () => {
@@ -21,6 +23,24 @@ describe("single-page browser agent policy", () => {
     expect(manifest.permissions).not.toContain("cookies");
     expect(manifest.permissions).not.toContain("clipboardRead");
     expect(manifest.permissions).not.toContain("downloads");
+  });
+
+  it("pins the local Markdown renderer used for exact long-message ownership", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"),
+    ) as ExtensionManifest;
+    const bundle = readFileSync(new URL("../extension/marked.umd.js", import.meta.url));
+    const license = readFileSync(
+      new URL("../extension/marked-LICENSE.md", import.meta.url),
+      "utf8",
+    );
+
+    expect(manifest.content_scripts[0]?.js).toEqual(["marked.umd.js", "content-script.js"]);
+    expect(bundle.subarray(0, 200).toString("utf8")).toContain("marked v18.0.13");
+    expect(createHash("sha256").update(bundle).digest("hex")).toBe(
+      "b147274a9ce27d17276587167e49483d719f6893eeca3a3667a59797661d3556",
+    );
+    expect(license).toContain("Permission is hereby granted, free of charge");
   });
 
   it("uses one page, native paste, one send, and immediate fresh-chat reset", () => {

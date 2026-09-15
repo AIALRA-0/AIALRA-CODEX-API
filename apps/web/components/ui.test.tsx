@@ -119,6 +119,7 @@ describe("shared visual tokens", () => {
     expect(css).toContain(".status-indicator.danger::before");
     expect(css).toMatch(/\.status-dot\s*\{[\s\S]*?background:\s*var\(--status-success\)/);
     expect(consoleSource).toContain('if (status === "succeeded") return "success";');
+    expect(consoleSource).toContain('errorCode === "validation_failed"');
     expect(consoleSource).toContain('["failed", "cancelled", "expired"]');
     expect(consoleSource).toMatch(/return "warning";\s*\}/);
   });
@@ -131,6 +132,14 @@ describe("shared visual tokens", () => {
     expect(source).toContain("Codex 执行权限不适用");
     expect(source).toContain("executionChannels");
     expect(css).toMatch(/\.choice-card:has\(input:checked\)/);
+  });
+
+  it("separates provider completion from caller validation failures", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain("最近调用结果返回率");
+    expect(source).toContain("结果规则通过率");
+    expect(source).toContain("不把规则未通过误算成调用崩溃");
+    expect(source).toContain("job.output != null");
   });
 
   it("explains and locks real web probes while diagnostic mode is disabled", () => {

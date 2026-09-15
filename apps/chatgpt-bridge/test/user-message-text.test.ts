@@ -76,4 +76,79 @@ describe("long user message ownership", () => {
       ),
     ).toBe(false);
   });
+
+  it("accepts the exact whole turn when dedicated body elements cover only part", () => {
+    const turn = userTurn("First paragraph only");
+    turn.innerText = objective;
+    expect(userMessageText(turn)).toBe("First paragraph only");
+    expect(userMessageMatchesObjective(turn, objective)).toBe(true);
+    turn.innerText = `${objective} unexplained extra`;
+    expect(userMessageMatchesObjective(turn, objective)).toBe(false);
+    turn.innerText = objective.slice(0, -30);
+    expect(userMessageMatchesObjective(turn, objective)).toBe(false);
+  });
+
+  it("accepts exact DOM content in a collapsed turn, rejecting loss or unrelated hidden text", () => {
+    const expected = "First paragraph\nSecond paragraph with <literal> punctuation";
+    const text = (value: string) => ({ nodeType: 3, nodeValue: value });
+    const p = (value: string) => ({ nodeType: 1, tagName: "P", childNodes: [text(value)] });
+    const turn = {
+      ...userTurn("First paragraph"),
+      nodeType: 1,
+      tagName: "DIV",
+      childNodes: [
+        p("First paragraph"),
+        p("Second paragraph with <literal> punctuation"),
+        { nodeType: 1, tagName: "BUTTON", childNodes: [text("Show more")] },
+      ],
+    };
+    expect(userMessageMatchesObjective(turn, expected)).toBe(true);
+    turn.childNodes[1] = p("Second paragraph with changed punctuation");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+    turn.childNodes[1] = p("Second paragraph with <literal> punctuation extra");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+  });
+
+  it("restores only observed code-node delimiters, including longer inline delimiters", () => {
+    const text = (value: string) => ({ nodeType: 3, nodeValue: value });
+    const code = (value: string) => ({ nodeType: 1, tagName: "CODE", childNodes: [text(value)] });
+    const expected = "Inline `x` then ```literal `tick` code``` end";
+    const turn = {
+      ...userTurn("Inline x then literal `tick` code end"),
+      nodeType: 1,
+      tagName: "DIV",
+      childNodes: [
+        text("Inline "),
+        code("x"),
+        text(" then "),
+        code("literal `tick` code"),
+        text(" end"),
+      ],
+    };
+    expect(userMessageMatchesObjective(turn, expected)).toBe(true);
+    turn.childNodes[1] = code("y");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+    turn.childNodes[1] = text("x");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+    turn.childNodes[1] = code("x");
+    turn.childNodes[4] = text(" missing ending");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+  });
+
+  it("restores trimmed code boundary whitespace only after exact body comparison", () => {
+    const text = (value: string) => ({ nodeType: 3, nodeValue: value });
+    const code = (value: string) => ({ nodeType: 1, tagName: "CODE", childNodes: [text(value)] });
+    const expected = "before ```bash\ncheck draft.md\n``` after";
+    const turn = {
+      ...userTurn("before bash check draft.md after"),
+      nodeType: 1,
+      tagName: "DIV",
+      childNodes: [text("before "), code("bash\ncheck draft.md"), text(" after")],
+    };
+    expect(userMessageMatchesObjective(turn, expected)).toBe(true);
+    turn.childNodes[1] = code("bash\ncheck other.md");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+    turn.childNodes[1] = code("bash\ncheck draft.md extra");
+    expect(userMessageMatchesObjective(turn, expected)).toBe(false);
+  });
 });

@@ -13,7 +13,7 @@
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["content-script.js"],
+      "js": ["marked.umd.js", "content-script.js"],
       "run_at": "document_idle"
     }
   ],

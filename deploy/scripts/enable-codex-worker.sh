@@ -8,6 +8,9 @@ set -euo pipefail
 [[ "$EUID" -eq 0 ]] || { echo "Run this script as root" >&2; exit 1; }
 [[ -s "$CODEX_AUTH_DIR/auth.json" ]] || { echo "Dedicated Codex login is missing" >&2; exit 1; }
 
+source "$(dirname "$0")/lib/deploy-lock.sh"
+AIALRA_DEPLOY_OPERATION=enable-codex-worker acquire_aialra_deploy_lock
+
 cd "$RELEASE_DIR"
 compose=(docker compose --env-file "$PRODUCTION_ENV" --file deploy/compose.yaml --profile codex)
 RELEASE_DIR="$RELEASE_DIR" \

@@ -101,6 +101,39 @@ it("extracts and deduplicates linked and plain-text public sources from the owne
   });
 });
 
+describe("strict structured answer extraction", () => {
+  const marker = "AIALRA_WEB_END_0123456789ABCDEF";
+  function extract(rawCode: string, remainder: string) {
+    const code = { textContent: rawCode };
+    const root = {
+      querySelectorAll: (selector: string) => (selector === "pre code" ? [code] : []),
+      cloneNode: () => ({ textContent: remainder, querySelectorAll: () => [] }),
+    };
+    const context = {
+      assistantTurnContainer: () => root,
+      normalizedText: (value: string) => value.replace(/\s+/g, " ").trim(),
+    };
+    return runInNewContext(
+      `${source.slice(source.indexOf("function withoutCompletionMarker("), source.indexOf("function extractResult("))}; structuredCodeResult`,
+      context,
+    )({}, marker);
+  }
+
+  it("accepts one JSON code block when the completion marker is outside", () => {
+    expect(extract('{"summary":"ok"}', `JSON ${marker}`)).toBe('{"summary":"ok"}');
+  });
+
+  it("accepts one JSON code block when the completion marker is inside", () => {
+    expect(extract(`{"summary":"ok"}\n${marker}`, "JSON")).toBe('{"summary":"ok"}');
+  });
+
+  it("rejects extra prose, malformed JSON, and foreign task markers", () => {
+    expect(extract('{"summary":"ok"}', `JSON explanation ${marker}`)).toBeNull();
+    expect(extract(`{"summary":"broken\nvalue"}\n${marker}`, "JSON")).toBeNull();
+    expect(extract('{"summary":"ok"}\nAIALRA_WEB_END_FEDCBA9876543210', "JSON")).toBeNull();
+  });
+});
+
 it("binds persistent Deep Research to the same fresh non-temporary document", () => {
   let currentToken = "document";
   let temporary = false;

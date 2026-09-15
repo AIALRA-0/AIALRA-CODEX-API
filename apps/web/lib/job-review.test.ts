@@ -30,7 +30,7 @@ describe("getJobResultSummary", () => {
       },
     });
 
-    expect(summary?.label).toBe("规则检查失败");
+    expect(summary?.label).toBe("答案已返回，规则未通过");
     expect(summary?.details[0]).toContain("ROUTER_E2E_OK");
   });
 

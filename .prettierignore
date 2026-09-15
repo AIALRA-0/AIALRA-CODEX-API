@@ -4,3 +4,4 @@ dist
 coverage
 pnpm-lock.yaml
 public/screenshots
+apps/chatgpt-bridge/extension/marked.umd.js

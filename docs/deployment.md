@@ -36,6 +36,10 @@ sudo RELEASE_DIR=/srv/example/model-router/releases/<commit> \
 
 脚本启动 PostgreSQL、API 和 Web，不启动 Worker；正式版本应优先使用 GHCR 返回的不可变镜像摘要，并先运行 `verify-production-images.sh`；VPS 源码构建只适合受控预发布
 
+发布目录必须使用完整的 40 位 Git 提交号命名。构建、切换版本、启停 Worker 和启停网页通道共用 `/run/lock/aialra-model-router-deploy.lock`；已有操作持锁时，后来的操作会直接拒绝并显示持有者，不允许两个 Agent 同时构建或重建生产组件
+
+所有应用镜像都写入 `org.opencontainers.image.revision` 标签。部署后必须用 `AIALRA_RELEASE_REVISION=<commit> deploy/scripts/verify-production-images.sh` 核对不可变镜像摘要和提交标签；不得把未提交文件复制进正在运行的容器，也不得让热补丁镜像继续声称自己来自旧提交
+
 ### 第四步：创建 Cloudflare DNS
 
 ```bash
