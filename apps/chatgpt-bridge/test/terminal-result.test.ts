@@ -9,6 +9,7 @@ function harness({
   ownership = true,
   foreign = false,
   changes = false,
+  terminalComposer = false,
 } = {}) {
   let now = 1_000;
   const user = { text: "objective", compareDocumentPosition: () => 4 };
@@ -32,6 +33,7 @@ function harness({
     first: () => (generating ? {} : null),
     SELECTORS: { stop: [] },
     hasTerminalCopyAction: () => copy,
+    hasTerminalComposerState: () => terminalComposer,
     hasForeignCompletionMarker: () => foreign,
     terminalActionsFor: () => [],
     visibleErrorKind: () => "other",
@@ -43,6 +45,7 @@ function harness({
       now += 750;
     },
     TERMINAL_RESULT_CONFIRM_MS: 15_000,
+    TERMINAL_COMPOSER_CONFIRM_MS: 30_000,
     TERMINAL_BLANK_CONFIRM_MS: 15_000,
     SELECTOR_DIAGNOSTIC_GRACE_MS: 5_000,
   };
@@ -51,7 +54,8 @@ function harness({
     context,
   );
   return {
-    run: () => waitForResult(0, 0, "objective", "EXPECTED_END", "document", 31_000, "job"),
+    run: (deadline = 31_000) =>
+      waitForResult(0, 0, "objective", "EXPECTED_END", "document", deadline, "job"),
     now: () => now,
   };
 }
@@ -64,6 +68,11 @@ describe("validated visible completion", () => {
   });
   it("does not treat nonempty text without terminal controls as complete", async () => {
     await expect(harness({ copy: false }).run()).rejects.toThrow("chatgpt_output_incomplete");
+  });
+  it("accepts stable text after a longer terminal-composer fallback window", async () => {
+    const h = harness({ copy: false, terminalComposer: true });
+    expect(await h.run(32_000)).toEqual({ outputText: "exact answer" });
+    expect(h.now()).toBeGreaterThanOrEqual(31_000);
   });
   it("does not finish while generation is active", async () => {
     await expect(harness({ generating: true }).run()).rejects.toThrow("chatgpt_output_incomplete");

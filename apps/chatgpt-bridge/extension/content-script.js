@@ -87,6 +87,7 @@ let accountQuotaDiscovery = null;
 const TERMINAL_REPORT_GRACE_MS = 5_000;
 const SELECTOR_DIAGNOSTIC_GRACE_MS = 5_000;
 const TERMINAL_RESULT_CONFIRM_MS = 15_000;
+const TERMINAL_COMPOSER_CONFIRM_MS = 30_000;
 const ACCOUNT_QUOTA_TTL_MS = 5 * 60_000;
 
 function safeQuotaWindow(kind, value) {
@@ -1937,6 +1938,13 @@ function hasTerminalCopyAction(element) {
   });
 }
 
+function hasTerminalComposerState() {
+  const composer = firstVisible(SELECTORS.composer);
+  if (!composer || first(SELECTORS.stop)) return false;
+  const root = composerControlRoot(composer);
+  return Boolean(sendControlFor(composer) || visibleEnabledButtons(root ?? document).length);
+}
+
 function visibleErrorKinds() {
   return visiblePageErrors().map(visibleErrorKind).slice(0, 16);
 }
@@ -2296,7 +2304,9 @@ async function waitForStableResult(
         blankSince = 0;
       } else if (sample) {
         blankSince = 0;
-        if (hasTerminalCopyAction(newest)) terminalSince ||= Date.now();
+        const hasCopyAction = hasTerminalCopyAction(newest);
+        const hasComposerState = hasTerminalComposerState();
+        if (hasCopyAction || hasComposerState) terminalSince ||= Date.now();
         else terminalSince = 0;
         if (sample === lastText) {
           stableReads += 1;
@@ -2309,7 +2319,8 @@ async function waitForStableResult(
           stableReads >= 2 &&
           ((sample.includes(completionMarker) && Date.now() - stableSince >= 1_000) ||
             (terminalSince &&
-              Date.now() - Math.max(stableSince, terminalSince) >= TERMINAL_RESULT_CONFIRM_MS))
+              Date.now() - Math.max(stableSince, terminalSince) >=
+                (hasCopyAction ? TERMINAL_RESULT_CONFIRM_MS : TERMINAL_COMPOSER_CONFIRM_MS)))
         ) {
           if (hasForeignCompletionMarker(sample, completionMarker)) {
             throw new Error("chatgpt_delivery_uncertain");
