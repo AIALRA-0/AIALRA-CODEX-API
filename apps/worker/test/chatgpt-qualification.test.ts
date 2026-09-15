@@ -81,7 +81,54 @@ describe("ChatGPT web qualification", () => {
     });
   });
 
-  it("waits through a transient unauthenticated browser snapshot", async () => {
+  it("accepts the single-page bridge ready state as idle capacity", async () => {
+    const repository = new InMemoryJobRepository();
+    const now = new Date().toISOString();
+    const run = ChatGptWebQualificationRunSchema.parse({
+      id: randomUUID(),
+      accountId: "account-b",
+      suite: "readiness",
+      status: "accepted",
+      total: 0,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: [],
+      errorCode: null,
+      createdBy: "admin",
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+    await repository.createChatGptWebQualificationRun(run);
+    const client = new ChatGptWebDiagnosticClient(
+      "http://127.0.0.1:1",
+      "synthetic-api",
+      "synthetic-diagnostic",
+      "account-b",
+    );
+    vi.spyOn(client, "health").mockResolvedValue({
+      sandboxVerified: true,
+      extensionConnected: true,
+      pageReady: true,
+      authenticated: true,
+      quarantinedTabs: 0,
+      activeTabs: 1,
+      activeJobId: null,
+      pending: 0,
+      slots: [{ state: "ready", submitted: false }],
+    });
+
+    await processChatGptWebQualification(repository, client, run.id);
+
+    await expect(repository.findChatGptWebQualificationRun(run.id)).resolves.toMatchObject({
+      status: "succeeded",
+      errorCode: null,
+    });
+  });
+
+  it("waits until a ready single-page slot is not submitted", async () => {
     vi.useFakeTimers();
     try {
       const client = new ChatGptWebDiagnosticClient(
@@ -91,16 +138,20 @@ describe("ChatGPT web qualification", () => {
       );
       vi.spyOn(client, "health")
         .mockResolvedValueOnce({
-          authenticated: false,
+          authenticated: true,
           extensionConnected: true,
-          pageReady: false,
-          slots: [],
+          pageReady: true,
+          activeJobId: null,
+          pending: 0,
+          slots: [{ state: "ready", submitted: true }],
         })
         .mockResolvedValue({
           authenticated: true,
           extensionConnected: true,
           pageReady: true,
-          slots: [{ state: "idle" }],
+          activeJobId: null,
+          pending: 0,
+          slots: [{ state: "ready", submitted: false }],
         });
 
       const waiting = (

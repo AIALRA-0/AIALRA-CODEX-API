@@ -32,6 +32,15 @@ type DiagnosticResult = {
   persistentChatVerified: boolean;
 };
 
+function hasAvailableBrowserSlot(health: Record<string, unknown>): boolean {
+  const slots = Array.isArray(health.slots) ? health.slots : [];
+  return slots.some((slot) => {
+    if (!slot || typeof slot !== "object") return false;
+    const record = slot as Record<string, unknown>;
+    return ["idle", "ready"].includes(String(record.state)) && record.submitted !== true;
+  });
+}
+
 export class DiagnosticInvocationError extends Error {
   constructor(
     message: string,
@@ -158,12 +167,10 @@ export class ChatGptWebDiagnosticClient {
         continue;
       }
       unavailableSince = 0;
-      const slots = Array.isArray(health.slots) ? health.slots : [];
       if (
-        slots.some(
-          (slot) =>
-            slot && typeof slot === "object" && (slot as Record<string, unknown>).state === "idle",
-        )
+        hasAvailableBrowserSlot(health) &&
+        (health.activeJobId === null || health.activeJobId === undefined) &&
+        Number(health.pending ?? 0) === 0
       ) {
         return;
       }
@@ -374,19 +381,15 @@ export async function processChatGptWebQualification(
 
   if (run.suite === "readiness") {
     const health: Record<string, unknown> = await client.health().catch(() => ({}));
-    const slots = Array.isArray(health.slots) ? health.slots : [];
     const passed =
       health.sandboxVerified === true &&
       health.extensionConnected === true &&
       health.pageReady === true &&
       health.authenticated === true &&
       Number(health.quarantinedTabs ?? 0) === 0 &&
-      Number(health.activeTabs ?? 0) === 0 &&
       Number(health.pending ?? 0) === 0 &&
-      slots.some(
-        (slot) =>
-          slot && typeof slot === "object" && (slot as Record<string, unknown>).state === "idle",
-      );
+      (health.activeJobId === null || health.activeJobId === undefined) &&
+      hasAvailableBrowserSlot(health);
     await repository.updateChatGptWebQualificationRun(runId, {
       status: passed ? "succeeded" : "failed",
       errorCode: passed ? null : "chatgpt_readiness_failed",
