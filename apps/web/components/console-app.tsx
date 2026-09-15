@@ -2030,6 +2030,162 @@ function chatGptErrorLabel(code: string | null | undefined) {
   return CHATGPT_ERROR_LABELS[code] ?? code;
 }
 
+type ChatGptAccountAlert = {
+  account: ChatGptWebAccount;
+  severity: "danger" | "warning";
+  title: string;
+  detail: string;
+  actionLabel: string;
+};
+
+function accountRepairUrl(account: ChatGptWebAccount): string {
+  const path = account.vncPath.slice(1, -1);
+  return `${account.vncPath}vnc.html?autoconnect=true&resize=remote&path=${path}/websockify`;
+}
+
+function currentAccountAlert(account: ChatGptWebAccount): ChatGptAccountAlert | null {
+  // Empty reserved slots must not create permanent noise. Once a slot has
+  // been enabled or verified, however, its authentication state stays visible.
+  const monitored =
+    account.enabled ||
+    account.qualified ||
+    account.lastProbeAt !== null ||
+    account.lastSuccessAt !== null;
+  if (!monitored) return null;
+
+  const loginFailure =
+    account.state === "login_required" || account.lastFailureCode === "chatgpt_login_required";
+  const contradictoryLoginState =
+    (account.authenticated && loginFailure) ||
+    (!account.authenticated && ["ready", "busy"].includes(account.state));
+  if (contradictoryLoginState) {
+    return {
+      account,
+      severity: "danger",
+      title: `${account.label} 登录状态冲突`,
+      detail:
+        "浏览器登录信号与账号池状态不一致。该账号已停止接收新任务，请打开对应窗口核对账号并重新登录。",
+      actionLabel: "核对并修复登录",
+    };
+  }
+  if (loginFailure || !account.authenticated) {
+    return {
+      account,
+      severity: "danger",
+      title: `${account.label} 登录已失效`,
+      detail: "系统已将该账号移出可接单池，不会把失败伪装成正常状态。请打开对应窗口重新登录。",
+      actionLabel: "立即重新登录",
+    };
+  }
+  if (account.lastFailureCode === "chatgpt_verification_required") {
+    return {
+      account,
+      severity: "danger",
+      title: `${account.label} 需要人工验证`,
+      detail: "ChatGPT 页面正在等待验证码或安全确认。验证完成前，该账号不会接收新任务。",
+      actionLabel: "打开验证窗口",
+    };
+  }
+  if (
+    account.state === "stale" ||
+    !account.extensionConnected ||
+    !account.pageReady ||
+    !account.sandboxVerified
+  ) {
+    return {
+      account,
+      severity: "warning",
+      title: `${account.label} 浏览器状态异常`,
+      detail: "浏览器、扩展、页面识别或安全隔离状态未完整就绪。该账号当前不会接收新任务。",
+      actionLabel: "打开修复窗口",
+    };
+  }
+  if (account.state === "quarantined" || (account.enabled && !account.qualified)) {
+    return {
+      account,
+      severity: "warning",
+      title: `${account.label} 已暂停接单`,
+      detail: account.lastFailureCode
+        ? `${chatGptErrorLabel(account.lastFailureCode)}。请查看账号状态并完成恢复检查。`
+        : "账号尚未恢复有效资格，请查看账号状态并完成恢复检查。",
+      actionLabel: "打开修复窗口",
+    };
+  }
+  return null;
+}
+
+function ChatGptAccountAlerts() {
+  const [status, setStatus] = useState<ChatGptWebStatus | null>(null);
+  const [monitorError, setMonitorError] = useState("");
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const next = await routerFetch<ChatGptWebStatus>("/api/v1/chatgpt-web/status", { signal });
+      setStatus(next);
+      setMonitorError("");
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setMonitorError(cause instanceof Error ? cause.message : "账号状态读取失败");
+    }
+  }, []);
+  useVisiblePolling(refresh, 3_000);
+
+  const alerts =
+    status?.accounts.flatMap((account) => {
+      const alert = currentAccountAlert(account);
+      return alert ? [alert] : [];
+    }) ?? [];
+  const statusIsStale = status ? Date.now() - new Date(status.updatedAt).getTime() > 15_000 : false;
+  if (!monitorError && !statusIsStale && alerts.length === 0) return null;
+
+  return (
+    <section className="account-alert-stack" aria-label="ChatGPT 账号实时告警">
+      {monitorError || statusIsStale ? (
+        <article className="account-alert warning" role="alert" aria-live="assertive">
+          <div>
+            <strong>账号状态监控中断</strong>
+            <p>
+              {monitorError || "超过 15 秒没有收到新的账号状态。系统不会把未知状态显示为正常。"}
+            </p>
+          </div>
+          <button className="button compact" onClick={() => void refresh()}>
+            立即重试
+          </button>
+        </article>
+      ) : null}
+      {alerts.map((alert) => (
+        <article
+          className={`account-alert ${alert.severity}`}
+          role="alert"
+          aria-live="assertive"
+          key={alert.account.accountId}
+        >
+          <div>
+            <strong className={`status-indicator ${alert.severity}`}>{alert.title}</strong>
+            <p>{alert.detail}</p>
+            <small>
+              当前状态：{ACCOUNT_STATE_LABELS[alert.account.state]} · 最近更新：
+              {formatDate(alert.account.updatedAt)}
+            </small>
+          </div>
+          <div className="action-row">
+            <a
+              className="button primary compact"
+              href={accountRepairUrl(alert.account)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {alert.actionLabel}
+            </a>
+            <Link className="button compact" href="/console/chatgpt-web">
+              查看账号状态
+            </Link>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 const SLOT_LABELS: Record<ChatGptWebStatus["slots"][number]["state"], string> = {
   starting: "正在启动",
   idle: "空闲",
@@ -3754,6 +3910,7 @@ export function ConsoleApp({ section = "overview" }: { section?: string }) {
     );
   return (
     <main id="main" className="console-main">
+      <ChatGptAccountAlerts />
       {content}
     </main>
   );

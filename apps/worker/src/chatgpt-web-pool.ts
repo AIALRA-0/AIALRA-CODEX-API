@@ -257,10 +257,17 @@ function accountPublicPatch(
     consecutiveRateLimits,
     lastRateLimitAt,
     lastSubmissionAt: healthString(health, "lastSubmissionAt") ?? current.lastSubmissionAt,
-    lastFailureCode: failureCode ?? current.lastFailureCode,
+    // Keep a current failure visible until the browser proves a complete,
+    // authenticated idle recovery. Once recovered, clear the active failure
+    // so the console cannot keep presenting an expired login warning as if it
+    // were still happening. lastFailureAt remains available as history.
+    lastFailureCode: failureCode ?? (safelyRecovered ? null : current.lastFailureCode),
     lastFailureAt: failureCode ? now.toISOString() : current.lastFailureAt,
-    failurePhase: safeFailurePhase(health.failurePhase) ?? current.failurePhase,
-    diagnosticSummary: safeDiagnosticSummary(health.diagnosticSummary) ?? current.diagnosticSummary,
+    failurePhase:
+      safeFailurePhase(health.failurePhase) ?? (safelyRecovered ? null : current.failurePhase),
+    diagnosticSummary:
+      safeDiagnosticSummary(health.diagnosticSummary) ??
+      (safelyRecovered ? null : current.diagnosticSummary),
     quota: safeAccountQuota(health.quota) ?? current.quota,
     updatedAt: now.toISOString(),
   };

@@ -727,6 +727,9 @@ describe("ChatGptWebPoolProvider", () => {
       state: "ready",
       lastProbePassed: true,
       activeJobId: null,
+      lastFailureCode: null,
+      failurePhase: null,
+      diagnosticSummary: null,
     });
   });
 

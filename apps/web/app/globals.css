@@ -559,6 +559,45 @@ h3 {
   max-width: 92rem;
   padding: clamp(1.25rem, 2.8vw, 2.75rem);
 }
+.account-alert-stack {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.account-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--status-warning);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  padding: 1rem;
+}
+.account-alert.danger {
+  border-left-color: var(--status-danger);
+  color: var(--text);
+}
+.account-alert.warning {
+  border-left-color: var(--status-warning);
+  color: var(--text);
+}
+.account-alert p {
+  margin: 0.35rem 0 0;
+  color: var(--text);
+}
+.account-alert small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+.account-alert > div:first-child {
+  min-width: 0;
+}
+.account-alert > .action-row {
+  flex: 0 0 auto;
+}
 .console-account {
   flex: 0 0 auto;
 }
@@ -1235,6 +1274,13 @@ td[colspan] {
 }
 
 @media (max-width: 720px) {
+  .account-alert {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .account-alert > .action-row {
+    justify-content: flex-start;
+  }
   .accounts-table,
   .accounts-table tbody {
     display: block;

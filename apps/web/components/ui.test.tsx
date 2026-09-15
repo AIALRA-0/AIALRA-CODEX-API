@@ -160,4 +160,18 @@ describe("shared visual tokens", () => {
     expect(source).toContain("只有已登录且已验证的账号会接收任务");
     expect(source).toContain("account.extensionConnected && account.sandboxVerified");
   });
+
+  it("shows real-time account failures globally with a direct repair entry", () => {
+    const source = readFileSync(new URL("./console-app.tsx", import.meta.url), "utf8");
+    expect(source).toContain("<ChatGptAccountAlerts />");
+    expect(source).toContain("useVisiblePolling(refresh, 3_000)");
+    expect(source).toContain('aria-label="ChatGPT 账号实时告警"');
+    expect(source).toContain("登录状态冲突");
+    expect(source).toContain("登录已失效");
+    expect(source).toContain("账号状态监控中断");
+    expect(source).toContain("立即重新登录");
+    expect(source).toContain("accountRepairUrl(alert.account)");
+    expect(css).toContain(".account-alert-stack");
+    expect(css).toContain("border-left-color: var(--status-danger)");
+  });
 });
